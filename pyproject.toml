@@ -1,0 +1,148 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langrag"
+version = "2.0.0"
+description = "Automated newsletter generation from WhatsApp group chats"
+requires-python = ">=3.11"
+dependencies = [
+    # Web Framework
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.32.0",
+    "sse-starlette==2.1.3",
+    "slowapi>=0.1.9", # Rate limiting
+    # LangChain / LangGraph (upgraded for LangGraph 1.0+ async support)
+    "langchain>=0.3.27",
+    "langchain-openai>=1.0.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-community>=0.4.0",
+    "langgraph>=1.0.3",
+    "langgraph-cli[inmem]>=0.1.55",
+    "langgraph-checkpoint-sqlite>=2.0.11",
+    "langsmith>=0.3.45",
+    # Observability
+    "langfuse>=2.50.0",
+    "prometheus-client==0.21.0",
+    # Matrix / Beeper Integration
+    "matrix-nio[e2e]==0.25.2",
+    "pycryptodome==3.23.0",
+    "python-olm==3.2.16",
+    "pynacl==1.6.1",
+    # LLM
+    "openai>=1.52.0",
+    "anthropic>=0.40.0",
+    "google-genai>=1.0.0",
+    "tiktoken>=0.12.0",
+    # Data Processing
+    "pandas>=2.2.3",
+    "numpy>=2.1.0",
+    "nltk==3.9.1",
+    "beautifulsoup4==4.14.2",
+    "emoji==2.10.1",
+    # Database
+    "pymongo>=4.8.0",
+    "motor>=3.5.0", # Async MongoDB driver for FastAPI
+    # Email
+    "sendgrid==6.11.0",
+    # Configuration
+    "python-dotenv==0.21.1",
+    "pydantic>=2.10.0",
+    "pydantic-settings==2.11.0",
+    # HTTP Clients
+    "requests>=2.32.5",
+    "httpx>=0.27.2",
+    "aiohttp>=3.12.13",
+    # Async utilities
+    "aiofiles==24.1.0",
+    # Background scheduling
+    "apscheduler>=3.10.0",
+    # Substack integration
+    "python-substack-tarun-1==0.1.16",
+    # Logging
+    "loguru>=0.7.0",
+    # Cryptography
+    "cryptography==44.0.3",
+    # Misc utilities
+    "tenacity==9.0.0",
+    "pyyaml==6.0.3",
+    "regex==2024.9.11",
+    "jinja2==3.1.4",
+    # CLI Tools
+    "typer==0.12.5",
+    "click==8.1.7", # Pin Click for Typer compatibility
+    "rich==13.7.0",
+    "sseclient-py==1.8.0",
+    "langgraph-api>=0.7.50",
+]
+
+[project.scripts]
+langrag = "ui.cli.newsletter_cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.2",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff==0.14.0",
+    "ipython==8.27.0",
+    "ipykernel==6.29.5",
+]
+
+[tool.ruff]
+line-length = 500
+fix = true  # Enable automatic safe fixes
+
+[tool.ruff.format]
+# Normalize string quotes
+quote-style = "double"
+
+[tool.ruff.lint]
+# Enable linting rules
+select = ["E", "F", "W"]
+
+# Define additional rules to select
+extend-select = ["UP", "DTZ003"]
+
+# Exclude specific rules (like tuple conversions)
+ignore = ["UP022"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+addopts = "-v"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.uv]
+# UV configuration
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "src/cli/*",
+    "src/observability/app/*",
+    "src/observability/metrics/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
+fail_under = 70
+show_missing = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-mock>=3.15.1",
+]

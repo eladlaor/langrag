@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "single_chat_analyzer": "./src/graphs/single_chat_analyzer/graph.py:newsletter_generation_graph",
+    "multi_chat_consolidator": "./src/graphs/multi_chat_consolidator/graph.py:parallel_orchestrator_graph"
+  },
+  "env": ".env"
+}

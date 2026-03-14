@@ -1,0 +1,179 @@
+{
+  "version": 4,
+  "terraform_version": "1.14.3",
+  "serial": 5,
+  "lineage": "fcee2323-5033-695c-8ff4-3bacc8996fc7",
+  "outputs": {
+    "domain_url": {
+      "value": "https://www.langrag.ai",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "cloudflare_zone_settings_override",
+      "name": "langrag",
+      "provider": "provider[\"registry.terraform.io/cloudflare/cloudflare\"]",
+      "instances": [
+        {
+          "status": "tainted",
+          "schema_version": 2,
+          "attributes": {
+            "id": "2658aa04cce363894804922af6cebde1",
+            "initial_settings": null,
+            "initial_settings_read_at": null,
+            "readonly_settings": null,
+            "settings": [
+              {
+                "aegis": [],
+                "always_online": "",
+                "always_use_https": "on",
+                "automatic_https_rewrites": "on",
+                "binary_ast": "",
+                "brotli": "",
+                "browser_cache_ttl": 0,
+                "browser_check": "",
+                "cache_level": "",
+                "challenge_ttl": 0,
+                "ciphers": [],
+                "cname_flattening": "",
+                "development_mode": "",
+                "early_hints": "",
+                "email_obfuscation": "",
+                "filter_logs_to_cloudflare": "",
+                "fonts": "",
+                "h2_prioritization": "",
+                "hotlink_protection": "",
+                "http2": "",
+                "http3": "",
+                "image_resizing": "",
+                "ip_geolocation": "",
+                "ipv6": "",
+                "log_to_cloudflare": "",
+                "max_upload": 0,
+                "min_tls_version": "1.2",
+                "minify": [],
+                "mirage": "",
+                "mobile_redirect": [],
+                "nel": [],
+                "opportunistic_encryption": "",
+                "opportunistic_onion": "",
+                "orange_to_orange": "",
+                "origin_error_page_pass_thru": "",
+                "origin_max_http_version": "",
+                "polish": "",
+                "prefetch_preload": "",
+                "privacy_pass": "",
+                "proxy_read_timeout": "",
+                "pseudo_ipv4": "",
+                "replace_insecure_js": "",
+                "response_buffering": "",
+                "rocket_loader": "",
+                "security_header": [],
+                "security_level": "",
+                "server_side_exclude": "",
+                "sort_query_string_for_cache": "",
+                "speed_brain": "",
+                "ssl": "full",
+                "ssl_automatic_mode": "",
+                "tls_1_2_only": "",
+                "tls_1_3": "",
+                "tls_client_auth": "",
+                "true_client_ip_header": "",
+                "universal_ssl": "",
+                "visitor_ip": "",
+                "waf": "",
+                "webp": "",
+                "websockets": "",
+                "zero_rtt": ""
+              }
+            ],
+            "zone_id": "2658aa04cce363894804922af6cebde1",
+            "zone_status": null,
+            "zone_type": null
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "eyJzY2hlbWFfdmVyc2lvbiI6IjIifQ=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "hcloud_firewall",
+      "name": "langrag",
+      "provider": "provider[\"registry.terraform.io/hetznercloud/hcloud\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "apply_to": [],
+            "id": "10599516",
+            "labels": {},
+            "name": "langrag-firewall",
+            "rule": [
+              {
+                "description": "",
+                "destination_ips": [],
+                "direction": "in",
+                "port": "22",
+                "protocol": "tcp",
+                "source_ips": [
+                  "0.0.0.0/0",
+                  "::/0"
+                ]
+              },
+              {
+                "description": "",
+                "destination_ips": [],
+                "direction": "in",
+                "port": "443",
+                "protocol": "tcp",
+                "source_ips": [
+                  "0.0.0.0/0",
+                  "::/0"
+                ]
+              },
+              {
+                "description": "",
+                "destination_ips": [],
+                "direction": "in",
+                "port": "80",
+                "protocol": "tcp",
+                "source_ips": [
+                  "0.0.0.0/0",
+                  "::/0"
+                ]
+              }
+            ]
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "hcloud_ssh_key",
+      "name": "default",
+      "provider": "provider[\"registry.terraform.io/hetznercloud/hcloud\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "fingerprint": "d9:32:cd:df:9a:45:06:f2:60:a3:8a:31:af:61:26:d1",
+            "id": "108202434",
+            "labels": {},
+            "name": "langrag-deploy-key",
+            "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJzZpU89RCrwptRpAQd9lwwAsSc3um3XnLrZyf5Oy8Z2 elad.l@solugen.ai\n"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}

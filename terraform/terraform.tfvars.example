@@ -1,0 +1,20 @@
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+
+# Hetzner Cloud API token (from console.hetzner.cloud → Security → API Tokens)
+hcloud_token = "your-hetzner-api-token-here"
+
+# Cloudflare API token (from dash.cloudflare.com → My Profile → API Tokens)
+cloudflare_api_token = "your-cloudflare-api-token-here"
+
+# Cloudflare Zone ID (from langrag.ai overview page → right sidebar)
+cloudflare_zone_id = "your-cloudflare-zone-id-here"
+
+# Path to your SSH public key (default: ~/.ssh/id_ed25519.pub)
+# ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# Server type (default: cx22 = 2 vCPU, 4GB RAM, ~$5/mo)
+# server_type = "cx22"
+
+# Datacenter location (default: ash = Ashburn, VA)
+# server_location = "ash"

@@ -1,0 +1,21 @@
+# Grafana Datasource Configuration
+# Auto-provisions Loki as a datasource on Grafana startup
+
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        # Enable clicking trace_id to open in Langfuse (if configured)
+        - datasourceUid: ""
+          matcherRegex: '"trace_id":"([^"]+)"'
+          name: trace_id
+          # URL template for Langfuse
+          url: 'http://localhost:3001/trace/${__value.raw}'

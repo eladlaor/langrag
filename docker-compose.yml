@@ -1,0 +1,523 @@
+services:
+  # Unified LangRAG Application (Backend + Frontend)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ""
+        USER_ID: ${USER_ID:-1001}
+        GROUP_ID: ${GROUP_ID:-1001}
+    container_name: langrag-app
+    user: "${USER_ID:-1001}:${GROUP_ID:-1001}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      # API Keys (from .env file)
+      BEEPER_ACCESS_TOKEN: ${BEEPER_ACCESS_TOKEN}
+      BEEPER_DEVICE_ID: ${BEEPER_DEVICE_ID}
+      BEEPER_EMAIL: ${BEEPER_EMAIL}
+      BEEPER_PASSWORD: ${BEEPER_PASSWORD}
+      BEEPER_HOMESERVER: ${BEEPER_HOMESERVER:-https://matrix.beeper.com}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # Decryption keys and storage (parameterized paths)
+      BEEPER_MATRIX_STORE_PATH: ${BEEPER_MATRIX_STORE_PATH:-/app/secrets/beeper_matrix_store}
+      DECRYPTED_KEYS_FILE_PATH: ${DECRYPTED_KEYS_FILE_PATH:-/app/secrets/decrypted-keys.json}
+      BEEPER_EXPORT_PASSWORD: ${BEEPER_EXPORT_PASSWORD:-}
+      BEEPER_RECOVERY_CODE: ${BEEPER_RECOVERY_CODE:-}
+
+      # LangSmith (optional - for observability)
+      LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
+      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
+      LANGCHAIN_PROJECT: ${LANGCHAIN_PROJECT:-langrag}
+      LANGCHAIN_ENDPOINT: ${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+
+      # LangFuse (optional - for observability)
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-true}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-server:3000}
+
+      # MongoDB connection
+      MONGODB_URI: mongodb://mongodb:27017/?replicaSet=langrag-mongodb
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-langrag}
+
+      # MongoDB feature flags
+      MONGODB_ENABLE_FILE_OUTPUTS: "true"  # Required for link enrichment stage
+
+      # Application settings
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      # SLM (Small Language Model) - Ollama message pre-filtering
+      SLM_ENABLED: ${SLM_ENABLED:-false}
+      SLM_MODEL: ${SLM_MODEL:-phi3:mini}
+      SLM_BASE_URL: ${SLM_BASE_URL:-http://ollama:11434}
+
+      # Email delivery
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      GMAIL_ADDRESS: ${GMAIL_ADDRESS:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      DEFAULT_EMAIL_RECIPIENT: ${DEFAULT_EMAIL_RECIPIENT:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-80}:80"      # Nginx serves frontend + proxies API (localhost for dev, langrag.ai for prod)
+      - "${BACKEND_PORT:-8000}:8000"  # Direct backend access (optional)
+    volumes:
+      # Examples and data persistence
+      - ./examples:/app/examples
+      - ./logs:/app/logs
+      - ./output:/app/output
+
+      # Knowledge base (read-only)
+      - ./knowledge:/app/knowledge:ro
+
+      # Secrets (read-write for Matrix session store)
+      - ./secrets:/app/secrets
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # Batch Worker - Background job processor for batch API
+  batch-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1001}
+        GROUP_ID: ${GROUP_ID:-1001}
+    container_name: langrag-batch-worker
+    user: "${USER_ID:-1001}:${GROUP_ID:-1001}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Override the default CMD to run the batch worker instead of uvicorn
+    command: ["python", "-m", "background_jobs.batch_worker"]
+    environment:
+      # API Keys (from .env file)
+      BEEPER_ACCESS_TOKEN: ${BEEPER_ACCESS_TOKEN}
+      BEEPER_DEVICE_ID: ${BEEPER_DEVICE_ID}
+      BEEPER_EMAIL: ${BEEPER_EMAIL}
+      BEEPER_PASSWORD: ${BEEPER_PASSWORD}
+      BEEPER_HOMESERVER: ${BEEPER_HOMESERVER:-https://matrix.beeper.com}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # Decryption keys and storage (parameterized paths)
+      BEEPER_MATRIX_STORE_PATH: ${BEEPER_MATRIX_STORE_PATH:-/app/secrets/beeper_matrix_store}
+      DECRYPTED_KEYS_FILE_PATH: ${DECRYPTED_KEYS_FILE_PATH:-/app/secrets/decrypted-keys.json}
+      BEEPER_EXPORT_PASSWORD: ${BEEPER_EXPORT_PASSWORD:-}
+      BEEPER_RECOVERY_CODE: ${BEEPER_RECOVERY_CODE:-}
+
+      # MongoDB connection
+      MONGODB_URI: mongodb://mongodb:27017/?replicaSet=langrag-mongodb
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-langrag}
+
+      # Batch worker settings
+      BATCH_WORKER_POLL_INTERVAL: ${BATCH_WORKER_POLL_INTERVAL:-10}
+      BATCH_WORKER_MAX_JOBS: ${BATCH_WORKER_MAX_JOBS:-1}
+
+      # Application settings
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      # Examples (same as main app)
+      - ./examples:/app/examples
+      - ./logs:/app/logs
+      - ./output:/app/output
+
+      # Knowledge base (read-only)
+      - ./knowledge:/app/knowledge:ro
+
+      # Secrets (read-write for Matrix session store)
+      - ./secrets:/app/secrets
+    networks:
+      - langrag-network
+    restart: unless-stopped
+    # Don't start by default - enable when needed
+    profiles:
+      - batch
+
+  # PostgreSQL Database (FUTURE - currently using file-based persistence)
+  # Uncomment when migrating from file-based to database storage
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: langrag-db
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-langrag}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langrag_dev_password}
+  #     POSTGRES_DB: ${POSTGRES_DB:-langrag}
+  #   ports:
+  #     - "${POSTGRES_PORT:-5432}:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-langrag}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - langrag-network
+
+  # LangSmith (Self-hosted - Optional)
+  # Uncomment if you want to run LangSmith locally instead of using cloud
+  # langsmith:
+  #   image: langchain/langsmith:latest
+  #   container_name: langrag-langsmith
+  #   environment:
+  #     POSTGRES_HOST: postgres
+  #     POSTGRES_PORT: 5432
+  #     POSTGRES_USER: ${POSTGRES_USER:-langrag}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langrag_dev_password}
+  #     POSTGRES_DB: langsmith
+  #   ports:
+  #     - "8080:8080"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   networks:
+  #     - langrag-network
+
+  # LangFuse (Self-hosted Observability)
+  # Access UI at http://localhost:3001
+  # First-time: Create account, then Settings > API Keys > Create new key
+  #
+  # SECURITY: The following env vars MUST be set in .env for production:
+  # - LANGFUSE_DB_PASSWORD (database password)
+  # - LANGFUSE_AUTH_SECRET (generate with: openssl rand -base64 32)
+  # - LANGFUSE_SALT (generate with: openssl rand -base64 32)
+  langfuse-server:
+    image: langfuse/langfuse:2
+    container_name: langrag-langfuse
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD must be set in .env}@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3001
+      NEXTAUTH_SECRET: "${LANGFUSE_AUTH_SECRET:?LANGFUSE_AUTH_SECRET must be set in .env - generate with openssl rand -base64 32}"
+      SALT: "${LANGFUSE_SALT:?LANGFUSE_SALT must be set in .env - generate with openssl rand -base64 32}"
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "3001:3000"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # PostgreSQL for Langfuse (separate from MongoDB - Langfuse requires PostgreSQL)
+  # SECURITY: LANGFUSE_DB_PASSWORD must be set in .env (no default allowed)
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: langfuse-postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      POSTGRES_USER: ${LANGFUSE_DB_USER:-langfuse}
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?LANGFUSE_DB_PASSWORD must be set in .env}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # MongoDB 8.0 with Atlas Search + Vector Search (bundled mongod + mongot)
+  mongodb:
+    image: mongodb/mongodb-atlas-local:8.0
+    container_name: langrag-mongodb
+    hostname: langrag-mongodb
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+      - mongodb_mongot:/data/mongot
+    healthcheck:
+      test: /usr/local/bin/runner healthcheck
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # n8n - Workflow Automation for LinkedIn Integration
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "5678:5678"
+
+    # Memory limits (critical for leak prevention)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+    environment:
+      # Execution cleanup (prevents memory bloat)
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=24  # hours
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=false
+
+      # Performance
+      - N8N_CONCURRENCY_PRODUCTION_LIMIT=1
+
+      # Database
+      - DB_TYPE=sqlite
+      - DB_SQLITE_VACUUM_ON_STARTUP=true
+
+      # Reduce overhead
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_HIRING_BANNER_ENABLED=false
+
+      # Auth (set in .env)
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+
+      # Timezone
+      - GENERIC_TIMEZONE=Asia/Jerusalem
+      - TZ=Asia/Jerusalem
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+    networks:
+      - langrag-network
+
+  # Loki - Log Aggregation (Apache 2.0, self-hosted)
+  # Collects and stores application logs for querying
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: langrag-loki
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./src/observability/app/loki/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # Grafana - Log Visualization (Apache 2.0, self-hosted)
+  # Access UI at http://localhost:3000
+  # Default credentials: admin/admin (change on first login)
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: langrag-grafana
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_DEFAULT_TIMEZONE=Asia/Jerusalem
+    volumes:
+      # Application observability (Loki datasource + logs dashboard)
+      - ./src/observability/app/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources/app:ro
+      - ./src/observability/app/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards/app:ro
+      - ./src/observability/app/grafana/dashboards:/etc/grafana/dashboards/app:ro
+
+      # Metrics observability (Prometheus datasource + metrics dashboards)
+      - ./src/observability/metrics/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources/metrics:ro
+      - ./src/observability/metrics/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards/metrics:ro
+      - ./src/observability/metrics/grafana/dashboards:/etc/grafana/dashboards/metrics:ro
+
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # Promtail - Log Shipper (Apache 2.0, self-hosted)
+  # Collects logs from Docker containers and ships to Loki
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: langrag-promtail
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - ./src/observability/app/promtail/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # Ollama - Local SLM Inference Server
+  # Provides OpenAI-compatible API for CPU-optimized small language models
+  # Used for message pre-filtering to reduce expensive LLM API calls
+  ollama:
+    image: ollama/ollama:latest
+    container_name: langrag-ollama
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      # CPU optimization settings
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-4}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 3G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # Prometheus - Metrics Collection
+  # Time-series database for application performance metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: langrag-prometheus
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./src/observability/metrics/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+# Volumes
+volumes:
+  ollama_models:
+    driver: local
+  n8n_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  langfuse_postgres:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  mongodb_mongot:
+    driver: local
+
+networks:
+  langrag-network:
+    driver: bridge
