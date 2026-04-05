@@ -24,17 +24,17 @@ const ROW_TOP = -340;
 const ROW_MID = 20;
 const ROW_BOT = 370;
 
-// Single chat container — wider to fit 8 bigger nodes
+// Single chat container — wider to fit 10 nodes
 const CONTAINER_X = 80;
 const CONTAINER_Y = ROW_MID;
 const CONTAINER_W = 1780;
 const CONTAINER_H = 200;
 
-// Stage spacing inside container (8 stages now)
-const STAGE_W = 190;
+// Stage spacing inside container (10 stages now)
+const STAGE_W = 148;
 const STAGE_H = 72;
-const STAGE_GAP = 210;
-const STAGE_START_X = CONTAINER_X - CONTAINER_W / 2 + 115;
+const STAGE_GAP = 170;
+const STAGE_START_X = CONTAINER_X - CONTAINER_W / 2 + 95;
 
 // Bottom row — 9 nodes
 const BOT_NODE_W = 165;
@@ -55,14 +55,16 @@ interface StageData {
   color: string;
 }
 
-// 8 stages — no final Translate (it moves to bottom row as shared last step)
+// 10 stages — no final Translate (it moves to bottom row as shared last step)
 const PIPELINE_STAGES: StageData[] = [
   {label: 'Extract\nMessages', color: COLORS.TEAL},
   {label: 'SLM\nFilter', color: COLORS.TEAL},
+  {label: 'Extract\nImages', color: COLORS.TEAL},
   {label: 'Preprocess\nData', color: COLORS.TEAL},
   {label: 'Normalize\nto English', color: COLORS.PURPLE},
   {label: 'Separate\nDiscussions', color: COLORS.PURPLE},
   {label: 'Rank\nDiscussions', color: COLORS.PURPLE},
+  {label: 'Associate\nImages', color: COLORS.PURPLE},
   {label: 'Generate\nSummary', color: COLORS.PURPLE},
   {label: 'Link\nEnrichment', color: COLORS.PURPLE},
 ];
@@ -303,7 +305,7 @@ export default makeScene2D(function* (view) {
   );
   yield* waitFor(0.5);
 
-  // ── Pipeline stages (8 nodes) ──
+  // ── Pipeline stages (10 nodes) ──
   const stageRefs: ReturnType<typeof createRef<Rect>>[] = [];
   const stageEdgeRefs: ReturnType<typeof createRef<Line>>[] = [];
 
@@ -362,23 +364,25 @@ export default makeScene2D(function* (view) {
   }
 
   // Animate stages in groups with edges
-  // Group 1: Extract, SLM Filter
+  // Group 1: Extract, SLM Filter, Extract Images
   yield* all(
-    ...stageRefs.slice(0, 2).map((ref) =>
+    ...stageRefs.slice(0, 3).map((ref) =>
       all(
         ref().opacity(1, 0.25, easeOutCubic),
         ref().scale(1, 0.35, easeOutCubic),
       ),
     ),
   );
-  if (stageEdgeRefs[0]) {
-    yield* stageEdgeRefs[0]().end(1, 0.2, easeInOutCubic);
-  }
+  yield* all(
+    ...stageEdgeRefs.slice(0, 2).map((ref, i) =>
+      delay(i * 0.06, ref().end(1, 0.2, easeInOutCubic)),
+    ),
+  );
   yield* waitFor(0.3);
 
-  // Group 2: Preprocess → Rank Discussions
+  // Group 2: Preprocess → Associate Images
   yield* all(
-    ...stageRefs.slice(2, 6).map((ref, i) =>
+    ...stageRefs.slice(3, 8).map((ref, i) =>
       delay(
         i * 0.06,
         all(
@@ -389,14 +393,14 @@ export default makeScene2D(function* (view) {
     ),
   );
   yield* all(
-    ...stageEdgeRefs.slice(1, 5).map((ref, i) =>
+    ...stageEdgeRefs.slice(2, 7).map((ref, i) =>
       delay(i * 0.06, ref().end(1, 0.2, easeInOutCubic)),
     ),
   );
 
   // Group 3: Generate Summary, Link Enrichment
   yield* all(
-    ...stageRefs.slice(6, 8).map((ref, i) =>
+    ...stageRefs.slice(8, 10).map((ref, i) =>
       delay(
         i * 0.06,
         all(
@@ -407,14 +411,14 @@ export default makeScene2D(function* (view) {
     ),
   );
   yield* all(
-    ...stageEdgeRefs.slice(5, 7).map((ref, i) =>
+    ...stageEdgeRefs.slice(7, 9).map((ref, i) =>
       delay(i * 0.06, ref().end(1, 0.2, easeInOutCubic)),
     ),
   );
 
-  // ── Cyclic arrow on Link Enrichment (index 7) ──
+  // ── Cyclic arrow on Link Enrichment (index 9) ──
   const linkLoopRef = createRef<Line>();
-  const linkX = stageX(7);
+  const linkX = stageX(9);
   const loopRadius = 36;
 
   view.add(
