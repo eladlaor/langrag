@@ -356,6 +356,7 @@ async def dispatch_chats(state: ParallelOrchestratorState, config: RunnableConfi
             force_refresh_content=state.get(OrchestratorKeys.FORCE_REFRESH_CONTENT, False),
             force_refresh_link_enrichment=state.get(OrchestratorKeys.FORCE_REFRESH_LINK_ENRICHMENT, False),
             force_refresh_final_translation=state.get(OrchestratorKeys.FORCE_REFRESH_FINAL_TRANSLATION, False),
+            enable_image_extraction=state.get(OrchestratorKeys.ENABLE_IMAGE_EXTRACTION),
         )
 
         # Send to chat_worker subgraph

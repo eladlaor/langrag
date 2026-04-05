@@ -16,6 +16,7 @@ from dataclasses import dataclass, asdict
 
 # Per-chat stages
 STAGE_EXTRACT = "extract_messages"
+STAGE_EXTRACT_IMAGES = "extract_images"
 STAGE_PREPROCESS = "preprocess_messages"
 STAGE_TRANSLATE = "translate_messages"
 STAGE_SEPARATE = "separate_discussions"

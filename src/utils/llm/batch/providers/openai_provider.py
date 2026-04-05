@@ -63,10 +63,12 @@ class OpenAIBatchProvider(BatchAPIProvider):
         Initialize the OpenAI batch provider.
 
         Args:
-            model: Default model to use (defaults to gpt-4o-mini)
+            model: Default model to use (falls back to config default)
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
         """
-        self._model = model or "gpt-4o-mini"
+        from config import get_settings
+
+        self._model = model or get_settings().llm.openai_mini_model
         self._api_key = api_key
         self._client: OpenAI | None = None
 

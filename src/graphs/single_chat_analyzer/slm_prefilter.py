@@ -150,14 +150,14 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
                 logger.warning(f"Failed to load messages for MongoDB persistence (SLM disabled): {e}")
 
         return {
-            "slm_filter_stats": SLMFilterStats(enabled=False).model_dump(),
+            Keys.SLM_FILTER_STATS: SLMFilterStats(enabled=False).model_dump(),
         }
 
     extracted_file_path = state.get(Keys.EXTRACTED_FILE_PATH)
     if not extracted_file_path:
         logger.warning("No extracted_file_path in state, skipping SLM filter")
         return {
-            "slm_filter_stats": SLMFilterStats(
+            Keys.SLM_FILTER_STATS: SLMFilterStats(
                 enabled=True,
                 fallback_used=True,
             ).model_dump(),
@@ -166,7 +166,7 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
     if not os.path.exists(extracted_file_path):
         logger.warning(f"Extracted file not found: {extracted_file_path}, skipping SLM filter")
         return {
-            "slm_filter_stats": SLMFilterStats(
+            Keys.SLM_FILTER_STATS: SLMFilterStats(
                 enabled=True,
                 fallback_used=True,
             ).model_dump(),
@@ -186,7 +186,7 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
             if not isinstance(messages, list):
                 logger.warning(f"Extracted messages not a list (got {type(messages).__name__}), " "skipping SLM filter")
                 return {
-                    "slm_filter_stats": SLMFilterStats(
+                    Keys.SLM_FILTER_STATS: SLMFilterStats(
                         enabled=True,
                         fallback_used=True,
                     ).model_dump(),
@@ -238,7 +238,7 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
                 if span:
                     span.update(output={"skipped": True, "reason": "slm_unavailable"})
 
-                return {"slm_filter_stats": stats.model_dump()}
+                return {Keys.SLM_FILTER_STATS: stats.model_dump()}
 
             # Convert messages to classification input
             classification_input = convert_raw_messages_to_classification_input(
@@ -309,8 +309,8 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
                 )
 
             return {
-                "slm_filter_stats": stats.model_dump(),
-                "message_count": len(filtered_messages),
+                Keys.SLM_FILTER_STATS: stats.model_dump(),
+                Keys.MESSAGE_COUNT: len(filtered_messages),
             }
 
         except json.JSONDecodeError as e:
@@ -319,7 +319,7 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
             stats = SLMFilterStats(enabled=True, fallback_used=True)
             if span:
                 span.update(output={"error": f"JSON parse error: {e}", "fallback_used": True})
-            return {"slm_filter_stats": stats.model_dump()}
+            return {Keys.SLM_FILTER_STATS: stats.model_dump()}
 
         except Exception as e:
             logger.error(f"SLM pre-filter failed: {e}, chat_name={chat_name}", exc_info=True)
@@ -335,4 +335,4 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
                 diagnostics = get_diagnostics(mongodb_run_id)
                 diagnostics.error(category=DIAGNOSTIC_CATEGORY_SLM_FILTER, message=f"SLM filter failed, continuing without filtering: {e}", node_name="slm_prefilter", details={"error": str(e)})
 
-            return {"slm_filter_stats": stats.model_dump()}
+            return {Keys.SLM_FILTER_STATS: stats.model_dump()}

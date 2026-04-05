@@ -201,8 +201,6 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
             "force_refresh_consolidated_content": newsletter_request.force_refresh_consolidated_content,
             "force_refresh_consolidated_link_enrichment": newsletter_request.force_refresh_consolidated_link_enrichment,
             "force_refresh_consolidated_translation": newsletter_request.force_refresh_consolidated_translation,
-            # LinkedIn draft creation
-            "create_linkedin_draft": newsletter_request.create_linkedin_draft,
             # Top-K discussions configuration
             "top_k_discussions": newsletter_request.top_k_discussions,
             # Anti-repetition configuration
@@ -210,6 +208,8 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
             # Discussion merging configuration
             "enable_discussion_merging": newsletter_request.enable_discussion_merging,
             "similarity_threshold": newsletter_request.similarity_threshold,
+            # Image extraction configuration
+            "enable_image_extraction": newsletter_request.enable_image_extraction,
             # Output actions (resolved with backward compat for create_linkedin_draft)
             "output_actions": _resolve_batch_output_actions(newsletter_request) or [OutputAction.SAVE_LOCAL],
             "webhook_url": newsletter_request.webhook_url,

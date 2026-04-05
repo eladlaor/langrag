@@ -12,7 +12,8 @@ import logging
 from pydantic import BaseModel
 
 from custom_types.newsletter_formats.base import NewsletterFormatBase
-from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys
+from custom_types.newsletter_formats.image_context import build_image_context_text
+from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys, LlmInputKeys
 from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole, SummaryFormats, WHATSAPP_DISPLAY_NAME
 from .schema import LlmResponseWhatsAppNewsletterContent
 from .prompt import WHATSAPP_NEWSLETTER_PROMPT
@@ -133,10 +134,14 @@ class WhatsAppFormat(NewsletterFormatBase):
 
         language_instruction = f"\n\nIMPORTANT: Generate the entire newsletter in {desired_language.upper()}. All titles, bullet points, and content must be in {desired_language}."
 
+        # Build optional image context from associated image descriptions
+        image_discussion_map = kwargs.get(LlmInputKeys.IMAGE_DISCUSSION_MAP)
+        image_context = build_image_context_text(discussions, image_discussion_map) if image_discussion_map else ""
+
         messages.append(
             {
                 "role": MessageRole.USER,
-                "content": ("According to the requirements, " "generate the WhatsApp community newsletter summary for:\n\n" f"{json.dumps(discussions, indent=2, ensure_ascii=False)}" f"{language_instruction}"),
+                "content": ("According to the requirements, " "generate the WhatsApp community newsletter summary for:\n\n" f"{json.dumps(discussions, indent=2, ensure_ascii=False)}" f"{image_context}" f"{language_instruction}"),
             }
         )
 

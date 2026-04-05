@@ -11,7 +11,8 @@ import logging
 from pydantic import BaseModel
 
 from custom_types.newsletter_formats.base import NewsletterFormatBase
-from custom_types.field_keys import NewsletterStructureKeys
+from custom_types.newsletter_formats.image_context import build_image_context_text
+from custom_types.field_keys import NewsletterStructureKeys, LlmInputKeys
 from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole, SummaryFormats, MCP_ISRAEL_GROUP_NAME_DEFAULT, MCP_ISRAEL_DISPLAY_NAME
 from .schema import LlmResponseMcpIsraelNewsletterContent
 from .prompt import MCP_NEWSLETTER_PROMPT, ADDITIONAL_TOPICS_GUIDANCE
@@ -105,11 +106,15 @@ class McpIsraelFormat(NewsletterFormatBase):
         # Language instruction is now in system prompt, but we keep this as reinforcement
         language_instruction = f"\n\nIMPORTANT: Generate the entire newsletter in {desired_language.upper()}. All sections, titles, and content must be in {desired_language}."
 
+        # Build optional image context from associated image descriptions
+        image_discussion_map = kwargs.get(LlmInputKeys.IMAGE_DISCUSSION_MAP)
+        image_context = build_image_context_text(discussions, image_discussion_map) if image_discussion_map else ""
+
         # User message with discussions to summarize
         messages.append(
             {
                 "role": MessageRole.USER,
-                "content": (f"Here are the translated WhatsApp discussions from the {group_name} group. " "Please create a comprehensive technical newsletter summary according to the requested format:\n\n" f"{json.dumps(discussions, indent=2, ensure_ascii=False)}" f"{language_instruction}"),
+                "content": (f"Here are the translated WhatsApp discussions from the {group_name} group. " "Please create a comprehensive technical newsletter summary according to the requested format:\n\n" f"{json.dumps(discussions, indent=2, ensure_ascii=False)}" f"{image_context}" f"{language_instruction}"),
             }
         )
 
@@ -137,6 +142,7 @@ class McpIsraelFormat(NewsletterFormatBase):
         empty_message = "No discussions were found for this time period. The group was quiet during this time."
         return {
             NewsletterStructureKeys.MARKDOWN_CONTENT: f"# MCP Israel Group - Technical Summary\n\n{empty_message}\n\n## Summary\n- No messages to summarize\n- No discussions to report\n- Group activity: None",
+            NewsletterStructureKeys.HEADLINE: "No headline for this period.",
             NewsletterStructureKeys.INDUSTRY_UPDATES: "No updates available",
             NewsletterStructureKeys.TOOLS_MENTIONED: "No tools mentioned",
             NewsletterStructureKeys.WORK_PRACTICES: "No work practices discussed",

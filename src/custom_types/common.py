@@ -97,6 +97,43 @@ class ChatAnalysisState(BaseModel):
 ######################## LLM SCHEMAS ########################
 
 
+class ImageMetadata(BaseModel):
+    """Metadata for an image extracted from a WhatsApp message."""
+
+    image_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    mxc_url: str
+    mimetype: str = ""
+    width: int | None = None
+    height: int | None = None
+    size_bytes: int | None = None
+    filename: str = ""
+    sender_id: str = ""
+    timestamp: int = 0
+    message_id: str = ""
+    chat_name: str = ""
+    data_source_name: str = ""
+    storage_path: str | None = None
+    description: str | None = None
+    description_model: str | None = None
+    discussion_id: str | None = None
+
+    # Matrix E2EE encryption fields (for decrypting encrypted media)
+    encryption_key: str | None = None  # AES-CTR JWK key (content.file.key.k)
+    encryption_iv: str | None = None  # Base64 AES-CTR IV (content.file.iv)
+    encryption_sha256: str | None = None  # Base64 SHA-256 hash (content.file.hashes.sha256)
+
+
+class ImageExtractionStats(BaseModel):
+    """Statistics from the image extraction node."""
+
+    enabled: bool = False
+    total_images_found: int = 0
+    images_downloaded: int = 0
+    images_described: int = 0
+    download_failures: int = 0
+    vision_failures: int = 0
+
+
 class LlmResponseInitialExtraction(BaseModel):
     messages: list[Message]
     sender_map: dict[str, str] = Field(default_factory=dict, description="Map of real sender names to anonymized sender_ids")

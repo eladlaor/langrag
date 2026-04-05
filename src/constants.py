@@ -260,6 +260,7 @@ COLLECTION_NEWSLETTERS = "newsletters"
 COLLECTION_SCHEDULED_NEWSLETTERS = "scheduled_newsletters"
 COLLECTION_EXTRACTION_CACHE = "extraction_cache"
 COLLECTION_ROOM_ID_CACHE = "room_id_cache"
+COLLECTION_IMAGES = "images"
 
 
 # ============================================================================
@@ -337,6 +338,11 @@ OUTPUT_FILENAME_MESSAGES_PROCESSED_TEMP = "messages_processed_temp.json"
 OUTPUT_FILENAME_SELECTED_DISCUSSIONS = "selected_discussions.json"
 OUTPUT_FILENAME_MERGED_DISCUSSIONS = "merged_discussions.json"
 OUTPUT_FILENAME_AGGREGATED_LINKS = "aggregated_links.json"
+OUTPUT_FILENAME_IMAGE_MANIFEST = "image_manifest.json"
+
+# Image-to-discussion association caps (prevent prompt bloat)
+MAX_IMAGES_PER_DISCUSSION = 3
+MAX_IMAGES_TOTAL = 15
 
 
 # ============================================================================
@@ -357,6 +363,7 @@ DIR_NAME_PREPROCESSED = "preprocessed"
 DIR_NAME_TRANSLATED = "translated"
 DIR_NAME_SEPARATE_DISCUSSIONS = "separate_discussions"
 DIR_NAME_DISCUSSIONS_RANKING = "discussions_ranking"
+DIR_NAME_IMAGES = "images"
 
 
 # ============================================================================
@@ -427,6 +434,9 @@ class LlmInputPurposes(StrEnum):
     # Anti-repetition validation
     CHECK_REPETITION = "check_repetition"
 
+    # Vision purposes
+    DESCRIBE_IMAGE = "describe_image"
+
     # Discussion merging purposes
     MERGE_SIMILAR_DISCUSSIONS = "merge_similar_discussions"
     GENERATE_MERGED_TITLE = "generate_merged_title"
@@ -438,10 +448,12 @@ class NodeNames:
         SETUP_DIRECTORIES = "setup_directories"
         EXTRACT_MESSAGES = "extract_messages"
         SLM_PREFILTER = "slm_prefilter"
+        EXTRACT_IMAGES = "extract_images"
         PREPROCESS_MESSAGES = "preprocess_messages"
         TRANSLATE_MESSAGES = "translate_messages"
         SEPARATE_DISCUSSIONS = "separate_discussions"
         RANK_DISCUSSIONS = "rank_discussions"
+        ASSOCIATE_IMAGES = "associate_images"
         GENERATE_CONTENT = "generate_content"
         ENRICH_WITH_LINKS = "enrich_with_links"
         TRANSLATE_FINAL_SUMMARY = "translate_final_summary"
@@ -487,6 +499,40 @@ class MatrixEventType(StrEnum):
     ROOM_ENCRYPTED = "m.room.encrypted"
     ROOM_MESSAGE = "m.room.message"
     ROOM_NAME = "m.room.name"
+
+
+class MatrixMessageType(StrEnum):
+    """Matrix content.msgtype values for different media types."""
+
+    TEXT = "m.text"
+    IMAGE = "m.image"
+    VIDEO = "m.video"
+    FILE = "m.file"
+    AUDIO = "m.audio"
+
+
+class VisionDescribeScope(StrEnum):
+    """Scope for vision image description."""
+
+    ALL = "all"
+    FEATURED_ONLY = "featured_only"
+
+
+# Vision cache namespace
+VISION_CACHE_PREFIX = "vision_describe"
+
+# OpenAI vision detail level (controls token usage per image)
+OPENAI_VISION_DETAIL_LOW = "low"
+
+# MIME type to file extension mapping for images
+MIME_TO_EXTENSION: dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+}
+DEFAULT_IMAGE_EXTENSION = ".bin"
 
 
 class MatrixEncryptionAlgorithm(StrEnum):
@@ -546,6 +592,7 @@ COMMUNITY_ALLOWED_OUTPUT_ACTIONS = {
 
 # Header names
 HEADER_CONTENT_TYPE = "Content-Type"
+HEADER_CONTENT_LENGTH = "content-length"
 HEADER_ACCEPT = "Accept"
 HEADER_AUTHORIZATION = "Authorization"
 
@@ -559,6 +606,7 @@ CONTENT_TYPE_JSON = "application/json"
 
 ENV_APP_BASE_URL = "APP_BASE_URL"
 ENV_DEFAULT_EMAIL_RECIPIENT = "DEFAULT_EMAIL_RECIPIENT"
+ENV_BEEPER_ACCESS_TOKEN = "BEEPER_ACCESS_TOKEN"
 
 
 # ============================================================================
@@ -647,6 +695,7 @@ class PipelineStage(StrEnum):
     """Pipeline stages for newsletter generation."""
 
     EXTRACT_MESSAGES = "extract_messages"
+    EXTRACT_IMAGES = "extract_images"
     PREPROCESS_MESSAGES = "preprocess_messages"
     TRANSLATE_MESSAGES = "translate_messages"
     SEPARATE_DISCUSSIONS = "separate_discussions"

@@ -38,9 +38,13 @@ CONTENT GUIDELINES:
 
 YOUR RESPONSE MUST INCLUDE BOTH:
 1. A complete markdown document with all sections combined (in the markdown_content field)
-2. Individual sections as separate fields in the JSON response (industry_updates, tools_mentioned, etc.)
+2. Individual sections as separate fields in the JSON response (headline, industry_updates, tools_mentioned, etc.)
 
 The conversation is from the {group_name} group. Extract information according to these categories:
+
+🎯 **Headline**
+The single most impactful or exciting topic from this period. This is the lead story — pick the one discussion that would make someone stop scrolling.
+Write it as a short paragraph (3-5 sentences), NOT bullet points. Lead with a bold one-line hook, then expand with context and why it matters to the community.
 
 📣 **Industry Updates**
 Announcements from companies/services — new releases, expanded capabilities, etc.
@@ -84,6 +88,10 @@ YOUR RESPONSE:
 Example structure:
 ```markdown
 # {group_name} - Technical Summary
+
+## 🎯 Headline
+
+**Cursor adds MCP Apps support** — Cursor now natively supports MCP Apps, the interactive UI layer for MCP servers. This builds on the MCP-UI protocol, whose founders lead the MCP-UI group right here in our community. A milestone moment for the Israeli MCP ecosystem — a protocol born in our community discussions is now integrated into one of the most popular AI-powered IDEs.
 
 ## 📣 Industry Updates
 - **Tool X v2.0 released** — adds support for new integrations via REST API. Documentation and examples available on GitHub.

@@ -87,3 +87,33 @@ class LLMProviderInterface(ABC, CustomBaseModel):
             Text response as string
         """
         ...
+
+    async def call_with_vision(
+        self,
+        purpose: str,
+        prompt: str,
+        image_data: bytes,
+        image_media_type: str = "image/jpeg",
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """
+        Describe or analyze an image using vision capabilities.
+
+        Default implementation raises NotImplementedError.
+        Providers that support vision should override this method.
+
+        Args:
+            purpose: Purpose identifier (for logging)
+            prompt: Text prompt to send alongside the image
+            image_data: Raw image bytes
+            image_media_type: MIME type of the image
+            model: Vision model to use
+            temperature: Temperature setting
+            max_tokens: Maximum tokens for response
+
+        Returns:
+            Text description of the image
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support vision calls")

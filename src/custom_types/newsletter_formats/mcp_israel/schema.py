@@ -16,6 +16,7 @@ class LlmResponseMcpIsraelNewsletterContent(BaseModel):
     """
 
     markdown_content: str = Field(..., description="The complete newsletter summary in markdown format")
+    headline: str = Field("", description="Lead story headline — the single most impactful topic of the period, written as a short paragraph (3-5 sentences)")
     industry_updates: str = Field("", description="Industry updates section content")
     tools_mentioned: str = Field("", description="Tools mentioned section content")
     work_practices: str = Field("", description="Work practices section content")

@@ -61,6 +61,12 @@ services:
       SLM_MODEL: ${SLM_MODEL:-phi3:mini}
       SLM_BASE_URL: ${SLM_BASE_URL:-http://ollama:11434}
 
+      # Vision (Image Extraction & Understanding)
+      VISION_ENABLED: ${VISION_ENABLED:-false}
+      VISION_DESCRIBE_SCOPE: ${VISION_DESCRIBE_SCOPE:-all}
+      VISION_MODEL: ${VISION_MODEL:-gpt-4.1-mini}
+      VISION_MAX_IMAGES_PER_CHAT: ${VISION_MAX_IMAGES_PER_CHAT:-50}
+
       # Email delivery
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
       GMAIL_ADDRESS: ${GMAIL_ADDRESS:-}
@@ -78,6 +84,9 @@ services:
       - ./examples:/app/examples
       - ./logs:/app/logs
       - ./output:/app/output
+
+      # Persistent media storage (images)
+      - ./data/media:/app/data/media
 
       # Knowledge base (read-only)
       - ./knowledge:/app/knowledge:ro
@@ -148,6 +157,9 @@ services:
       - ./examples:/app/examples
       - ./logs:/app/logs
       - ./output:/app/output
+
+      # Persistent media storage (images)
+      - ./data/media:/app/data/media
 
       # Knowledge base (read-only)
       - ./knowledge:/app/knowledge:ro

@@ -369,8 +369,6 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
             "force_refresh_consolidated_content": request.force_refresh_consolidated_content,
             "force_refresh_consolidated_link_enrichment": request.force_refresh_consolidated_link_enrichment,
             "force_refresh_consolidated_translation": request.force_refresh_consolidated_translation,
-            # LinkedIn draft creation (NEW)
-            "create_linkedin_draft": request.create_linkedin_draft,
             # Top-K discussions configuration
             "top_k_discussions": request.top_k_discussions,
             # Anti-repetition configuration
@@ -378,6 +376,8 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
             # Discussion merging configuration
             "enable_discussion_merging": request.enable_discussion_merging,
             "similarity_threshold": request.similarity_threshold,
+            # Image extraction configuration
+            "enable_image_extraction": request.enable_image_extraction,
             # Output actions (resolved with backward compat for create_linkedin_draft)
             "output_actions": resolve_output_actions(request) or [OutputAction.SAVE_LOCAL],
             "webhook_url": request.webhook_url,
@@ -715,8 +715,6 @@ async def run_workflow_with_progress(request: PeriodicNewsletterRequest, run_out
         "force_refresh_consolidated_content": request.force_refresh_consolidated_content,
         "force_refresh_consolidated_link_enrichment": request.force_refresh_consolidated_link_enrichment,
         "force_refresh_consolidated_translation": request.force_refresh_consolidated_translation,
-        # LinkedIn draft creation
-        "create_linkedin_draft": request.create_linkedin_draft,
         # HITL selection timeout
         "hitl_selection_timeout_minutes": request.hitl_selection_timeout_minutes,
         # Top-K discussions configuration
@@ -726,6 +724,8 @@ async def run_workflow_with_progress(request: PeriodicNewsletterRequest, run_out
         # Discussion merging configuration
         "enable_discussion_merging": request.enable_discussion_merging,
         "similarity_threshold": request.similarity_threshold,
+        # Image extraction configuration
+        "enable_image_extraction": request.enable_image_extraction,
         # Output actions (resolved with backward compat for create_linkedin_draft)
         "output_actions": resolve_output_actions(request) or [OutputAction.SAVE_LOCAL],
         "webhook_url": request.webhook_url,
