@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img src="docs/figures/images/langrag_banner.png" alt="LangRAG — Recapping All Groups" width="300">
+  <img src="docs/figures/images/langrag_banner.png" alt="LangRAG: Recapping All Groups" width="300">
 
   <h3>
     Everyone summarizes WhatsApp.<br>
@@ -37,11 +37,10 @@
   - [n8n Israel](#n8n-israel)
 - [How It Works](#how-it-works)
   - [Pipeline Overview](#pipeline-overview)
-  - [Beeper: The Secret Sauce](#the-secret-sauce)
-  - [Single Chat Analysis](#single-chat-analysis-an-8-stage-pipeline)
-  - [Multi-Chat Consolidation](#multi-chat-consolidation-a-9-stage-pipeline)
   - [What Gives This Solution an Edge](#what-gives-this-solution-an-edge)
-  - [Tech Stack](#tech-stack)
+  - [Reply Correlation via Beeper](#reply-correlation-via-beeper)
+  - [Single Chat Analysis](#single-chat-analysis)
+  - [Multi-Chat Consolidation](#multi-chat-consolidation)
 - [Setup](#setup)
   - [Getting Started](#getting-started)
   - [User Interfaces](#user-interfaces)
@@ -128,21 +127,39 @@ Founded by [Elay Guez](https://www.linkedin.com/in/elay-g/), [Gilad Shoham](http
 ### Pipeline Overview
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG pipeline overview — animated" width="800">
+  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG pipeline overview - animated" width="800">
 </div>
 
 <details>
 <summary><strong>View static diagram</strong></summary>
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG pipeline overview — full diagram" width="800">
+  <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG pipeline overview - full diagram" width="800">
 </div>
 
 </details>
 
 ---
 
-### The Secret Sauce
+### What Gives this Solution an Edge
+
+| Feature | How | Impact |
+|---------|-----|--------|
+| Image Understanding | Vision model describes shared images, context injected into generation | Newsletters reflect visual content, not just text |
+| Reply Correlation | Matrix `m.relates_to` metadata preserved through Beeper extraction | Precise discussion separation - no timestamp guessing |
+| MMR Diversity Ranking | Multi-factor scoring + Maximal Marginal Relevance | Quality-diversity balance |
+| Human-in-the-Loop | Two-phase pipeline with Web UI discussion selector | Editorial control over final newsletter content |
+| Batch API | JSONL serialization, async polling, exponential backoff | 50% cost reduction |
+| SLM Pre-filtering | Configurable local SLM classifies KEEP/FILTER/UNCERTAIN before LLM | 15-30% additional savings |
+| Hybrid Anti-Repetition | Embedding cosine similarity + LLM validation vs. last N editions | No repetition of content from previous N newsletters |
+| Smart Discussion Merging | Configurable similarity thresholds + LLM validation | Better handling of cross-group similar discussions |
+| Full Observability | Langfuse + Prometheus + Loki/Grafana, all fail-soft | Production monitoring |
+| Link Enrichment | Auto-fetch URLs, non-destructive markdown insertion | References for further learning |
+| LinkedIn Automation | n8n webhook integration | One-click LinkedIn draft publishing |
+
+---
+
+### Reply Correlation via Beeper
 
 <img src="docs/figures/images/beeper.png" alt="Beeper" width="40" align="left" style="margin-right: 12px;">
 
@@ -152,44 +169,52 @@ Most WhatsApp export tools lose reply metadata - the link between a reply and th
 
 Better data, better results.
 
-### Single Chat Analysis: An 8-Stage Pipeline
+### Single Chat Analysis
 
 Each chat runs through the **SingleChatAnalyzer** - a LangGraph pipeline which would be used as a subgraph in multi-chat. These are its stages:
 
 #### 1. Extract Messages
-Pulls messages from the selected groups, using a Beeper/Matrix bridge. Preserves metadata for reply threading. Includes automatic decryption using a hybrid decryption manager with three configurable strategies: persistent session store, server-side key backup, and manual key export.
+Pulls messages from the selected groups via a Beeper/Matrix bridge. Preserves reply-chain metadata (`m.in_reply_to`) for accurate discussion separation. Includes automatic E2E decryption with three configurable strategies: persistent session store, server-side key backup, and manual key export.
 
 #### 2. SLM Filter *(optional)*
 
-A local Phi3 model (via Ollama) classifies each message as **KEEP**, **FILTER**, or **UNCERTAIN**. Reduces downstream LLM API calls by 15-30%. Fail-soft: if the SLM is unavailable, the pipeline continues without filtering. UNCERTAIN messages always pass through to the LLM pipeline.
+A configurable local SLM (via Ollama) classifies each message as **KEEP**, **FILTER**, or **UNCERTAIN**. Reduces downstream LLM API calls by 15-30%. Fail-soft: if the SLM is unavailable, the pipeline continues without filtering.
 
-#### 3. Preprocess Data
+#### 3. Extract Images *(optional)*
+
+Downloads and decrypts images shared in the chat (AES-CTR encrypted media from Matrix). Describes each image using a configurable vision model. Descriptions are cached in MongoDB to avoid redundant API calls. This visual context is carried forward through the pipeline and injected into newsletter generation.
+
+#### 4. Preprocess Data
 
 Parse timestamps, sender names, media attachments, and URLs. Pure transformation | no LLM calls. Structures raw Matrix events into a normalized message format.
 
-#### 4. Normalize to English
+#### 5. Normalize to English
 
 Normalize all messages to English using gpt-4o-mini in batch mode. Messages already in English are skipped. This ensures consistent language for downstream analysis regardless of the source language.
 
-#### 5. Separate Discussions
+#### 6. Separate Discussions
 
-Group messages into topical discussions. Uses reply-to chains (from Beeper's `m.relates_to`) as the primary signal, with LLM-based content analysis as a secondary signal for standalone messages. Outputs a structured list of discussions, each with its constituent messages.
+Group messages into topical discussions. Uses reply-to chains as the primary signal, with LLM-based content analysis as a secondary signal for standalone messages. Outputs a structured list of discussions, each with its constituent messages.
 
-#### 6. Rank Discussions
+#### 7. Rank Discussions
 
 Score discussions by importance and diversity. Uses a **discussion ranker subgraph** that combines multi-factor scoring with Maximal Marginal Relevance (MMR) re-ranking. Includes anti-repetition checks against previous newsletters (embedding cosine similarity + LLM validation) | reducing repeated content by up to 80%.
 
-#### 7. Generate Summary
+#### 8. Associate Images
 
-Create the newsletter content from the top-ranked discussions. Uses format plugins (`langtalks_format`, `mcp_israel_format`) to produce output as JSON, Markdown, and HTML. Each format defines its own structure, section ordering, and editorial style.
+Maps extracted image descriptions to their parent discussions. The generation stage receives both the text content and the visual context of each discussion, producing richer and more accurate summaries.
 
-#### 8. Link Enrichment
+#### 9. Generate Summary
+
+Create the newsletter content from the top-ranked discussions. Uses format plugins (`langtalks_format`, `mcp_israel_format`) to produce output as JSON, Markdown, and HTML. Each format defines its own structure, section ordering, and editorial style. Image context is included where relevant.
+
+#### 10. Link Enrichment
 
 Extract URLs from the original messages and optionally perform web searches to find additional relevant links. Inserts markdown hyperlinks into the newsletter content non-destructively | existing text is preserved, links are woven in contextually.
 
-### Multi-Chat Consolidation: A 9-Stage Pipeline
+### Multi-Chat Consolidation
 
-When processing multiple WhatsApp groups, the **ParallelOrchestrator** coordinates the full pipeline. The orchestrator dispatches N chats concurrently using LangGraph's **Send API**, each running the full 8-stage SingleChatAnalyzer independently. After all chats complete, the consolidation stages begin:
+When processing multiple WhatsApp groups, the **ParallelOrchestrator** coordinates the full pipeline. The orchestrator dispatches N chats concurrently using LangGraph's **Send API**, each running the full SingleChatAnalyzer independently. After all chats complete, the consolidation stages begin:
 
 #### 1. Aggregate Cross-Chat
 
@@ -231,37 +256,6 @@ The output handler dispatches to multiple destinations:
 - **Email** | Via SendGrid, Gmail, or SMTP2GO
 - **LinkedIn** | Draft post via n8n webhook
 - **Webhook** | Custom HTTP endpoint
-
----
-
-### What Gives this Solution an Edge
-
-| Feature | How | Impact |
-|---------|-----|--------|
-| Reply Threading via Beeper | Matrix `m.relates_to` metadata preserved through extraction | Precise discussion separation - no timestamp guessing |
-| MMR Diversity Ranking | Multi-factor scoring + Maximal Marginal Relevance | Quality-diversity balance |
-| Human-in-the-Loop | Two-phase pipeline with Web UI discussion selector | Editorial control over final newsletter content |
-| Batch API | JSONL serialization, async polling, exponential backoff | 50% cost reduction |
-| SLM Pre-filtering | Local Phi3 classifies KEEP/FILTER/UNCERTAIN before LLM | 15-30% additional savings |
-| Hybrid Anti-Repetition | Embedding cosine similarity + LLM validation vs. last N editions | No repetition of content from previous N newsletters |
-| Smart Discussion Merging | Configurable similarity thresholds + LLM validation | Better handling of cross-group similar discussions |
-| Full Observability | Langfuse + Prometheus + Loki/Grafana, all fail-soft | Production monitoring |
-| Link Enrichment | Auto-fetch URLs, non-destructive markdown insertion | References for further learning |
-| LinkedIn Automation | n8n webhook integration | One-click LinkedIn draft publishing |
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| API | FastAPI (async) |
-| Orchestration | LangGraph 1.0+ (native async graphs) |
-| LLM | OpenAI or Anthropic (via LangChain) |
-| Cost Optimization | Batch API (OpenAI / Anthropic) + Ollama SLM (Phi3) |
-| Database | MongoDB 8 + Motor (async) + Atlas Vector Search |
-| Message Source | Beeper / Matrix (matrix-nio, E2E encrypted) |
-| Frontend | React 19 + TypeScript + SSE streaming |
-| Observability | Langfuse, Prometheus, Loki, Grafana |
-| Infrastructure | Docker Compose, nginx |
 
 ---
 
@@ -372,6 +366,7 @@ See: **[docs/setup/SETUP_LINKEDIN_WEBHOOK.md](docs/setup/SETUP_LINKEDIN_WEBHOOK.
 | `enable_discussion_merging` | Merge similar discussions across different chats | `true` / `false` | `true` |
 | `similarity_threshold` | How aggressively to merge similar discussions | `strict` / `moderate` / `aggressive` | `moderate` |
 | `summary_format` | Newsletter template and editorial style | `langtalks_format`, `mcp_israel_format` | required |
+| `enable_image_extraction` | Extract and describe shared images using a vision model | `true` / `false` | `false` |
 | `create_linkedin_draft` | Auto-create a LinkedIn draft post via n8n | `true` / `false` | `false` |
 
 #### Environment Variables
