@@ -86,6 +86,7 @@ class NewsletterStructureKeys:
     VALUABLE_POSTS = "valuable_posts"
     OPEN_QUESTIONS = "open_questions"
     CONCEPTUAL_DISCUSSIONS = "conceptual_discussions"
+    HEADLINE = "headline"
     ISSUES_CHALLENGES = "issues_challenges"
     TITLE = "title"
     BULLET_POINTS = "bullet_points"
@@ -174,6 +175,50 @@ class LlmInputKeys:
     NON_FEATURED_DISCUSSIONS = "non_featured_discussions"
     NEWSLETTER_ID = "newsletter_id"
     FEATURED_DISCUSSION_IDS = "featured_discussion_ids"
+    IMAGE_DISCUSSION_MAP = "image_discussion_map"
+
+
+class MatrixImageInfoKeys:
+    """Keys for Matrix image info sub-object (content.info)."""
+
+    MIMETYPE = "mimetype"
+    WIDTH = "w"
+    HEIGHT = "h"
+    SIZE = "size"
+
+
+class MatrixEncryptedFileKeys:
+    """Keys for Matrix encrypted file sub-object (content.file).
+
+    Encrypted media in Matrix stores the mxc URL inside content.file.url
+    instead of content.url, along with encryption keys for decryption.
+    """
+
+    FILE = "file"
+    URL = "url"
+    FILENAME = "filename"
+
+
+class ImageKeys:
+    """Keys for image metadata dictionaries."""
+
+    IMAGE_ID = "image_id"
+    MXC_URL = "mxc_url"
+    HTTP_URL = "http_url"
+    MIMETYPE = "mimetype"
+    WIDTH = "width"
+    HEIGHT = "height"
+    SIZE_BYTES = "size_bytes"
+    FILENAME = "filename"
+    SENDER_ID = "sender_id"
+    TIMESTAMP = "timestamp"
+    MESSAGE_ID = "message_id"
+    STORAGE_PATH = "storage_path"
+    DESCRIPTION = "description"
+    DESCRIPTION_MODEL = "description_model"
+    DISCUSSION_ID = "discussion_id"
+    CHAT_NAME = "chat_name"
+    DATA_SOURCE_NAME = "data_source_name"
 
 
 class DbFieldKeys:

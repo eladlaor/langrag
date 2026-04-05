@@ -23,6 +23,7 @@ Usage:
 from custom_types.sse_events import (
     # Stage constants (per-chat)
     STAGE_EXTRACT,
+    STAGE_EXTRACT_IMAGES,
     STAGE_PREPROCESS,
     STAGE_TRANSLATE,
     STAGE_SEPARATE,
@@ -64,6 +65,7 @@ from .node_decorators import (
 __all__ = [
     # Stage constants (per-chat)
     "STAGE_EXTRACT",
+    "STAGE_EXTRACT_IMAGES",
     "STAGE_PREPROCESS",
     "STAGE_TRANSLATE",
     "STAGE_SEPARATE",

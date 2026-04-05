@@ -42,7 +42,9 @@ class GeminiBatchProvider(BatchAPIProvider):
     BACKOFF_MULTIPLIER = 1.5
 
     def __init__(self, model: str | None = None, api_key: str | None = None):
-        self._model = model or "gemini-2.5-flash"
+        from config import get_settings
+
+        self._model = model or get_settings().llm.gemini_default_model
         self._api_key = api_key
         self._client = None
 

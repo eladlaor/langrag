@@ -100,6 +100,13 @@ class SingleChatState(TypedDict):
     original_newsletter_id: str | None  # Tracking ID for original version
     enriched_newsletter_id: str | None  # Tracking ID for enriched version (same as newsletter_id)
 
+    # === Image Extraction (Optional) ===
+    enable_image_extraction: bool | None  # Whether to extract images from messages
+    image_manifest_path: str | None  # Path to image manifest JSON
+    images_dir: str | None  # Directory for image storage within output
+    image_extraction_stats: dict | None  # Image extraction statistics
+    image_discussion_map: dict | None  # Maps discussion_id -> list of image description dicts
+
     # === Processing Metadata ===
     message_count: int | None  # Number of messages processed
     reused_existing: bool | None  # Whether existing files were reused (not regenerated)
@@ -126,7 +133,7 @@ class SingleChatState(TypedDict):
 # ============================================================================
 
 
-def create_single_chat_state(*, chat_name: str, data_source_name: str, start_date: str, end_date: str, output_dir: str, summary_format: str, desired_language: str = DEFAULT_LANGUAGE, force_refresh_all: bool = False, top_k_discussions: int | None = None, previous_newsletters_to_consider: int | None = 5, progress_thread_id: str | None = None, **kwargs) -> SingleChatState:
+def create_single_chat_state(*, chat_name: str, data_source_name: str, start_date: str, end_date: str, output_dir: str, summary_format: str, desired_language: str = DEFAULT_LANGUAGE, force_refresh_all: bool = False, top_k_discussions: int | None = None, previous_newsletters_to_consider: int | None = 5, progress_thread_id: str | None = None, enable_image_extraction: bool | None = None, **kwargs) -> SingleChatState:
     """
     Factory function for creating SingleChatState with sensible defaults.
 
@@ -221,6 +228,12 @@ def create_single_chat_state(*, chat_name: str, data_source_name: str, start_dat
         "newsletter_id": None,
         "original_newsletter_id": None,
         "enriched_newsletter_id": None,
+        # === Image Extraction ===
+        "enable_image_extraction": enable_image_extraction,
+        "image_manifest_path": None,
+        "images_dir": None,
+        "image_extraction_stats": None,
+        "image_discussion_map": None,
         # === Processing Metadata ===
         "message_count": None,
         "reused_existing": None,

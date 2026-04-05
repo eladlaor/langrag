@@ -28,7 +28,7 @@ from constants import (
 )
 from utils.llm import get_llm_caller
 from custom_types.common import LlmResponseTranslateSummary
-from custom_types.field_keys import NewsletterStructureKeys, ContentResultKeys, RankingResultKeys, DiscussionKeys
+from custom_types.field_keys import NewsletterStructureKeys, ContentResultKeys, RankingResultKeys, DiscussionKeys, LlmInputKeys
 from config import get_settings
 from db.repositories.newsletters import NewslettersRepository
 
@@ -154,12 +154,14 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
             non_featured_discussions = kwargs.get("non_featured_discussions", [])
 
             # Format builds the complete message list (owns prompt assembly)
+            image_discussion_map = kwargs.get(LlmInputKeys.IMAGE_DISCUSSION_MAP)
             messages = self._format.build_messages(
                 discussions=featured_discussions,
                 brief_mention_items=brief_mention_items,
                 non_featured_discussions=non_featured_discussions,
                 group_name=kwargs.get(DiscussionKeys.GROUP_NAME, self._format.format_display_name),
                 desired_language=desired_language,
+                image_discussion_map=image_discussion_map,
             )
 
             response_schema = self._format.get_response_schema()

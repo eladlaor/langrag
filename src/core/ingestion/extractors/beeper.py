@@ -143,6 +143,12 @@ def _run_async_extraction_in_process(source_name, kwargs_dict):
         return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
 
+# Module-level lock to serialize Beeper session refresh across concurrent API requests.
+# SQLite (used by matrix-nio for the encryption store) does not handle concurrent writers,
+# so parallel orchestrator runs must take turns refreshing the session.
+_session_refresh_lock = asyncio.Lock()
+
+
 class RawDataExtractorBeeper(RawDataExtractorInterface):
     # Defining as class variable with default empty dict
     EXTRACTION_STRATEGIES_MAP: dict[str, dict[str, Callable]] = {}
@@ -328,11 +334,17 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         Raises:
             RuntimeError: If BEEPER_EMAIL or BEEPER_PASSWORD not set in environment
         """
+        logging.info("Refreshing Matrix session via direct login (acquiring session lock)...")
+
+        async with _session_refresh_lock:
+            logging.info("Session lock acquired - proceeding with refresh")
+            await self._refresh_session_impl()
+
+    async def _refresh_session_impl(self) -> None:
+        """Internal implementation of session refresh, called under _session_refresh_lock."""
         from nio import AsyncClient, AsyncClientConfig, LoginResponse
         from pathlib import Path
         import shutil
-
-        logging.info("🔄 Refreshing Matrix session via direct login...")
 
         # Getting credentials from environment
         email = os.getenv("BEEPER_EMAIL")

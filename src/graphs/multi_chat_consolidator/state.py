@@ -65,6 +65,9 @@ class ParallelOrchestratorState(TypedDict):
     # === Anti-Repetition Configuration ===
     previous_newsletters_to_consider: int | None  # Max previous newsletters to check (default: 5, 0 disables)
 
+    # === Image Extraction Configuration ===
+    enable_image_extraction: bool | None  # Extract images from messages (requires VISION_ENABLED=true)
+
     # === Discussion Merging Configuration ===
     enable_discussion_merging: bool | None  # Enable merging of similar discussions (default: True for multi-chat)
     similarity_threshold: str | None  # "strict" | "moderate" | "aggressive" (default: "moderate")

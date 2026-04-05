@@ -26,7 +26,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from constants import SimilarityThreshold
+from constants import SimilarityThreshold, VisionDescribeScope
 
 
 # ============================================================================
@@ -344,6 +344,8 @@ class SLMSettings(BaseSettings):
     """Small Language Model configuration for local inference via Ollama."""
 
     enabled: bool = Field(default=False, description="Enable SLM-based message pre-filtering. Set to false to disable.")
+    classifier_mode: str = Field(default="ollama", description="Classifier mode: 'deberta' (HTTP sidecar) | 'ollama' | 'disabled'")
+    classifier_url: str = Field(default="http://slm-classifier:8090", description="DeBERTa classifier sidecar URL")
     provider: str = Field(default="ollama", description="SLM provider (currently only 'ollama' supported)")
     base_url: str = Field(default="http://ollama:11434", description="Ollama API base URL (use http://localhost:11434 outside Docker)")
     model: str = Field(default="phi3:mini", description="Ollama model name for message classification")
@@ -356,6 +358,30 @@ class SLMSettings(BaseSettings):
     max_tokens: int = Field(default=50, description="Maximum tokens for classification response")
 
     model_config = SettingsConfigDict(env_prefix="SLM_")
+
+
+# ============================================================================
+# VISION (IMAGE UNDERSTANDING) CONFIGURATION
+# ============================================================================
+
+
+class VisionSettings(BaseSettings):
+    """Vision LLM configuration for image understanding in WhatsApp messages."""
+
+    enabled: bool = Field(default=False, description="Master toggle for image extraction and vision description")
+    provider: str = Field(default="openai", description="Vision LLM provider")
+    model: str = Field(default="gpt-4.1-mini", description="Vision model for image description")
+    max_images_per_chat: int = Field(default=50, description="Maximum images to process per chat")
+    max_image_size_bytes: int = Field(default=10_485_760, description="Maximum image size in bytes (10MB)")
+    description_max_tokens: int = Field(default=300, description="Max tokens for vision description response")
+    temperature: float = Field(default=0.2, description="Temperature for vision description")
+    download_timeout_seconds: int = Field(default=30, description="Timeout for image download")
+    download_concurrency: int = Field(default=5, description="Max parallel image downloads")
+    cache_ttl_days: int = Field(default=30, description="Vision description cache TTL in days")
+    describe_scope: VisionDescribeScope = Field(default=VisionDescribeScope.ALL, description="Which images to describe: 'all' or 'featured_only'")
+    media_base_dir: str = Field(default="data/media/images", description="Base directory for persistent media storage")
+
+    model_config = SettingsConfigDict(env_prefix="VISION_")
 
 
 # ============================================================================
@@ -405,6 +431,7 @@ class Settings(BaseSettings):
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
     ranking: RankingSettings = Field(default_factory=RankingSettings)
     slm: SLMSettings = Field(default_factory=SLMSettings)
+    vision: VisionSettings = Field(default_factory=VisionSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

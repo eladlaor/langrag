@@ -61,10 +61,12 @@ class AnthropicBatchProvider(BatchAPIProvider):
         Initialize the Anthropic batch provider.
 
         Args:
-            model: Default model to use (defaults to claude-sonnet-4-20250514)
+            model: Default model to use (falls back to config default)
             api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
         """
-        self._model = model or "claude-sonnet-4-20250514"
+        from config import get_settings
+
+        self._model = model or get_settings().llm.anthropic_default_model
         self._api_key = api_key
         self._client: Anthropic | None = None
 

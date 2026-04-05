@@ -89,6 +89,16 @@ class SingleChatStateKeys:
     # === Worker Store Path (for parallel workers) ===
     WORKER_STORE_PATH = "worker_store_path"
 
+    # === SLM Pre-Filter Statistics ===
+    SLM_FILTER_STATS = "slm_filter_stats"
+
+    # === Image Extraction ===
+    ENABLE_IMAGE_EXTRACTION = "enable_image_extraction"
+    IMAGE_MANIFEST_PATH = "image_manifest_path"
+    IMAGES_DIR = "images_dir"
+    IMAGE_EXTRACTION_STATS = "image_extraction_stats"
+    IMAGE_DISCUSSION_MAP = "image_discussion_map"
+
     # === Processing Metadata ===
     MESSAGE_COUNT = "message_count"
     REUSED_EXISTING = "reused_existing"
@@ -147,6 +157,9 @@ class ParallelOrchestratorStateKeys:
 
     # === Anti-Repetition Configuration ===
     PREVIOUS_NEWSLETTERS_TO_CONSIDER = "previous_newsletters_to_consider"
+
+    # === Image Extraction Configuration ===
+    ENABLE_IMAGE_EXTRACTION = "enable_image_extraction"
 
     # === Discussion Merging Configuration ===
     ENABLE_DISCUSSION_MERGING = "enable_discussion_merging"
@@ -208,8 +221,6 @@ class ParallelOrchestratorStateKeys:
     TOTAL_DISCUSSIONS_CONSOLIDATED = "total_discussions_consolidated"
     TOTAL_MESSAGES_CONSOLIDATED = "total_messages_consolidated"
     SOURCE_CHATS_IN_CONSOLIDATED = "source_chats_in_consolidated"
-
-    # === LinkedIn Draft Creation ===
 
     # === Delivery Results ===
     DELIVERY_RESULTS = "delivery_results"

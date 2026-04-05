@@ -32,6 +32,17 @@ class McpIsraelRenderer:
                 return markdown_content
 
             # Fallback: build markdown from individual section fields
+            markdown = "# MCP Israel Group - Technical Summary\n\n"
+
+            # Headline section (paragraph, not bullet points)
+            headline = response.get(NewsletterStructureKeys.HEADLINE, "")
+            markdown += "## 🎯 Headline\n\n"
+            if headline and headline.strip():
+                markdown += f"{headline}\n\n"
+            else:
+                markdown += "No headline for this period.\n\n"
+
+            # Categorical sections (bullet points)
             sections = {
                 NewsletterStructureKeys.INDUSTRY_UPDATES: response.get(NewsletterStructureKeys.INDUSTRY_UPDATES, ""),
                 NewsletterStructureKeys.TOOLS_MENTIONED: response.get(NewsletterStructureKeys.TOOLS_MENTIONED, ""),
@@ -42,8 +53,6 @@ class McpIsraelRenderer:
                 NewsletterStructureKeys.CONCEPTUAL_DISCUSSIONS: response.get(NewsletterStructureKeys.CONCEPTUAL_DISCUSSIONS, ""),
                 NewsletterStructureKeys.ISSUES_CHALLENGES: response.get(NewsletterStructureKeys.ISSUES_CHALLENGES, ""),
             }
-
-            markdown = "# MCP Israel Group - Technical Summary\n\n"
 
             section_emojis = {
                 NewsletterStructureKeys.INDUSTRY_UPDATES: "📣",

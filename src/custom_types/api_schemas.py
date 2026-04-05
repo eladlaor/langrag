@@ -28,7 +28,7 @@ class PeriodicNewsletterRequest(BaseModel):
     data_source_name: str = Field(..., description="Data source name (langtalks, mcp_israel, or n8n_israel)", example="langtalks")
     whatsapp_chat_names_to_include: list[str] = Field(..., description="List of WhatsApp chat names to process", example=["LangTalks Community"])
     desired_language_for_summary: str = Field(..., description="Target language for the newsletter summary", example="english")
-    summary_format: str = Field(..., description="Newsletter format: mcp_israel_format or langtalks_format", example="langtalks_format")
+    summary_format: str = Field(..., description="Newsletter format: langtalks_format, mcp_israel_format, or whatsapp_format", example="langtalks_format")
     output_dir: str | None = Field(None, description="Override default output directory (optional)")
 
     # Force refresh flags (optional)
@@ -78,6 +78,9 @@ class PeriodicNewsletterRequest(BaseModel):
     webhook_url: str | None = Field(None, description="Webhook URL for webhook action")
     email_recipients: list[str] | None = Field(None, description="Email recipients for send_email action")
     substack_blog_id: str | None = Field(None, description="Substack blog ID for send_substack action (optional)")
+
+    # Image extraction (optional)
+    enable_image_extraction: bool | None = Field(False, description="Extract and store images from messages. Requires VISION_ENABLED=true in environment.")
 
     # Batch API configuration (optional) - for 50% cost reduction
     use_batch_api: bool | None = Field(False, description="Use OpenAI Batch API for translation (50% cost savings). " "When enabled, the request is queued for background processing. " "Returns a job_id immediately - use GET /api/batch_jobs/{job_id} to check status. " "Default: False (synchronous processing with real-time progress).")

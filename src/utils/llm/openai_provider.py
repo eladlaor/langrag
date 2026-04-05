@@ -6,6 +6,7 @@ Uses prompts from utils/llm/prompts/ for all LLM interactions.
 Instrumented with Langfuse for tracing and cost tracking.
 """
 
+import base64
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ from pydantic import Field
 
 from config import get_settings
 from utils.llm.retry import with_retry
-from constants import LlmInputPurposes, LLMCallType, DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole
+from constants import LlmInputPurposes, LLMCallType, DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole, OPENAI_VISION_DETAIL_LOW
 from custom_types.exceptions import (
     LLMError,
     LLMResponseError,
@@ -439,6 +440,94 @@ class OpenAIProvider(LLMProviderInterface):
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_simple ({purpose}): {e}"
+            logging.error(error_message)
+            raise LLMError(error_message) from e
+
+    @with_retry(max_retries=3, base_delay=1.0)
+    @observe(as_type="generation", name="openai_vision")
+    async def call_with_vision(
+        self,
+        purpose: str,
+        prompt: str,
+        image_data: bytes,
+        image_media_type: str = "image/jpeg",
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """
+        Describe or analyze an image using OpenAI vision capabilities.
+
+        Uses detail: "low" (fixed 85 tokens per image) for cost efficiency.
+
+        Args:
+            purpose: Purpose identifier (for logging)
+            prompt: Text prompt to accompany the image
+            image_data: Raw image bytes
+            image_media_type: MIME type of the image
+            model: Vision model (default from config.vision.model)
+            temperature: Temperature setting
+            max_tokens: Maximum tokens for response
+
+        Returns:
+            Text description of the image
+        """
+        try:
+            settings = get_settings()
+            model = model or settings.vision.model
+            temperature = temperature if temperature is not None else settings.vision.temperature
+            max_tokens = max_tokens or settings.vision.description_max_tokens
+
+            client = self._get_openai_client()
+
+            base64_data = base64.b64encode(image_data).decode("utf-8")
+            messages = [
+                {
+                    "role": MessageRole.USER,
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{image_media_type};base64,{base64_data}",
+                                "detail": OPENAI_VISION_DETAIL_LOW,
+                            },
+                        },
+                    ],
+                }
+            ]
+
+            logging.info(f"[{purpose}] Making vision call with model={model}")
+
+            self._update_langfuse_input(model, messages, purpose, temperature)
+
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            if not response.choices:
+                raise LLMResponseError(f"Vision call returned no choices for purpose={purpose}")
+            content = response.choices[0].message.content
+            if not content:
+                raise LLMResponseError(f"Vision call returned empty content for purpose={purpose}")
+
+            logging.debug(f"[{purpose}] Vision response: {content[:200]}...")
+
+            self._update_langfuse_output(content, response.usage)
+
+            return content
+
+        except openai.APIError as e:
+            self._update_langfuse_error(e)
+            error_message = f"OpenAI API error in call_with_vision ({purpose}): {e}"
+            logging.error(error_message)
+            raise LLMError(error_message) from e
+        except Exception as e:
+            self._update_langfuse_error(e)
+            error_message = f"Unexpected error in call_with_vision ({purpose}): {e}"
             logging.error(error_message)
             raise LLMError(error_message) from e
 

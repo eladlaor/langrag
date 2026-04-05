@@ -6,7 +6,7 @@ Processing individual chats through extraction, SLM pre-filtering, preprocessing
 discussion separation, ranking, content generation, link enrichment, and final translation stages.
 
 Workflow: Periodic Newsletter (Multi-day date range)
-Pipeline: extract → slm_prefilter → preprocess → translate → separate → rank → generate → enrich_links → translate_final
+Pipeline: extract → slm_prefilter → extract_images → preprocess → translate → separate → rank → associate_images → generate → enrich_links → translate_final
 
 SLM Pre-filtering (optional, controlled by SLM_ENABLED):
 - Uses local Ollama SLM to classify messages as KEEP/FILTER/UNCERTAIN
@@ -37,6 +37,8 @@ from db.run_tracker import get_tracker
 
 from config import get_settings
 from graphs.single_chat_analyzer.state import SingleChatState
+from graphs.single_chat_analyzer.image_extraction import extract_images_node
+from graphs.single_chat_analyzer.associate_images import associate_images_node
 from graphs.state_keys import SingleChatStateKeys as Keys
 from graphs.subgraphs.state import (
     create_ranker_state_from_single_chat,
@@ -609,6 +611,9 @@ async def generate_content(state: SingleChatState, config: RunnableConfig | None
         date_str = start_date if start_date == end_date else f"{start_date} to {end_date}"
         featured_ids_for_generator = [d.get(DiscussionKeys.ID) for d in featured_discussions if d.get(DiscussionKeys.ID)]
 
+        # Step 6b: Loading image-discussion map (optional, may be None)
+        image_discussion_map = state.get(Keys.IMAGE_DISCUSSION_MAP)
+
         content_result = await content_generator.generate_content(
             operation=ContentGenerationOperations.GENERATE_NEWSLETTER_SUMMARY,
             data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES,
@@ -620,6 +625,7 @@ async def generate_content(state: SingleChatState, config: RunnableConfig | None
             brief_mention_items=brief_mention_items,
             non_featured_discussions=non_featured_discussions,
             desired_language_for_summary=desired_language,
+            image_discussion_map=image_discussion_map,
             # MongoDB metadata for persistence
             newsletter_id=newsletter_id,
             run_id=mongodb_run_id,
@@ -840,9 +846,9 @@ def build_newsletter_generation_graph() -> StateGraph:
     Building and compiling the newsletter generation workflow graph.
 
     Graph Structure:
-    START → setup_directories → extract_messages → slm_prefilter → preprocess_messages →
-    translate_messages → separate_discussions → rank_discussions → generate_content →
-    enrich_with_links → translate_final_summary → END
+    START → setup_directories → extract_messages → slm_prefilter → extract_images →
+    preprocess_messages → translate_messages → separate_discussions → rank_discussions →
+    generate_content → enrich_with_links → translate_final_summary → END
 
     Note: Session validation (ensure_valid_session) now running once at orchestrator level
     (parallel_orchestrator.py) before workers are dispatched, preventing rate limiting
@@ -865,10 +871,12 @@ def build_newsletter_generation_graph() -> StateGraph:
     builder.add_node(NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES, setup_directories)
     builder.add_node(NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES, extract_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.SLM_PREFILTER, slm_prefilter_node)  # SLM pre-filtering (optional, controlled by SLM_ENABLED)
+    builder.add_node(NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES, extract_images_node)  # Image extraction (optional, controlled by VISION_ENABLED)
     builder.add_node(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, preprocess_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, translate_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS, separate_discussions)
     builder.add_node(NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS, rank_discussions)
+    builder.add_node(NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES, associate_images_node)
     builder.add_node(NodeNames.SingleChatAnalyzer.GENERATE_CONTENT, generate_content)
     builder.add_node(NodeNames.SingleChatAnalyzer.ENRICH_WITH_LINKS, enrich_with_links)
     builder.add_node(NodeNames.SingleChatAnalyzer.TRANSLATE_FINAL_SUMMARY, translate_final_summary)
@@ -878,11 +886,13 @@ def build_newsletter_generation_graph() -> StateGraph:
     builder.add_edge(START, NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES, NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES, NodeNames.SingleChatAnalyzer.SLM_PREFILTER)  # SLM pre-filter after extraction
-    builder.add_edge(NodeNames.SingleChatAnalyzer.SLM_PREFILTER, NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.SLM_PREFILTER, NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES, NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS)
     builder.add_edge(NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS, NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS)
-    builder.add_edge(NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS, NodeNames.SingleChatAnalyzer.GENERATE_CONTENT)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS, NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES, NodeNames.SingleChatAnalyzer.GENERATE_CONTENT)
     builder.add_edge(NodeNames.SingleChatAnalyzer.GENERATE_CONTENT, NodeNames.SingleChatAnalyzer.ENRICH_WITH_LINKS)
     builder.add_edge(NodeNames.SingleChatAnalyzer.ENRICH_WITH_LINKS, NodeNames.SingleChatAnalyzer.TRANSLATE_FINAL_SUMMARY)
     builder.add_edge(NodeNames.SingleChatAnalyzer.TRANSLATE_FINAL_SUMMARY, END)
