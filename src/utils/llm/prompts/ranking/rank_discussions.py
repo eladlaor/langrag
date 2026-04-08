@@ -47,6 +47,25 @@ When setting repetition_identification_reasoning, be specific:
 - Explain the semantic overlap
 """
 
+# SLM enrichment context - injected when messages have been enriched with multi-label scores
+SLM_ENRICHMENT_SECTION = """
+**SLM ENRICHMENT LABELS (Pre-computed Semantic Signals)**
+
+Each message in the discussions below has been pre-tagged with semantic labels by a specialized model.
+Use these labels as pre-computed quality signals to speed up your analysis:
+
+- Messages tagged as `professional`, `experience_sharing`, `how_to`, or `substantive` indicate **high-quality technical content** — these strongly support the Relevance & Importance (50%) and Quality & Depth (30%) factors.
+- Messages tagged as `question` or `discussion_init` indicate **conversation starters** — discussions with many of these are driving engagement.
+- Messages tagged as `resource` indicate **shared links, tools, papers** — concrete value for readers.
+- Messages tagged only as `reaction` or `humor` are **lower signal** — they indicate engagement but not depth.
+- Messages tagged as `off_group_topic` are **noise** — discussions dominated by these should be downranked.
+
+Look at the `slm_active_labels` field on each message. A discussion where most messages are tagged `professional` + `substantive` is likely more valuable than one dominated by `reaction` labels.
+"""
+
+# Used when enrichment is not available
+NO_SLM_ENRICHMENT_SECTION = ""
+
 # Used when no previous newsletters are available
 NO_PREVIOUS_NEWSLETTERS_SECTION = """
 **REPETITION ANALYSIS**
@@ -58,6 +77,8 @@ RANK_DISCUSSIONS_PROMPT = """You are an expert newsletter editor analyzing Whats
 Your task is to rank discussions and generate teachable one-liner summaries for each.
 
 {repetition_analysis_section}
+
+{slm_enrichment_section}
 
 For each discussion, consider these factors with the following weights:
 1. **Relevance & Importance** (50%): Is this technically significant or impactful?

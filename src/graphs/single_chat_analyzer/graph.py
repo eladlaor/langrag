@@ -39,6 +39,7 @@ from config import get_settings
 from graphs.single_chat_analyzer.state import SingleChatState
 from graphs.single_chat_analyzer.image_extraction import extract_images_node
 from graphs.single_chat_analyzer.associate_images import associate_images_node
+from graphs.single_chat_analyzer.slm_enrichment import slm_enrichment_node
 from graphs.state_keys import SingleChatStateKeys as Keys
 from graphs.subgraphs.state import (
     create_ranker_state_from_single_chat,
@@ -866,8 +867,8 @@ def build_newsletter_generation_graph() -> StateGraph:
 
     Graph Structure:
     START → setup_directories → extract_messages → slm_prefilter → extract_images →
-    preprocess_messages → translate_messages → separate_discussions → rank_discussions →
-    generate_content → enrich_with_links → translate_final_summary → END
+    preprocess_messages → translate_messages → separate_discussions → slm_enrichment →
+    rank_discussions → generate_content → enrich_with_links → translate_final_summary → END
 
     Note: Session validation (ensure_valid_session) now running once at orchestrator level
     (parallel_orchestrator.py) before workers are dispatched, preventing rate limiting
@@ -894,6 +895,7 @@ def build_newsletter_generation_graph() -> StateGraph:
     builder.add_node(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, preprocess_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, translate_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS, separate_discussions)
+    builder.add_node(NodeNames.SingleChatAnalyzer.SLM_ENRICHMENT, slm_enrichment_node)  # SLM multi-label enrichment (optional, controlled by SLM_ENRICHMENT_ENABLED)
     builder.add_node(NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS, rank_discussions)
     builder.add_node(NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES, associate_images_node)
     builder.add_node(NodeNames.SingleChatAnalyzer.GENERATE_CONTENT, generate_content)
@@ -909,7 +911,8 @@ def build_newsletter_generation_graph() -> StateGraph:
     builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES, NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS)
-    builder.add_edge(NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS, NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS, NodeNames.SingleChatAnalyzer.SLM_ENRICHMENT)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.SLM_ENRICHMENT, NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS)
     builder.add_edge(NodeNames.SingleChatAnalyzer.RANK_DISCUSSIONS, NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.ASSOCIATE_IMAGES, NodeNames.SingleChatAnalyzer.GENERATE_CONTENT)
     builder.add_edge(NodeNames.SingleChatAnalyzer.GENERATE_CONTENT, NodeNames.SingleChatAnalyzer.ENRICH_WITH_LINKS)
