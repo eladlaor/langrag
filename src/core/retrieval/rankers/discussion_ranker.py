@@ -37,6 +37,8 @@ from utils.llm.prompts.ranking.rank_discussions import (
     RANK_DISCUSSIONS_PROMPT,
     REPETITION_ANALYSIS_SECTION,
     NO_PREVIOUS_NEWSLETTERS_SECTION,
+    SLM_ENRICHMENT_SECTION,
+    NO_SLM_ENRICHMENT_SECTION,
 )
 from core.retrieval.history.newsletter_history_loader import (
     PreviousNewslettersContext,
@@ -225,6 +227,16 @@ async def rank_with_llm(
     """
     discussions_json = json.dumps(discussions_summary, indent=2)
 
+    # Build SLM enrichment section (detect if messages have slm_active_labels)
+    has_enrichment = any(
+        msg.get("slm_active_labels")
+        for disc in discussions_summary
+        for msg in disc.get("messages", [])
+    )
+    enrichment_section = SLM_ENRICHMENT_SECTION if has_enrichment else NO_SLM_ENRICHMENT_SECTION
+    if has_enrichment:
+        logger.info("SLM enrichment labels detected on messages, including in ranking prompt")
+
     # Build repetition analysis section
     repetition_section = _build_repetition_analysis_section(previous_newsletter_context)
 
@@ -265,7 +277,7 @@ async def rank_with_llm(
     logger.info(f"Analyzing {len(discussions_summary)} discussions with LLM...")
     try:
         invoke_config = {"callbacks": callbacks} if callbacks else {}
-        response = await chain.ainvoke({"discussions_json": discussions_json, "summary_format": summary_format, "repetition_analysis_section": repetition_section}, config=invoke_config)
+        response = await chain.ainvoke({"discussions_json": discussions_json, "summary_format": summary_format, "repetition_analysis_section": repetition_section, "slm_enrichment_section": enrichment_section}, config=invoke_config)
 
         # Parse LLM response (handles markdown fences, preamble text from non-OpenAI providers)
         ranking_result = parse_json_response(response.content)

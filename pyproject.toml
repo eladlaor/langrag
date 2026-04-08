@@ -90,6 +90,12 @@ dev = [
     "ipython==8.27.0",
     "ipykernel==6.29.5",
 ]
+slm-enrichment = [
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "sentencepiece>=0.2.0",
+    "huggingface-hub>=0.20.0",
+]
 
 [tool.ruff]
 line-length = 500

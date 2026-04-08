@@ -362,6 +362,26 @@ class SLMSettings(BaseSettings):
 
 
 # ============================================================================
+# SLM ENRICHMENT CONFIGURATION
+# ============================================================================
+
+
+class SLMEnrichmentSettings(BaseSettings):
+    """SLM multi-label enrichment configuration for discussion messages.
+
+    Uses the chat-message-tagger-deberta-v3 model to add 15 semantic labels
+    to each message before discussion ranking.
+    """
+
+    enabled: bool = Field(default=False, description="Enable SLM-based message enrichment. Set to true to activate.")
+    model_name: str = Field(default="eladlaor/chat-message-tagger-deberta-v3", description="HuggingFace model name for multi-label enrichment")
+    batch_size: int = Field(default=32, description="Inference batch size for enrichment")
+    max_length: int = Field(default=256, description="Max token sequence length for enrichment model")
+
+    model_config = SettingsConfigDict(env_prefix="SLM_ENRICHMENT_")
+
+
+# ============================================================================
 # VISION (IMAGE UNDERSTANDING) CONFIGURATION
 # ============================================================================
 
@@ -432,6 +452,7 @@ class Settings(BaseSettings):
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
     ranking: RankingSettings = Field(default_factory=RankingSettings)
     slm: SLMSettings = Field(default_factory=SLMSettings)
+    slm_enrichment: SLMEnrichmentSettings = Field(default_factory=SLMEnrichmentSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
 
     # Output directories

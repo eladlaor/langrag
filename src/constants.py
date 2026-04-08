@@ -461,6 +461,7 @@ class NodeNames:
         PREPROCESS_MESSAGES = "preprocess_messages"
         TRANSLATE_MESSAGES = "translate_messages"
         SEPARATE_DISCUSSIONS = "separate_discussions"
+        SLM_ENRICHMENT = "slm_enrichment"
         RANK_DISCUSSIONS = "rank_discussions"
         ASSOCIATE_IMAGES = "associate_images"
         GENERATE_CONTENT = "generate_content"
