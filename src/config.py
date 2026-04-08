@@ -250,6 +250,7 @@ class DatabaseSettings(BaseSettings):
 
     # MongoDB-specific configuration
     extraction_cache_ttl_days: int = Field(default=30, description="Extraction cache expiration in days")
+    translation_cache_ttl_days: int = Field(default=30, description="Translation cache expiration in days")
     newsletter_history_limit: int = Field(default=10, description="Maximum newsletters for anti-repetition context")
     query_timeout_ms: int = Field(default=5000, description="MongoDB query timeout in milliseconds")
 

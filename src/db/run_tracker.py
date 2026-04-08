@@ -31,6 +31,7 @@ class RunTracker:
             self._runs_repo = None
             self._discussions_repo = None
             self._messages_repo = None
+            self._polls_repo = None
             self._initialized = False
         except Exception as e:
             logger.error(f"Unexpected error initializing RunTracker: {e}")
@@ -47,12 +48,14 @@ class RunTracker:
             from db.repositories.discussions import DiscussionsRepository
             from db.repositories.messages import MessagesRepository
             from db.repositories.newsletters import NewslettersRepository
+            from db.repositories.polls import PollsRepository
 
             self._db = await get_database()
             self._runs_repo = RunsRepository(self._db)
             self._discussions_repo = DiscussionsRepository(self._db)
             self._messages_repo = MessagesRepository(self._db)
             self._newsletters_repo = NewslettersRepository(self._db)
+            self._polls_repo = PollsRepository(self._db)
             self._initialized = True
             return True
         except Exception as e:
@@ -203,6 +206,35 @@ class RunTracker:
                 stored += 1
             except Exception as e:
                 logger.debug(f"Failed to store discussion {idx}: {e}")
+        return stored
+
+    async def store_polls(self, run_id: str, chat_name: str, data_source_name: str, polls: list[dict]) -> int:
+        """Storing polls extracted from a chat. Fail-soft."""
+        if not run_id or not polls or not await self._ensure_initialized():
+            return 0
+
+        stored = 0
+        for poll in polls:
+            try:
+                matrix_event_id = poll.get("matrix_event_id", "")
+                poll_id = f"{run_id}_poll_{matrix_event_id}"
+
+                await self._polls_repo.create_poll(
+                    poll_id=poll_id,
+                    run_id=run_id,
+                    chat_name=chat_name,
+                    data_source_name=data_source_name,
+                    sender=poll.get("sender", ""),
+                    timestamp=poll.get("timestamp", 0),
+                    question=poll.get("question", ""),
+                    matrix_event_id=matrix_event_id,
+                    options=poll.get("options", []),
+                    total_votes=poll.get("total_votes", 0),
+                    unique_voter_count=poll.get("unique_voter_count", 0),
+                )
+                stored += 1
+            except Exception as e:
+                logger.debug(f"Failed to store poll {poll.get('matrix_event_id', '?')}: {e}")
         return stored
 
     async def store_newsletter(self, newsletter_id: str, run_id: str, newsletter_type: str, data_source_name: str, chat_name: str | None, start_date: str, end_date: str, summary_format: str, desired_language: str, json_path: str, md_path: str, html_path: str | None = None, stats: dict | None = None, featured_discussion_ids: list[str] | None = None, version_type: str = NewsletterVersionType.ORIGINAL) -> bool:

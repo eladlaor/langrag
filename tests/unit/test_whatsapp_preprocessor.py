@@ -357,3 +357,145 @@ class TestMessageStatistics:
 
         assert sender_counts["user_1"] == 2
         assert sender_counts["user_2"] == 1
+
+
+@requires_docker
+class TestPollHandling:
+    """Test WhatsApp poll extraction and formatting."""
+
+    def _make_preprocessor(self):
+        from core.ingestion.preprocessors.whatsapp import DataPreprocessorWhatsappChatsBase
+        return DataPreprocessorWhatsappChatsBase.__new__(DataPreprocessorWhatsappChatsBase)
+
+    def _make_poll_start(self, event_id="$poll1", question="Best framework?", options=None):
+        if options is None:
+            options = [("opt_a", "LangChain"), ("opt_b", "LlamaIndex")]
+        return {
+            "event_id": event_id,
+            "origin_server_ts": 1700000000000,
+            "sender": "@creator:beeper.local",
+            "type": "m.room.message",
+            "content": {
+                "body": f"{question}\n\n" + "\n\n".join(f"{i+1}. {name}" for i, (_, name) in enumerate(options)) + "\n\n(This message is a poll. Please open WhatsApp to vote.)",
+                "msgtype": "m.text",
+                "org.matrix.msc3381.poll.start": {
+                    "question": {"org.matrix.msc1767.text": question},
+                    "answers": [{"id": oid, "org.matrix.msc1767.text": name} for oid, name in options],
+                    "kind": "org.matrix.msc3381.poll.disclosed",
+                    "max_selections": 1,
+                },
+            },
+        }
+
+    def _make_poll_response(self, parent_event_id, sender, answer_ids, ts_offset=1000):
+        return {
+            "event_id": f"$resp_{sender}_{ts_offset}",
+            "origin_server_ts": 1700000000000 + ts_offset,
+            "sender": sender,
+            "type": "org.matrix.msc3381.poll.response",
+            "content": {
+                "body": "",
+                "m.relates_to": {"event_id": parent_event_id, "rel_type": "m.reference"},
+                "org.matrix.msc3381.poll.response": {"answers": answer_ids},
+            },
+        }
+
+    def _make_text_msg(self, event_id, body, ts_offset=0):
+        return {
+            "event_id": event_id,
+            "origin_server_ts": 1700000000000 + ts_offset,
+            "sender": "@user:beeper.local",
+            "type": "m.room.message",
+            "content": {"body": body, "msgtype": "m.text"},
+        }
+
+    def test_format_poll_with_votes(self):
+        preprocessor = self._make_preprocessor()
+        poll = self._make_poll_start()
+        vote_counts = {"opt_a": 3, "opt_b": 2}
+        result = preprocessor._format_poll_as_text(poll["content"], vote_counts)
+        assert "[Poll] Best framework?" in result
+        assert "LangChain (3 votes)" in result
+        assert "LlamaIndex (2 votes)" in result
+        assert "Total votes: 5" in result
+
+    def test_format_poll_without_votes(self):
+        preprocessor = self._make_preprocessor()
+        poll = self._make_poll_start()
+        result = preprocessor._format_poll_as_text(poll["content"], None)
+        assert "[Poll] Best framework?" in result
+        assert "- LangChain" in result
+        assert "- LlamaIndex" in result
+        assert "Total votes" not in result
+
+    def test_aggregate_poll_responses(self):
+        preprocessor = self._make_preprocessor()
+        messages = [
+            self._make_poll_start(),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_a"], 1000),
+            self._make_poll_response("$poll1", "@voter2:beeper.local", ["opt_b"], 2000),
+            self._make_poll_response("$poll1", "@voter3:beeper.local", ["opt_a"], 3000),
+        ]
+        votes, response_ids, _voter_counts = preprocessor._aggregate_poll_responses(messages)
+        assert "$poll1" in votes
+        assert votes["$poll1"]["opt_a"] == 2
+        assert votes["$poll1"]["opt_b"] == 1
+        assert len(response_ids) == 3
+
+    def test_aggregate_latest_vote_per_sender(self):
+        """When a user changes their vote, only the latest response counts."""
+        preprocessor = self._make_preprocessor()
+        messages = [
+            self._make_poll_start(),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_a"], 1000),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_b"], 2000),  # Changed vote
+        ]
+        votes, response_ids, _voter_counts = preprocessor._aggregate_poll_responses(messages)
+        assert votes["$poll1"].get("opt_a", 0) == 0
+        assert votes["$poll1"]["opt_b"] == 1
+
+    def test_parse_messages_skips_poll_responses(self):
+        preprocessor = self._make_preprocessor()
+        messages = [
+            self._make_text_msg("$msg1", "Hello", -1000),
+            self._make_poll_start(),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_a"], 1000),
+            self._make_poll_response("$poll1", "@voter2:beeper.local", ["opt_b"], 2000),
+            self._make_text_msg("$msg2", "Goodbye", 5000),
+        ]
+        result = preprocessor._parse_messages(messages)
+        output_msgs = result["messages"]
+        assert len(output_msgs) == 3  # 2 text + 1 poll start, responses skipped
+        contents = [m["content"] for m in output_msgs]
+        assert any("[Poll]" in c for c in contents)
+        assert not any(c == "" for c in contents)  # No empty poll response bodies
+
+    def test_parse_messages_poll_has_vote_counts(self):
+        preprocessor = self._make_preprocessor()
+        messages = [
+            self._make_poll_start(),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_a"], 1000),
+            self._make_poll_response("$poll1", "@voter2:beeper.local", ["opt_a"], 2000),
+        ]
+        result = preprocessor._parse_messages(messages)
+        poll_msg = [m for m in result["messages"] if "[Poll]" in m["content"]][0]
+        assert "LangChain (2 votes)" in poll_msg["content"]
+        assert "Total votes: 2" in poll_msg["content"]
+
+    def test_parse_messages_returns_poll_structs(self):
+        """Verify _parse_messages returns structured poll data for DB persistence."""
+        preprocessor = self._make_preprocessor()
+        messages = [
+            self._make_poll_start(),
+            self._make_poll_response("$poll1", "@voter1:beeper.local", ["opt_a"], 1000),
+            self._make_poll_response("$poll1", "@voter2:beeper.local", ["opt_b"], 2000),
+        ]
+        result = preprocessor._parse_messages(messages)
+        assert "polls" in result
+        assert len(result["polls"]) == 1
+        poll = result["polls"][0]
+        assert poll["question"] == "Best framework?"
+        assert poll["matrix_event_id"] == "$poll1"
+        assert len(poll["options"]) == 2
+        assert poll["total_votes"] == 2
+        assert poll["unique_voter_count"] == 2

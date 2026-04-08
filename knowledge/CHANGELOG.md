@@ -1,6 +1,8 @@
 # Changelog
 
 ## Table of Contents
+- [2026-04-08: Overlap Extraction Cache & Sender Map Persistence (Phases 2-3)](#2026-04-08-overlap-extraction-cache--sender-map-persistence-phases-2-3)
+- [2026-04-06: Per-Message Translation Cache (Phase 1 - Incremental Caching)](#2026-04-06-per-message-translation-cache-phase-1---incremental-caching)
 - [2026-03-29: Image-to-Discussion Association (Phase 6)](#2026-03-29-image-to-discussion-association-phase-6)
 - [2026-03-17: WhatsApp Image Extraction & Vision Understanding](#2026-03-17-whatsapp-image-extraction--vision-understanding)
 - [2026-02-04: UI and SSE Event System Improvements](#2026-02-04-ui-and-sse-event-system-improvements)
@@ -18,6 +20,62 @@
 - [2025-12-12: Anti-Repetition System](#2025-12-12-anti-repetition-system)
 - [2025-12-06: Fail-Fast Error Handling Improvements](#2025-12-06-fail-fast-error-handling-improvements)
 - [2025-12-06: Worth Mentioning Enhancement](#2025-12-06-worth-mentioning-enhancement)
+
+---
+
+## 2026-04-08: Overlap Extraction Cache & Sender Map Persistence (Phases 2-3)
+
+**What Changed:**
+
+Completed the remaining two phases of the incremental caching plan, enabling efficient date range extension for newsletter generation.
+
+**Phase 2: Overlap-Aware Extraction Cache**
+
+When the exact cache key misses (different date range), the system now checks for overlapping cached extractions. Three scenarios are handled:
+
+1. **Superset cache hit**: A cached extraction fully contains the requested range (e.g., cached Mar 15-Apr 10, requested Mar 19-Apr 6). Messages are filtered by timestamp from cache — no Beeper API call needed.
+2. **Partial overlap**: Messages from overlapping caches are collected and merged with freshly extracted messages (deduplicated by `event_id`).
+3. **No overlap**: Falls through to full extraction (existing behavior).
+
+Files modified:
+- `src/db/repositories/extraction_cache.py` — Added `get_overlapping_extractions()` and `_normalize_chat_name()`, plus `chat_name_normalized` field in stored documents
+- `src/core/ingestion/extractors/beeper.py` — Added overlap-aware cache lookup (superset detection + partial overlap merge) before the exact-match fallback
+- `src/db/indexes.py` — Added `chat_name_normalized` compound index on `extraction_cache`
+
+**Phase 3: Sender Map Persistence**
+
+Sender anonymization maps (`@alice:beeper.com` -> `user_1`) are now persisted to MongoDB. When preprocessing runs again (different date range, same chat), the same user always gets the same anonymized ID.
+
+1. **New Repository** (`src/db/repositories/sender_map.py`): `SenderMapRepository` with `get_sender_map` and `upsert_sender_map` methods.
+2. **Modified Preprocessing** (`src/core/ingestion/preprocessors/whatsapp.py`): `_parse_and_standardize_raw_whatsapp_messages_with_stats` is now async, loads sender map from MongoDB at start, persists updated map at end. Also fixed inter-chunk sender map propagation (sender map now fed back between chunks).
+3. **New Constant** (`src/constants.py`): `COLLECTION_SENDER_MAPS`.
+4. **New Index** (`src/db/indexes.py`): Unique compound index on `(data_source_name, chat_name)`.
+
+**Plan:** `knowledge/plans/INCREMENTAL_CACHING_PLAN.md`
+
+---
+
+## 2026-04-06: Per-Message Translation Cache (Phase 1 - Incremental Caching)
+
+**What Changed:**
+
+Added per-message translation caching to MongoDB so that extending a newsletter date range (e.g., Mar 19-Apr 4 to Mar 19-Apr 6) only translates the new messages. Previously, ALL messages were re-sent to OpenAI even if 95% were already translated in a prior run.
+
+**Why:** Common workflow is to generate a newsletter, then extend the date range by a few days before sending. Without caching, every extension re-translates all messages at full cost.
+
+1. **New Repository** (`src/db/repositories/translation_cache.py`): `TranslationCacheRepository` with bulk get/store operations. Keyed by `(matrix_event_id, target_language)` with SHA256 content hash for edit detection and TTL-based expiration.
+
+2. **Modified Translation Flow** (`src/core/ingestion/preprocessors/whatsapp.py`): `_translate_whatsapp_group_chat_messages` now looks up cached translations before sending to OpenAI Batch API. Only uncached (or edited) messages are translated. Fresh translations are stored back to cache.
+
+3. **New MongoDB Indexes** (`src/db/indexes.py`): Compound unique index on `(matrix_event_id, target_language)` and TTL index on `expires_at`.
+
+4. **New Constants** (`src/constants.py`): `COLLECTION_TRANSLATION_CACHE`, `DEFAULT_TRANSLATION_CACHE_TTL_DAYS`.
+
+5. **Config** (`src/config.py`): `translation_cache_ttl_days` setting (default 30 days).
+
+6. **Graph Node** (`src/graphs/single_chat_analyzer/graph.py`): `translate_messages` node now passes `chat_name`, `data_source_name`, and `force_refresh_translation` to the translation method.
+
+**Plan:** `knowledge/plans/INCREMENTAL_CACHING_PLAN.md` (Phase 2: extraction overlap cache, Phase 3: sender map persistence — not yet implemented).
 
 ---
 

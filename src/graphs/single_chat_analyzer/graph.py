@@ -81,6 +81,7 @@ from constants import (
     OUTPUT_FILENAME_NEWSLETTER_HTML,
     OUTPUT_FILENAME_ENRICHED_SUMMARY_JSON,
     OUTPUT_FILENAME_ENRICHED_SUMMARY_MD,
+    OUTPUT_FILENAME_POLLS,
     RESULT_KEY_NEWSLETTER_SUMMARY_PATH,
     RESULT_KEY_MARKDOWN_PATH,
     RESULT_KEY_HTML_PATH,
@@ -321,6 +322,8 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
                 PreprocessingOperations.PARSE_AND_STANDARDIZE_RAW_WHATSAPP_MESSAGES_WITH_STATS,
             ],
             output_dir=preprocess_dir,
+            chat_name=chat_name,
+            data_source_name=data_source_name,
         )
 
         if not os.path.exists(expected_file):
@@ -334,6 +337,21 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
                 message_count = len(messages) if isinstance(messages, list) else 0
         except Exception as e:
             logger.warning(f"Failed to load messages: {e}")
+
+        # Persist extracted polls to MongoDB (fail-soft)
+        try:
+            polls_file = os.path.join(preprocess_dir, OUTPUT_FILENAME_POLLS)
+            mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
+            if mongodb_run_id and os.path.exists(polls_file):
+                with open(polls_file) as f:
+                    polls = json.load(f)
+                if polls:
+                    from db.run_tracker import get_tracker
+                    tracker = get_tracker()
+                    stored_count = await tracker.store_polls(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, polls=polls)
+                    logger.info(f"Persisted {stored_count}/{len(polls)} polls to MongoDB")
+        except Exception as e:
+            logger.warning(f"Failed to persist polls to MongoDB: {e}")
 
         result = {Keys.PREPROCESSED_FILE_PATH: expected_file, Keys.MESSAGE_COUNT: message_count}
 
@@ -380,7 +398,8 @@ async def translate_messages(state: SingleChatState, config: RunnableConfig | No
         preprocessor = DataProcessorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, source_name=data_source_name, chat_name=chat_name)
 
         settings = get_settings()
-        await preprocessor.preprocess_data(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, data_source_path=data_source_path, preprocessing_operations=[PreprocessingOperations.TRANSLATE_WHATSAPP_GROUP_CHAT_MESSAGES], output_dir=translation_dir, batch_size=settings.processing.translation_batch_size, skip_already_translated=True)
+        force_refresh = state.get(Keys.FORCE_REFRESH_TRANSLATION, False)
+        await preprocessor.preprocess_data(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, data_source_path=data_source_path, preprocessing_operations=[PreprocessingOperations.TRANSLATE_WHATSAPP_GROUP_CHAT_MESSAGES], output_dir=translation_dir, batch_size=settings.processing.translation_batch_size, skip_already_translated=True, chat_name=chat_name, data_source_name=data_source_name, force_refresh_translation=force_refresh)
 
         if not os.path.exists(expected_file):
             raise RuntimeError(f"Translation did not create expected file: {expected_file}")
