@@ -208,6 +208,7 @@ ROUTE_RUN_BY_ID = "/runs/{run_id}"
 ROUTE_RUN_NEWSLETTER = "/runs/{run_id}/newsletter"
 ROUTE_RUN_NEWSLETTER_RAW = "/runs/{run_id}/newsletter/raw"
 ROUTE_RUN_DISCUSSIONS = "/runs/{run_id}/discussions"
+ROUTE_RUN_POLLS = "/runs/{run_id}/polls"
 ROUTE_SEARCH_DISCUSSIONS = "/search/discussions"
 ROUTE_RUNS_STATS = "/runs/stats"
 
@@ -218,6 +219,7 @@ ROUTE_MONGODB_RUN_BY_ID = "/mongodb/runs/{run_id}"
 ROUTE_MONGODB_RUN_MESSAGES = "/mongodb/runs/{run_id}/messages"
 ROUTE_MONGODB_RUN_DISCUSSIONS = "/mongodb/runs/{run_id}/discussions"
 ROUTE_MONGODB_RUN_DIAGNOSTICS = "/mongodb/runs/{run_id}/diagnostics"
+ROUTE_MONGODB_RUN_POLLS = "/mongodb/runs/{run_id}/polls"
 ROUTE_MONGODB_STATS = "/mongodb/stats"
 
 # Metrics Routes (no prefix)
@@ -261,6 +263,12 @@ COLLECTION_SCHEDULED_NEWSLETTERS = "scheduled_newsletters"
 COLLECTION_EXTRACTION_CACHE = "extraction_cache"
 COLLECTION_ROOM_ID_CACHE = "room_id_cache"
 COLLECTION_IMAGES = "images"
+COLLECTION_TRANSLATION_CACHE = "translation_cache"
+COLLECTION_SENDER_MAPS = "sender_maps"
+COLLECTION_POLLS = "polls"
+
+# Default TTL for translation cache entries (days)
+DEFAULT_TRANSLATION_CACHE_TTL_DAYS = 30
 
 
 # ============================================================================
@@ -323,6 +331,7 @@ OUTPUT_FILENAME_RANKED_DISCUSSIONS = "ranked_discussions.json"
 OUTPUT_FILENAME_USER_SELECTIONS = "user_selections.json"
 OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS = "all_chats_aggregated.json"
 OUTPUT_FILENAME_MESSAGES_PROCESSED = "messages_processed.json"
+OUTPUT_FILENAME_POLLS = "polls.json"
 OUTPUT_FILENAME_MESSAGES_TRANSLATED = "messages_translated_to_english.json"
 OUTPUT_FILENAME_SEPARATE_DISCUSSIONS = "separate_discussions.json"
 OUTPUT_FILENAME_DISCUSSIONS_RANKING = "discussions_ranking.json"
@@ -499,6 +508,18 @@ class MatrixEventType(StrEnum):
     ROOM_ENCRYPTED = "m.room.encrypted"
     ROOM_MESSAGE = "m.room.message"
     ROOM_NAME = "m.room.name"
+    POLL_RESPONSE = "org.matrix.msc3381.poll.response"
+
+
+# ============================================================================
+# POLL CONTENT CONSTANTS
+# ============================================================================
+
+POLL_START_CONTENT_KEY = "org.matrix.msc3381.poll.start"
+POLL_RESPONSE_CONTENT_KEY = "org.matrix.msc3381.poll.response"
+POLL_WHATSAPP_CONTENT_KEY = "fi.mau.whatsapp.poll"
+POLL_TEXT_KEY = "org.matrix.msc1767.text"
+POLL_FALLBACK_SUFFIX = "(This message is a poll. Please open WhatsApp to vote.)"
 
 
 class MatrixMessageType(StrEnum):

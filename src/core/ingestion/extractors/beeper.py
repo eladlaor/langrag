@@ -35,6 +35,8 @@ from constants import (
     MESSAGING_PLATFORM_WHATSAPP,
     EXTRACTION_STRATEGY_GROUP_CHAT,
     DecryptionMethod,
+    POLL_START_CONTENT_KEY,
+    POLL_RESPONSE_CONTENT_KEY,
 )
 from custom_types.exceptions import ConfigurationError
 from custom_types.field_keys import DecryptionResultKeys, DiscussionKeys
@@ -446,6 +448,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                 message_types.extend(BRIDGE_MESSAGE_TYPES)
             if include_encrypted:
                 message_types.append(MatrixEventType.ROOM_ENCRYPTED)
+            message_types.append(MatrixEventType.POLL_RESPONSE)
 
             if debug:
                 logging.debug(f"Looking for event types: {message_types}")
@@ -568,9 +571,16 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             # source contains the raw event dict from server
             source = event.source
             if isinstance(source, dict):
-                # Preserving m.relates_to if present (critical for reply threading)
-                if DecryptionResultKeys.CONTENT in source and MATRIX_KEY_RELATES_TO in source[DecryptionResultKeys.CONTENT]:
-                    result[DecryptionResultKeys.CONTENT][MATRIX_KEY_RELATES_TO] = source[DecryptionResultKeys.CONTENT][MATRIX_KEY_RELATES_TO]
+                source_content = source.get(DecryptionResultKeys.CONTENT, {})
+
+                # Preserving m.relates_to if present (critical for reply threading and poll vote linking)
+                if MATRIX_KEY_RELATES_TO in source_content:
+                    result[DecryptionResultKeys.CONTENT][MATRIX_KEY_RELATES_TO] = source_content[MATRIX_KEY_RELATES_TO]
+
+                # Preserving poll-specific content keys from MSC3381
+                for poll_key in (POLL_START_CONTENT_KEY, POLL_RESPONSE_CONTENT_KEY):
+                    if poll_key in source_content:
+                        result[DecryptionResultKeys.CONTENT][poll_key] = source_content[poll_key]
 
                 # Copying any other important fields
                 for key in ["unsigned", "age"]:
@@ -736,15 +746,15 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
             # Checking MongoDB cache first (unless force_refresh)
             if not force_refresh and not settings.database.enable_file_cache:
+                # Fast path: exact cache key match
                 logging.info(f"Checking MongoDB cache: {cache_key}")
                 cached_extraction = await cache_repo.get_cached_extraction(cache_key)
 
                 if cached_extraction:
-                    # Cache hit! Use cached messages
+                    # Exact cache hit — use cached messages directly
                     decrypted_messages = cached_extraction.get(DiscussionKeys.MESSAGES, [])
-                    logging.info(f"✓ MongoDB cache hit: {len(decrypted_messages)} messages " f"(cached at {cached_extraction.get('created_at')})")
+                    logging.info(f"✓ MongoDB cache hit (exact): {len(decrypted_messages)} messages " f"(cached at {cached_extraction.get('created_at')})")
 
-                    # Writing to file for debugging/intermediate storage if needed
                     safe_room_name = room_name.replace(" ", "_").replace("/", "_")
                     start_date_formatted = start_date_str.replace("-", "")
                     decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}.json")
@@ -758,6 +768,78 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
                     logging.info(f"Wrote cached messages to file for debugging: {decrypted_messages_file_path}")
                     return decrypted_messages_file_path
+
+                # Slow path: overlap-aware cache check
+                # Find cached extractions that overlap with the requested date range
+                overlapping = await cache_repo.get_overlapping_extractions(room_name, start_date_str, end_date_str)
+
+                if overlapping:
+                    # Check if any single cached extraction is a SUPERSET of the requested range
+                    for cached_doc in overlapping:
+                        if cached_doc["start_date"] <= start_date_str and cached_doc["end_date"] >= end_date_str:
+                            # Superset found — filter messages by requested timestamp range
+                            from custom_types.field_keys import DecryptionResultKeys as DRKeys
+                            all_cached_msgs = cached_doc.get(DiscussionKeys.MESSAGES, [])
+
+                            req_start_ts = self._parse_timestamp(start_date_str, day_boundary="start")
+                            req_end_ts = self._parse_timestamp(end_date_str, day_boundary=DayBoundary.END)
+
+                            filtered = [
+                                msg for msg in all_cached_msgs
+                                if req_start_ts <= msg.get(DRKeys.ORIGIN_SERVER_TS, 0) <= req_end_ts
+                            ]
+
+                            logging.info(
+                                f"✓ MongoDB cache hit (superset): filtered {len(filtered)}/{len(all_cached_msgs)} messages "
+                                f"from cached range [{cached_doc['start_date']} to {cached_doc['end_date']}]"
+                            )
+
+                            safe_room_name = room_name.replace(" ", "_").replace("/", "_")
+                            start_date_formatted = start_date_str.replace("-", "")
+                            decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}.json")
+
+                            output_dir = os.path.dirname(decrypted_messages_file_path)
+                            if output_dir:
+                                os.makedirs(output_dir, exist_ok=True)
+
+                            with open(decrypted_messages_file_path, "w") as f:
+                                json.dump(filtered, f, indent=2, ensure_ascii=False)
+
+                            # Cache the filtered result under the new exact key for future fast-path hits
+                            try:
+                                extraction_metadata = {
+                                    "extracted_at": datetime.now(UTC).isoformat(),
+                                    "source": "overlap_cache_superset_filter",
+                                    "source_cache_key": cached_doc.get("cache_key"),
+                                }
+                                await cache_repo.set_cached_extraction(
+                                    cache_key=cache_key, chat_name=room_name, room_id=cached_doc.get(DecryptionResultKeys.ROOM_ID, ""),
+                                    start_date=start_date_str, end_date=end_date_str,
+                                    messages=filtered, extraction_metadata=extraction_metadata,
+                                )
+                            except Exception as e:
+                                logging.warning(f"Failed to cache filtered superset result: {e}")
+
+                            return decrypted_messages_file_path
+
+                    # No single superset — collect messages from all overlapping caches
+                    # and remember which date ranges are already covered
+                    from custom_types.field_keys import DecryptionResultKeys as DRKeys
+                    cached_messages_by_event_id: dict[str, dict] = {}
+
+                    for cached_doc in overlapping:
+                        for msg in cached_doc.get(DiscussionKeys.MESSAGES, []):
+                            event_id = msg.get(DRKeys.EVENT_ID)
+                            if event_id:
+                                cached_messages_by_event_id[event_id] = msg
+
+                    if cached_messages_by_event_id:
+                        logging.info(
+                            f"Overlap cache: collected {len(cached_messages_by_event_id)} unique messages "
+                            f"from {len(overlapping)} overlapping cache entries"
+                        )
+                        # Store for use after fresh extraction to merge with delta
+                        kwargs["_overlap_cached_messages"] = cached_messages_by_event_id
 
             room_id = await self._get_room_id_with_cache(room_name)
 
@@ -857,6 +939,23 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             elif encrypted_count > 0 and stats["total_successes"] < encrypted_count:
                 failed_count = encrypted_count - stats["total_successes"]
                 logging.warning(f"\n⚠️  PARTIAL DECRYPTION: {failed_count}/{encrypted_count} messages could not be decrypted.\n" f"   This might be normal if:\n" f"   - Some messages are from before you joined the room\n" f"   - Some messages are from devices that never shared keys\n" f"   - Some encryption sessions expired\n")
+
+            # Merge with overlap-cached messages if available
+            # Fresh decryptions take priority over cached versions (in case of re-encrypted messages)
+            overlap_cached = kwargs.get("_overlap_cached_messages")
+            if overlap_cached:
+                fresh_event_ids = {msg.get(DecryptionResultKeys.EVENT_ID) for msg in decrypted_messages if msg.get(DecryptionResultKeys.EVENT_ID)}
+                merged_from_cache = 0
+                for event_id, cached_msg in overlap_cached.items():
+                    if event_id not in fresh_event_ids:
+                        # Only include cached messages that fall within the requested date range
+                        msg_ts = cached_msg.get(DecryptionResultKeys.ORIGIN_SERVER_TS, 0)
+                        if start_ts <= msg_ts <= end_ts:
+                            decrypted_messages.append(cached_msg)
+                            merged_from_cache += 1
+
+                if merged_from_cache > 0:
+                    logging.info(f"Merged {merged_from_cache} messages from overlap cache into fresh extraction")
 
             # Sorting by timestamp
             decrypted_messages.sort(key=lambda msg: msg.get(DecryptionResultKeys.ORIGIN_SERVER_TS, 0))
@@ -1264,6 +1363,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                 message_types.extend(BRIDGE_MESSAGE_TYPES)
             if include_encrypted:
                 message_types.append(MatrixEventType.ROOM_ENCRYPTED)
+            message_types.append(MatrixEventType.POLL_RESPONSE)
 
             if debug:
                 logger.debug(f"Looking for event types: {message_types}")

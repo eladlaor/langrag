@@ -55,6 +55,7 @@ from constants import (
     ROUTE_MONGODB_RUN_MESSAGES,
     ROUTE_MONGODB_RUN_DISCUSSIONS,
     ROUTE_MONGODB_RUN_DIAGNOSTICS,
+    ROUTE_MONGODB_RUN_POLLS,
     ROUTE_MONGODB_STATS,
     ENGLISH_LANGUAGE_CODES,
     FileFormat,
@@ -254,6 +255,27 @@ class DiagnosticReportResponse(BaseModel):
     report: dict | None = Field(None, description="LLM-generated analysis")
     raw_issues: list[DiagnosticIssueResponse] | None = Field(None, description="All captured issues")
     generated_at: str | None = Field(None, description="When the report was generated")
+
+
+class PollOptionResponse(BaseModel):
+    """A single poll option with vote count."""
+
+    option_id: str = Field(..., description="Option identifier")
+    text: str = Field(..., description="Option text")
+    vote_count: int = Field(0, description="Number of votes for this option")
+
+
+class PollResponse(BaseModel):
+    """A poll extracted from a WhatsApp chat."""
+
+    poll_id: str = Field(..., description="Unique poll identifier")
+    chat_name: str = Field(..., description="Source chat name")
+    sender: str = Field(..., description="Anonymized sender ID")
+    timestamp: int = Field(..., description="Unix timestamp in milliseconds")
+    question: str = Field(..., description="Poll question text")
+    options: list[PollOptionResponse] = Field(..., description="Poll options with vote counts")
+    total_votes: int = Field(0, description="Total votes across all options")
+    unique_voter_count: int = Field(0, description="Number of unique voters")
 
 
 # ============================================================================
@@ -933,3 +955,26 @@ async def get_run_stats():
     except Exception as e:
         logger.warning(f"Failed to get run stats from MongoDB: {e}")
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+@router.get(ROUTE_MONGODB_RUN_POLLS, response_model=list[PollResponse])
+async def get_mongodb_run_polls(run_id: str, chat_name: str | None = Query(None, description="Filter by chat name")):
+    """
+    Get polls for a specific run from MongoDB.
+
+    Returns polls with their questions, options, and vote counts.
+    """
+    try:
+        from db.connection import get_database
+        from db.repositories.polls import PollsRepository
+        from custom_types.field_keys import PollDbKeys
+
+        db = await get_database()
+        polls_repo = PollsRepository(db)
+
+        polls = await polls_repo.get_polls_by_run(run_id=run_id, chat_name=chat_name)
+
+        return [PollResponse(poll_id=poll[PollDbKeys.POLL_ID], chat_name=poll.get(PollDbKeys.CHAT_NAME, "unknown"), sender=poll.get(PollDbKeys.SENDER, ""), timestamp=poll.get(PollDbKeys.TIMESTAMP, 0), question=poll.get(PollDbKeys.QUESTION, ""), options=[PollOptionResponse(option_id=opt.get(PollDbKeys.OPTION_ID, ""), text=opt.get(PollDbKeys.OPTION_TEXT, ""), vote_count=opt.get(PollDbKeys.VOTE_COUNT, 0)) for opt in poll.get(PollDbKeys.OPTIONS, [])], total_votes=poll.get(PollDbKeys.TOTAL_VOTES, 0), unique_voter_count=poll.get(PollDbKeys.UNIQUE_VOTER_COUNT, 0)) for poll in polls]
+    except Exception as e:
+        logger.error(f"Failed to get polls for run {run_id} from MongoDB: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch polls: {str(e)}")

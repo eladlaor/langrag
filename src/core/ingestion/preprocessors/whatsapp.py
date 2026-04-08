@@ -17,9 +17,15 @@ from constants import (
     OUTPUT_FILENAME_SENDER_MAP,
     OUTPUT_FILENAME_MESSAGE_STATS,
     OUTPUT_FILENAME_SEPARATE_DISCUSSIONS,
+    OUTPUT_FILENAME_POLLS,
     MATRIX_KEY_RELATES_TO,
     MATRIX_KEY_IN_REPLY_TO,
     OLDER_MESSAGE_PLACEHOLDER,
+    MatrixEventType,
+    POLL_START_CONTENT_KEY,
+    POLL_RESPONSE_CONTENT_KEY,
+    POLL_TEXT_KEY,
+    POLL_FALLBACK_SUFFIX,
 )
 from custom_types.exceptions import (
     PreprocessingError,
@@ -29,7 +35,7 @@ from custom_types.exceptions import (
     FileValidationError,
     LLMResponseError,
 )
-from custom_types.field_keys import DiscussionKeys, DecryptionResultKeys
+from custom_types.field_keys import DiscussionKeys, DecryptionResultKeys, PollContentKeys, PollDbKeys
 from utils.llm import get_llm_caller
 from custom_types.common import LlmResponseSeparateDiscussions
 
@@ -124,7 +130,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             logging.error(error_message)
             raise PreprocessingError(error_message) from e
 
-    def _parse_and_standardize_raw_whatsapp_messages_with_stats(self, **kwargs) -> str:
+    async def _parse_and_standardize_raw_whatsapp_messages_with_stats(self, **kwargs) -> str:
         try:
             data_source_path: str = kwargs.get("data_source_path")
             if not data_source_path:
@@ -207,7 +213,11 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 raise PreprocessingError(error_message) from e
 
             all_parsed_messages = []
-            sender_map = {}  # an anonymization mechanism that converts real WhatsApp user identifiers into generic "user_X" IDs while maintaining consistent mappings across multiple processing runs. This is important for privacy and for generating consistent analytics without exposing real user identities.
+            chat_name = kwargs.get("chat_name", self.chat_name)
+            data_source_name = kwargs.get("data_source_name", self.source_name)
+
+            # Load persisted sender map from MongoDB for cross-run consistency
+            sender_map = await self._load_persisted_sender_map(data_source_name, chat_name)
 
             temp_output_path = os.path.join(output_path_base, OUTPUT_FILENAME_MESSAGES_PROCESSED_TEMP)
             final_output_path = os.path.join(output_path_base, OUTPUT_FILENAME_MESSAGES_PROCESSED)
@@ -217,18 +227,15 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             # Define placeholder constant for older messages
             older_message_placeholder = OLDER_MESSAGE_PLACEHOLDER
 
-            # just creating the files:
+            # Creating initial files
             with open(temp_output_path, "w") as f:
                 json.dump(all_parsed_messages, f)
             with open(sender_map_path, "w") as f:
                 json.dump(sender_map, f)
 
-            # Load the existing sender map
-            with open(sender_map_path) as f:
-                sender_map = json.load(f)
-
             # Process all messages using our deterministic parser in chunks
             logging.info(f"Parsing {total_messages} messages with deterministic parser")
+            all_extracted_polls = []
 
             for chunk_index in range(total_chunks):
                 start_idx = chunk_index * chunk_size
@@ -251,17 +258,28 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                     raise ValueError("_parse_messages result missing required 'messages' field")
 
                 updated_sender_map = chunk_result["sender_map"]
+                # Feed updated sender map to next chunk for consistent anonymization
+                sender_map = updated_sender_map
 
                 with open(sender_map_path, "w") as f:
                     json.dump(updated_sender_map, f, indent=2)
 
                 # Append chunk messages to all_parsed_messages
                 all_parsed_messages.extend(chunk_result[DiscussionKeys.MESSAGES])
+                # Collect extracted polls from this chunk
+                all_extracted_polls.extend(chunk_result.get("polls", []))
                 # Save progress to temp file after each chunk
                 with open(temp_output_path, "w") as f:
                     json.dump(all_parsed_messages, f, ensure_ascii=False, indent=2)
 
                 logging.info(f"Completed chunk {chunk_index + 1}/{total_chunks}. Total messages processed: {len(all_parsed_messages)}")
+
+            # Save extracted polls
+            if all_extracted_polls:
+                polls_output_path = os.path.join(output_path_base, OUTPUT_FILENAME_POLLS)
+                with open(polls_output_path, "w", encoding="utf-8") as f:
+                    json.dump(all_extracted_polls, f, indent=2, ensure_ascii=False)
+                logging.info(f"Saved {len(all_extracted_polls)} polls to {polls_output_path}")
 
             logging.info(f"Initial parsing complete for {len(all_parsed_messages)} messages. Post-processing...")
 
@@ -352,6 +370,9 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
                 logging.info(f"Saved message stats to {stats_output_path}")
 
+            # Persist final sender map to MongoDB for cross-run consistency
+            await self._persist_sender_map(data_source_name, chat_name, sender_map)
+
             return final_output_path
 
         except (ValidationError, FileValidationError, PreprocessingError):
@@ -361,7 +382,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             logging.error(error_message)
             raise PreprocessingError(error_message) from e
 
-    def _translate_whatsapp_group_chat_messages(self, **kwargs) -> Any:
+    async def _translate_whatsapp_group_chat_messages(self, **kwargs) -> Any:
         try:
             data_source_path = kwargs.get("data_source_path")
             if not data_source_path:
@@ -372,7 +393,6 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             if not os.path.exists(data_source_path):
                 raise FileValidationError(f"Data source path does not exist: {data_source_path}")
 
-            # Check if output_dir is provided, use it instead of the default
             output_path_base = kwargs.get("output_dir")
             if not output_path_base:
                 error_message = "output_dir is required"
@@ -383,7 +403,10 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             translate_from = DEFAULT_HTML_LANGUAGE
             translate_to = DEFAULT_LANGUAGE
 
-            batch_size = kwargs.get("batch_size", 100)  # defaults to 100 messages per batch.
+            batch_size = kwargs.get("batch_size", 100)
+            chat_name = kwargs.get("chat_name", self.chat_name)
+            data_source_name = kwargs.get("data_source_name", self.source_name)
+            force_refresh = kwargs.get("force_refresh_translation", False)
 
             translated_output_path = os.path.join(output_path_base, f"messages_translated_to_{translate_to}.json")
             recovery_file_path = os.path.join(output_path_base, f"{translate_to}_translation_progress.json")
@@ -405,14 +428,77 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 logging.info(f"Empty translated messages saved to: {translated_output_path}")
                 return []
 
-            # Use Batch API for translation (50% cost savings)
-            from utils.llm.batch import BatchTranslator
-            from config import get_settings
+            # --- Per-message translation cache lookup ---
+            cache_hits = 0
+            messages_to_translate = all_messages
+            cached_translations_map: dict[str, str] = {}  # matrix_event_id -> translated_content
 
-            settings = get_settings()
-            translator = BatchTranslator(model=settings.llm.default_model, provider_name=settings.llm.provider)
+            if not force_refresh:
+                cached_translations_map, messages_to_translate, cache_hits = await self._lookup_translation_cache(
+                    all_messages=all_messages,
+                    target_language=translate_to,
+                )
 
-            translated_messages, batch_info = translator.translate_messages_batch(all_messages=all_messages, translate_from=translate_from, translate_to=translate_to, batch_size=batch_size, timeout_minutes=120)
+            messages_needing_translation = len(messages_to_translate)
+            logging.info(
+                f"Translation cache: {cache_hits} hits, {messages_needing_translation} misses "
+                f"(out of {total_messages} total)"
+            )
+
+            # --- Translate only uncached messages ---
+            batch_info = {}
+            freshly_translated_map: dict[str, str] = {}  # matrix_event_id -> translated_content
+
+            if messages_needing_translation > 0:
+                from utils.llm.batch import BatchTranslator
+                from config import get_settings
+
+                settings = get_settings()
+                translator = BatchTranslator(model=settings.llm.default_model, provider_name=settings.llm.provider)
+
+                # Capture original content before translation (translator replaces content field)
+                original_content_map = {
+                    msg.get("matrix_event_id"): msg.get("content", "")
+                    for msg in messages_to_translate
+                    if msg.get("matrix_event_id")
+                }
+
+                translated_subset, batch_info = translator.translate_messages_batch(
+                    all_messages=messages_to_translate,
+                    translate_from=translate_from,
+                    translate_to=translate_to,
+                    batch_size=batch_size,
+                    timeout_minutes=120,
+                )
+
+                # Build map of freshly translated messages
+                for msg in translated_subset:
+                    event_id = msg.get("matrix_event_id")
+                    if event_id:
+                        freshly_translated_map[event_id] = msg.get("content", "")
+
+                # Store fresh translations in cache
+                await self._store_translations_in_cache(
+                    original_content_map=original_content_map,
+                    translated_map=freshly_translated_map,
+                    target_language=translate_to,
+                    chat_name=chat_name,
+                    data_source_name=data_source_name,
+                )
+
+            # --- Merge: apply translations to all messages ---
+            translated_messages = []
+            for msg in all_messages:
+                result_msg = msg.copy()
+                event_id = msg.get("matrix_event_id")
+
+                if event_id and event_id in cached_translations_map:
+                    result_msg["content"] = cached_translations_map[event_id]
+                elif event_id and event_id in freshly_translated_map:
+                    result_msg["content"] = freshly_translated_map[event_id]
+                # else: message content remains as-is (untranslated fallback)
+
+                translated_messages.append(result_msg)
 
             # Save recovery file
             with open(recovery_file_path, "w") as f:
@@ -423,7 +509,8 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
             translation_stats = {
                 "total_messages": total_messages,
-                "translated_count": batch_info.get("completed_requests", 0),
+                "cache_hits": cache_hits,
+                "translated_count": messages_needing_translation,
                 "failed_count": batch_info.get("failed_requests", 0),
                 "batch_id": batch_info.get("batch_id"),
                 "provider": batch_info.get("provider"),
@@ -432,11 +519,9 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             logging.info(f"Translation complete. Stats: {translation_stats}")
             logging.info(f"Translated messages saved to: {translated_output_path}")
 
-            # Log the metadata but return the messages directly
             translation_metadata = {"translated_messages_count": total_messages, "translated_messages_path": translated_output_path, "translation_stats": translation_stats}
             logging.info(f"Translation metadata: {translation_metadata}")
 
-            # Return the messages directly instead of a dictionary containing them
             return translated_messages
 
         except (TranslationError, LLMResponseError, ValidationError, FileValidationError):
@@ -445,6 +530,141 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             error_message = f"Error translating whatsapp group chat messages: {e}"
             logging.error(error_message)
             raise TranslationError(error_message) from e
+
+    async def _lookup_translation_cache(
+        self,
+        all_messages: list[dict],
+        target_language: str,
+    ) -> tuple[dict[str, str], list[dict], int]:
+        """
+        Look up cached translations for messages, separating cached from uncached.
+
+        Returns:
+            Tuple of (cached_translations_map, messages_needing_translation, cache_hit_count)
+        """
+        from db.connection import get_database
+        from db.repositories.translation_cache import TranslationCacheRepository, compute_content_hash
+
+        try:
+            db = await get_database()
+            cache_repo = TranslationCacheRepository(db)
+
+            # Extract matrix_event_ids from all messages
+            event_ids = [msg.get("matrix_event_id") for msg in all_messages if msg.get("matrix_event_id")]
+
+            if not event_ids:
+                logging.warning("No matrix_event_ids found in messages — skipping translation cache lookup")
+                return {}, all_messages, 0
+
+            cached = await cache_repo.get_cached_translations(
+                matrix_event_ids=event_ids,
+                target_language=target_language,
+            )
+
+            cached_translations_map: dict[str, str] = {}
+            messages_to_translate: list[dict] = []
+            cache_hits = 0
+
+            for msg in all_messages:
+                event_id = msg.get("matrix_event_id")
+                original_content = msg.get("content", "")
+
+                if event_id and event_id in cached:
+                    cached_entry = cached[event_id]
+                    current_hash = compute_content_hash(original_content)
+
+                    if cached_entry.get("content_hash") == current_hash:
+                        # Cache hit — content unchanged, use cached translation
+                        cached_translations_map[event_id] = cached_entry["translated_content"]
+                        cache_hits += 1
+                    else:
+                        # Content hash mismatch — message was edited, needs re-translation
+                        logging.debug(f"Content hash mismatch for {event_id} — message edited, re-translating")
+                        messages_to_translate.append(msg)
+                else:
+                    # Cache miss — needs translation
+                    messages_to_translate.append(msg)
+
+            return cached_translations_map, messages_to_translate, cache_hits
+
+        except Exception as e:
+            logging.warning(f"Translation cache lookup failed (proceeding without cache): {e}")
+            return {}, all_messages, 0
+
+    async def _store_translations_in_cache(
+        self,
+        original_content_map: dict[str, str],
+        translated_map: dict[str, str],
+        target_language: str,
+        chat_name: str,
+        data_source_name: str,
+    ) -> None:
+        """Store freshly translated messages into the translation cache."""
+        from db.connection import get_database
+        from db.repositories.translation_cache import TranslationCacheRepository
+        from custom_types.field_keys import DbFieldKeys
+
+        try:
+            db = await get_database()
+            cache_repo = TranslationCacheRepository(db)
+
+            translations_to_store = []
+            for event_id, translated_content in translated_map.items():
+                original_content = original_content_map.get(event_id, "")
+                translations_to_store.append({
+                    DbFieldKeys.MATRIX_EVENT_ID: event_id,
+                    DbFieldKeys.CONTENT: original_content,
+                    DbFieldKeys.TRANSLATED_CONTENT: translated_content,
+                })
+
+            if translations_to_store:
+                stored = await cache_repo.store_translations(
+                    translations=translations_to_store,
+                    target_language=target_language,
+                    chat_name=chat_name,
+                    data_source_name=data_source_name,
+                )
+                logging.info(f"Stored {stored} translations in cache for chat={chat_name}")
+
+        except Exception as e:
+            logging.warning(f"Failed to store translations in cache (non-fatal): {e}")
+
+    async def _load_persisted_sender_map(
+        self, data_source_name: str, chat_name: str
+    ) -> dict[str, str]:
+        """Load persisted sender map from MongoDB, returning empty dict if not found."""
+        try:
+            from db.connection import get_database
+            from db.repositories.sender_map import SenderMapRepository
+
+            db = await get_database()
+            repo = SenderMapRepository(db)
+            sender_map = await repo.get_sender_map(data_source_name, chat_name)
+            if sender_map:
+                logging.info(f"Loaded persisted sender map: {len(sender_map)} mappings for {chat_name}")
+                return sender_map
+            logging.info(f"No persisted sender map found for {chat_name} — starting fresh")
+            return {}
+        except Exception as e:
+            logging.warning(f"Failed to load persisted sender map (proceeding without): {e}")
+            return {}
+
+    async def _persist_sender_map(
+        self, data_source_name: str, chat_name: str, sender_map: dict[str, str]
+    ) -> None:
+        """Persist sender map to MongoDB for cross-run consistency."""
+        if not sender_map:
+            return
+        try:
+            from db.connection import get_database
+            from db.repositories.sender_map import SenderMapRepository
+
+            db = await get_database()
+            repo = SenderMapRepository(db)
+            await repo.upsert_sender_map(data_source_name, chat_name, sender_map)
+            logging.info(f"Persisted sender map: {len(sender_map)} mappings for {chat_name}")
+        except Exception as e:
+            logging.warning(f"Failed to persist sender map (non-fatal): {e}")
 
     async def _separate_whatsapp_group_message_discussions(self, **kwargs) -> Any:
         try:
@@ -569,6 +789,156 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             logging.error(error_message)
             raise DiscussionSeparationError(error_message) from e
 
+    def _aggregate_poll_responses(self, raw_messages: list[dict[str, Any]]) -> tuple[dict[str, dict[str, int]], set[str], dict[str, int]]:
+        """
+        Pre-scan raw messages to aggregate poll vote responses by parent poll event ID.
+
+        For each sender, only their latest response to a given poll is counted (vote changes).
+
+        Returns:
+            Tuple of (poll_votes, poll_response_event_ids, unique_voter_counts):
+            - poll_votes: {poll_event_id: {answer_id: vote_count}}
+            - poll_response_event_ids: set of event IDs for poll response events (to skip in main parse loop)
+            - unique_voter_counts: {poll_event_id: number_of_unique_voters}
+        """
+        # Track latest response per (poll_event_id, sender) to handle vote changes
+        latest_responses: dict[tuple[str, str], tuple[int, list[str]]] = {}  # (poll_id, sender) -> (timestamp, answer_ids)
+        poll_response_event_ids: set[str] = set()
+
+        for msg in raw_messages:
+            if not isinstance(msg, dict):
+                continue
+            msg_type = msg.get(DecryptionResultKeys.TYPE, "")
+            if msg_type != MatrixEventType.POLL_RESPONSE:
+                continue
+
+            event_id = msg.get(DecryptionResultKeys.EVENT_ID, "")
+            if event_id:
+                poll_response_event_ids.add(event_id)
+
+            sender = msg.get(DecryptionResultKeys.SENDER, "")
+            timestamp = msg.get(DecryptionResultKeys.ORIGIN_SERVER_TS, 0)
+            content = msg.get(DecryptionResultKeys.CONTENT, {})
+
+            relates_to = content.get(MATRIX_KEY_RELATES_TO, {})
+            parent_event_id = relates_to.get(DecryptionResultKeys.EVENT_ID, "")
+            if not parent_event_id:
+                continue
+
+            response_data = content.get(POLL_RESPONSE_CONTENT_KEY, {})
+            selected_answers = response_data.get(PollContentKeys.ANSWERS, [])
+
+            key = (parent_event_id, sender)
+            existing_ts = latest_responses.get(key, (0, []))[0]
+            if timestamp >= existing_ts:
+                latest_responses[key] = (timestamp, selected_answers)
+
+        # Aggregate vote counts and unique voters from latest responses only
+        poll_votes: dict[str, dict[str, int]] = {}
+        poll_voters: dict[str, set[str]] = {}
+        for (poll_id, sender), (_ts, answer_ids) in latest_responses.items():
+            if poll_id not in poll_votes:
+                poll_votes[poll_id] = {}
+                poll_voters[poll_id] = set()
+            if answer_ids:  # Only count as voter if they have active selections
+                poll_voters[poll_id].add(sender)
+            for answer_id in answer_ids:
+                poll_votes[poll_id][answer_id] = poll_votes[poll_id].get(answer_id, 0) + 1
+
+        unique_voter_counts = {poll_id: len(voters) for poll_id, voters in poll_voters.items()}
+
+        return poll_votes, poll_response_event_ids, unique_voter_counts
+
+    def _format_poll_as_text(self, content: dict, vote_counts: dict[str, int] | None = None) -> str:
+        """
+        Format an MSC3381 poll start event as readable text for LLM consumption.
+
+        Args:
+            content: The full message content dict containing org.matrix.msc3381.poll.start
+            vote_counts: Optional dict mapping answer_id -> vote count
+
+        Returns:
+            Formatted text like: [Poll] Question\\n- Option1 (N votes)\\n- Option2 (N votes)\\nTotal votes: X
+        """
+        poll_data = content.get(POLL_START_CONTENT_KEY, {})
+        question_obj = poll_data.get(PollContentKeys.QUESTION, {})
+        question_text = question_obj.get(POLL_TEXT_KEY, "")
+        answers = poll_data.get(PollContentKeys.ANSWERS, [])
+
+        if not question_text:
+            # Fallback: use body but strip the bridge suffix
+            body = content.get(DecryptionResultKeys.BODY, "")
+            question_text = body.replace(POLL_FALLBACK_SUFFIX, "").strip() if body else "Unknown poll"
+
+        lines = [f"[Poll] {question_text}"]
+        total_votes = 0
+
+        for answer in answers:
+            answer_text = answer.get(POLL_TEXT_KEY, "")
+            answer_id = answer.get(PollContentKeys.ANSWER_ID, "")
+            if vote_counts and answer_id in vote_counts:
+                count = vote_counts[answer_id]
+                total_votes += count
+                lines.append(f"- {answer_text} ({count} votes)")
+            else:
+                lines.append(f"- {answer_text}")
+
+        if total_votes > 0:
+            lines.append(f"Total votes: {total_votes}")
+
+        return "\n".join(lines)
+
+    def _extract_poll_struct(self, content: dict, matrix_event_id: str, sender_id: str, timestamp: int, vote_counts: dict[str, int] | None, unique_voter_count: int) -> dict[str, Any] | None:
+        """
+        Extract structured poll data for DB persistence.
+
+        Args:
+            content: The full message content dict containing org.matrix.msc3381.poll.start
+            matrix_event_id: Original Matrix event ID
+            sender_id: Anonymized sender ID
+            timestamp: Unix timestamp in milliseconds
+            vote_counts: Dict mapping answer_id -> vote count (or None)
+            unique_voter_count: Number of unique voters
+
+        Returns:
+            Dict with poll data ready for DB storage, or None if extraction fails
+        """
+        try:
+            poll_data = content.get(POLL_START_CONTENT_KEY, {})
+            question_obj = poll_data.get(PollContentKeys.QUESTION, {})
+            question_text = question_obj.get(POLL_TEXT_KEY, "")
+            answers = poll_data.get(PollContentKeys.ANSWERS, [])
+
+            if not question_text:
+                body = content.get(DecryptionResultKeys.BODY, "")
+                question_text = body.replace(POLL_FALLBACK_SUFFIX, "").strip() if body else ""
+
+            if not question_text:
+                logging.warning(f"Poll {matrix_event_id} has no question text, skipping")
+                return None
+
+            options = []
+            total_votes = 0
+            for answer in answers:
+                answer_id = answer.get(PollContentKeys.ANSWER_ID, "")
+                answer_text = answer.get(POLL_TEXT_KEY, "")
+                count = vote_counts.get(answer_id, 0) if vote_counts else 0
+                total_votes += count
+                options.append({PollDbKeys.OPTION_ID: answer_id, PollDbKeys.OPTION_TEXT: answer_text, PollDbKeys.VOTE_COUNT: count})
+
+            return {
+                "matrix_event_id": matrix_event_id,
+                "sender": sender_id,
+                "timestamp": timestamp,
+                "question": question_text,
+                "options": options,
+                "total_votes": total_votes,
+                "unique_voter_count": unique_voter_count,
+            }
+        except Exception as e:
+            logging.error(f"Failed to extract poll struct from {matrix_event_id}: {e}")
+            return None
+
     def _parse_messages(self, raw_messages: list[dict[str, Any]], existing_sender_map: dict[str, str] = None) -> dict[str, Any]:
         """
         Parse raw WhatsApp messages from Beeper/Matrix into a structured format.
@@ -594,7 +964,13 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                     except (ValueError, IndexError):
                         continue
 
+            # Pre-scan: aggregate poll vote responses and identify poll response event IDs to skip
+            poll_votes, poll_response_event_ids, unique_voter_counts = self._aggregate_poll_responses(raw_messages)
+            if poll_votes:
+                logging.info(f"Found poll votes for {len(poll_votes)} poll(s)")
+
             structured_messages = []
+            extracted_polls = []
 
             for msg in raw_messages:
                 # Skip if not a valid message
@@ -606,6 +982,10 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 msg_id = msg.get(DecryptionResultKeys.EVENT_ID)
                 if not msg_id:
                     logging.warning("Skipping message without event_id")
+                    continue
+
+                # Skip poll response events (votes are aggregated into the parent poll message)
+                if msg_id in poll_response_event_ids:
                     continue
 
                 # Extract timestamp
@@ -626,9 +1006,18 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                     sender_map[sender] = f"user_{max_user_num}"
                 sender_id = sender_map[sender]
 
-                # Extract content body
+                # Extract content body, with special handling for poll messages
                 content = msg.get("content", {})
-                body = content.get("body", "")
+                if POLL_START_CONTENT_KEY in content:
+                    vote_counts = poll_votes.get(msg_id)
+                    body = self._format_poll_as_text(content, vote_counts)
+
+                    # Extract structured poll data for DB persistence
+                    poll_struct = self._extract_poll_struct(content, msg_id, sender_id, timestamp, vote_counts, unique_voter_counts.get(msg_id, 0))
+                    if poll_struct:
+                        extracted_polls.append(poll_struct)
+                else:
+                    body = content.get("body", "")
 
                 # Sanitize malformed Unicode escape sequences
                 body = self._sanitize_malformed_unicode_escapes(body)
@@ -645,7 +1034,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
                 structured_messages.append(structured_msg)
 
-            return {DiscussionKeys.MESSAGES: structured_messages, "sender_map": sender_map}
+            return {DiscussionKeys.MESSAGES: structured_messages, "sender_map": sender_map, "polls": extracted_polls}
 
         except Exception as e:
             error_message = f"Error parsing messages: {e}"

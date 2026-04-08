@@ -95,7 +95,7 @@ class ExtractionCacheRepository(BaseRepository):
             # Count encrypted messages
             encrypted_count = sum(1 for msg in messages if msg.get("encrypted", False))
 
-            document = {"cache_key": cache_key, DbFieldKeys.CHAT_NAME: chat_name, DbFieldKeys.ROOM_ID: room_id, "start_date": start_date, "end_date": end_date, "messages": messages, "message_count": len(messages), "encrypted_count": encrypted_count, "extraction_metadata": extraction_metadata or {}, "created_at": now, "expires_at": now + timedelta(days=ttl_days)}
+            document = {"cache_key": cache_key, DbFieldKeys.CHAT_NAME: chat_name, "chat_name_normalized": self._normalize_chat_name(chat_name), DbFieldKeys.ROOM_ID: room_id, "start_date": start_date, "end_date": end_date, "messages": messages, "message_count": len(messages), "encrypted_count": encrypted_count, "extraction_metadata": extraction_metadata or {}, "created_at": now, "expires_at": now + timedelta(days=ttl_days)}
 
             # Upsert to handle re-caching
             await self.update_one({"cache_key": cache_key}, {"$set": document}, upsert=True)
@@ -183,6 +183,57 @@ class ExtractionCacheRepository(BaseRepository):
             logger.error(f"Failed to get cache stats: {e}")
             raise
 
+    async def get_overlapping_extractions(
+        self, chat_name: str, start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
+        """
+        Find cached extractions whose date range overlaps with the requested range.
+
+        Used for incremental extraction: when extending a date range (e.g., Mar 19-Apr 4
+        to Mar 19-Apr 6), find existing cached extractions that cover part of the range
+        and only extract the delta from the API.
+
+        Args:
+            chat_name: Name of the chat
+            start_date: Requested start date (YYYY-MM-DD)
+            end_date: Requested end date (YYYY-MM-DD)
+
+        Returns:
+            List of cached extraction documents with overlapping date ranges,
+            sorted by start_date ascending.
+        """
+        try:
+            normalized_name = self._normalize_chat_name(chat_name)
+
+            # Overlap condition: cached.start <= requested.end AND cached.end >= requested.start
+            docs = await self.find_many(
+                query={
+                    "chat_name_normalized": normalized_name,
+                    "start_date": {"$lte": end_date},
+                    "end_date": {"$gte": start_date},
+                },
+                sort=[("start_date", 1)],
+            )
+
+            if docs:
+                logger.info(
+                    f"Found {len(docs)} overlapping extraction cache entries for "
+                    f"{chat_name} [{start_date} to {end_date}]"
+                )
+            else:
+                logger.debug(f"No overlapping extraction cache entries for {chat_name}")
+
+            return docs
+
+        except Exception as e:
+            logger.error(f"Failed to query overlapping extractions for {chat_name}: {e}")
+            raise
+
+    def _normalize_chat_name(self, chat_name: str) -> str:
+        """Normalize chat name to lowercase with underscores for consistent lookups."""
+        import re
+        return re.sub(r"[^a-z0-9]+", "_", chat_name.lower()).strip("_")
+
     def generate_cache_key(self, chat_name: str, start_date: str, end_date: str) -> str:
         """
         Generate a cache key for a chat and date range.
@@ -195,9 +246,5 @@ class ExtractionCacheRepository(BaseRepository):
         Returns:
             Cache key string
         """
-        import re
-
-        # Normalize chat name to lowercase with underscores
-        normalized_name = re.sub(r"[^a-z0-9]+", "_", chat_name.lower()).strip("_")
-
+        normalized_name = self._normalize_chat_name(chat_name)
         return f"beeper_{normalized_name}_{start_date}_{end_date}"

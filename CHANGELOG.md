@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.1
+## v1.1.1
 - Updated README: image extraction pipeline documentation, reply correlation section, reduced hardcoded model references.
 - Updated pipeline animation and static diagram to include Extract Images and Associate Images stages.
 

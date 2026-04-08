@@ -199,6 +199,39 @@ class MatrixEncryptedFileKeys:
     FILENAME = "filename"
 
 
+class PollContentKeys:
+    """Keys for MSC3381 poll event content structure.
+
+    Used to access fields inside org.matrix.msc3381.poll.start content.
+    """
+
+    QUESTION = "question"
+    ANSWERS = "answers"
+    ANSWER_ID = "id"
+    KIND = "kind"
+    MAX_SELECTIONS = "max_selections"
+
+
+class PollDbKeys:
+    """Keys for poll documents in MongoDB polls collection."""
+
+    POLL_ID = "poll_id"
+    MATRIX_EVENT_ID = "matrix_event_id"
+    RUN_ID = "run_id"
+    CHAT_NAME = "chat_name"
+    DATA_SOURCE_NAME = "data_source_name"
+    SENDER = "sender"
+    TIMESTAMP = "timestamp"
+    QUESTION = "question"
+    OPTIONS = "options"
+    OPTION_ID = "option_id"
+    OPTION_TEXT = "text"
+    VOTE_COUNT = "vote_count"
+    TOTAL_VOTES = "total_votes"
+    UNIQUE_VOTER_COUNT = "unique_voter_count"
+    CREATED_AT = "created_at"
+
+
 class ImageKeys:
     """Keys for image metadata dictionaries."""
 
@@ -263,6 +296,10 @@ class DbFieldKeys:
     QUALITY_SCORES = "quality_scores"
     STATS = "stats"
     ROOM_ID = "room_id"
+    MATRIX_EVENT_ID = "matrix_event_id"
+    CONTENT_HASH = "content_hash"
+    TRANSLATED_AT = "translated_at"
+    EXPIRES_AT = "expires_at"
     VERSIONS = "versions"
     JSON_CONTENT = "json_content"
     HTML_CONTENT = "html_content"

@@ -152,10 +152,38 @@ INDEXES = {
         {"keys": [("cache_key", ASCENDING)], "unique": True},
         # Query by chat + date range (alternative lookup)
         {"keys": [("chat_name", ASCENDING), ("start_date", ASCENDING), ("end_date", ASCENDING)]},
+        # Overlap-aware cache lookup (normalized name + date range for range intersection queries)
+        {"keys": [("chat_name_normalized", ASCENDING), ("start_date", ASCENDING), ("end_date", ASCENDING)]},
         # TTL index for automatic expiration
         {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
         # Query by creation date (for monitoring)
         {"keys": [("created_at", DESCENDING)]},
+    ],
+    "polls": [
+        # Primary lookup
+        {"keys": [("poll_id", ASCENDING)], "unique": True},
+        # CRITICAL: Query by run_id (get all polls for a run)
+        {"keys": [("run_id", ASCENDING)]},
+        # Query by run + chat
+        {"keys": [("run_id", ASCENDING), ("chat_name", ASCENDING)]},
+        # Query by chat + time range (for dashboard chronological view)
+        {"keys": [("chat_name", ASCENDING), ("timestamp", DESCENDING)]},
+        # Query by data source + time range (cross-chat dashboard)
+        {"keys": [("data_source_name", ASCENDING), ("timestamp", DESCENDING)]},
+    ],
+    "translation_cache": [
+        # Primary lookup: unique per message + target language
+        {"keys": [("matrix_event_id", ASCENDING), ("target_language", ASCENDING)], "unique": True},
+        # TTL index for automatic expiration
+        {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
+        # Query by chat name (for stats/invalidation)
+        {"keys": [("chat_name", ASCENDING)]},
+        # Query by chat + language (for targeted invalidation)
+        {"keys": [("chat_name", ASCENDING), ("target_language", ASCENDING)]},
+    ],
+    "sender_maps": [
+        # Primary lookup: unique per data source + chat
+        {"keys": [("data_source_name", ASCENDING), ("chat_name", ASCENDING)], "unique": True},
     ],
     "room_id_cache": [
         # Primary lookup - UNIQUE constraint prevents duplicates
