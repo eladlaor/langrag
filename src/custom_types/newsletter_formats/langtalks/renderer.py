@@ -23,15 +23,9 @@ from constants import (
     HTML_LANG_ENGLISH,
     LANGTALKS_WHATSAPP_JOIN_URL,
     LANGTALKS_NEWSLETTER_SIGNUP_URL,
-    LANGTALKS_FOOTER_THANKS,
-    LANGTALKS_FOOTER_DESCRIPTION,
-    LANGTALKS_FOOTER_SHARE_CTA,
-    LANGTALKS_FOOTER_WHATSAPP_BUTTON,
-    LANGTALKS_FOOTER_SIGNUP_BUTTON,
-    LANGTALKS_WORTH_MENTIONING_HEADING,
-    LANGTALKS_ATTRIBUTION_PREFIX,
     MS_TO_SECONDS_MULTIPLIER,
     DISPLAY_TIMEZONE,
+    get_langtalks_i18n,
 )
 from custom_types.field_keys import NewsletterStructureKeys
 
@@ -41,17 +35,19 @@ logger = logging.getLogger(__name__)
 class LangTalksRenderer:
     """Renders LangTalks newsletter content to Markdown and HTML formats."""
 
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """
         Generate Markdown newsletter from JSON response.
 
         Args:
             response: Newsletter JSON with primary_discussion, secondary_discussions, worth_mentioning
+            desired_language: Target language for content strings (default: DEFAULT_HTML_LANGUAGE)
 
         Returns:
             Markdown-formatted newsletter string
         """
         try:
+            i18n = get_langtalks_i18n(desired_language)
             markdown = "# LangTalks Newsletter\n\n"
 
             markdown += "## Primary Discussion\n\n"
@@ -60,11 +56,11 @@ class LangTalksRenderer:
             if primary.get(NewsletterStructureKeys.IS_MERGED, False) and primary.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
                 group_names = [s.get("group", "") for s in primary[NewsletterStructureKeys.SOURCE_DISCUSSIONS] if s.get("group")]
                 if group_names:
-                    markdown += f"📍 נדון ב-{len(group_names)} קבוצות: {', '.join(group_names)}\n\n"
+                    markdown += i18n["merged_discussed_in"].format(count=len(group_names), groups=", ".join(group_names)) + "\n\n"
             for i, bullet in enumerate(primary[NewsletterStructureKeys.BULLET_POINTS], 1):
                 markdown += f"{i}. **{bullet[NewsletterStructureKeys.LABEL]}**: {bullet[NewsletterStructureKeys.CONTENT]}\n\n"
 
-            markdown += self._render_markdown_attribution(primary)
+            markdown += self._render_markdown_attribution(primary, desired_language)
 
             markdown += "\n---\n\n## Secondary Discussions\n\n"
             for discussion in response[NewsletterStructureKeys.SECONDARY_DISCUSSIONS]:
@@ -72,11 +68,11 @@ class LangTalksRenderer:
                 if discussion.get(NewsletterStructureKeys.IS_MERGED, False) and discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
                     group_names = [s.get("group", "") for s in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS] if s.get("group")]
                     if group_names:
-                        markdown += f"📍 נדון ב-{len(group_names)} קבוצות: {', '.join(group_names)}\n\n"
+                        markdown += i18n["merged_discussed_in"].format(count=len(group_names), groups=", ".join(group_names)) + "\n\n"
                 for i, bullet in enumerate(discussion[NewsletterStructureKeys.BULLET_POINTS], 1):
                     markdown += f"{i}. **{bullet[NewsletterStructureKeys.LABEL]}**: {bullet[NewsletterStructureKeys.CONTENT]}\n\n"
 
-                markdown += self._render_markdown_attribution(discussion)
+                markdown += self._render_markdown_attribution(discussion, desired_language)
                 markdown += "\n---\n\n"
 
             markdown += "## Worth Mentioning\n\n"
@@ -90,23 +86,25 @@ class LangTalksRenderer:
             logger.error(error_message)
             raise Exception(error_message) from e
 
-    def _render_markdown_attribution(self, discussion: dict) -> str:
+    def _render_markdown_attribution(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Render markdown attribution footer for a discussion."""
+        i18n = get_langtalks_i18n(desired_language)
+
         if discussion.get(NewsletterStructureKeys.IS_MERGED, False) and discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
-            result = "\n📅 **נדון בקבוצות הבאות:**\n"
+            result = f"\n{i18n['merged_attribution_header']}\n"
             for source in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS]:
                 timestamp = source.get(NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP, 0)
                 if isinstance(timestamp, (int, float)) and timestamp > 0:
                     time_str, date_str = self._format_timestamp(timestamp)
                     group_name = source.get("group", "Unknown Group")
-                    result += f"- {group_name} (התחיל ב-{date_str}, {time_str})\n"
+                    result += f"- {group_name} ({i18n['merged_started_at'].format(date=date_str, time=time_str)})\n"
             return result
         elif NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in discussion and discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
             timestamp = discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
             if isinstance(timestamp, (int, float)):
                 time_str, date_str = self._format_timestamp(timestamp)
                 chat_name = discussion.get(NewsletterStructureKeys.CHAT_NAME, LANGTALKS_CHAT_NAME_DEFAULT)
-                return f"\n{LANGTALKS_ATTRIBUTION_PREFIX} {chat_name} | {time_str} | {date_str}\n"
+                return f"\n{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}\n"
         return ""
 
     def _markdown_links_to_html(self, text: str) -> str:
@@ -143,8 +141,10 @@ class LangTalksRenderer:
             return chat_name[len(LANGTALKS_CHAT_PREFIX) :]
         return chat_name
 
-    def _render_discussion_attribution_html(self, discussion: dict) -> str:
+    def _render_discussion_attribution_html(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Render the attribution line for a single discussion."""
+        i18n = get_langtalks_i18n(desired_language)
+
         if discussion.get(NewsletterStructureKeys.IS_MERGED, False) and discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
             lines = []
             for source in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS]:
@@ -152,7 +152,7 @@ class LangTalksRenderer:
                 if isinstance(timestamp, (int, float)) and timestamp > 0:
                     time_str, date_str = self._format_timestamp(timestamp)
                     group_name = source.get("group", "Unknown Group")
-                    lines.append(f"<p>{LANGTALKS_ATTRIBUTION_PREFIX} {group_name} | {time_str} | {date_str}</p>")
+                    lines.append(f"<p>{i18n['attribution_prefix']} {group_name} | {time_str} | {date_str}</p>")
             return "\n".join(lines)
 
         if NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in discussion and discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
@@ -160,7 +160,7 @@ class LangTalksRenderer:
             if isinstance(timestamp, (int, float)):
                 time_str, date_str = self._format_timestamp(timestamp)
                 chat_name = self._strip_chat_prefix(discussion.get(NewsletterStructureKeys.CHAT_NAME, LANGTALKS_CHAT_NAME_DEFAULT))
-                return f"<p>{LANGTALKS_ATTRIBUTION_PREFIX} {chat_name} | {time_str} | {date_str}</p>"
+                return f"<p>{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}</p>"
 
         return ""
 
@@ -200,6 +200,7 @@ class LangTalksRenderer:
             Clean <article> HTML string
         """
         try:
+            i18n = get_langtalks_i18n(desired_language)
             parts = []
             parts.append("<article>")
             parts.append("<div><hr></div>")
@@ -210,7 +211,7 @@ class LangTalksRenderer:
                 parts.append(f"\n<h2><strong>{self._process_inline_formatting(primary.get(NewsletterStructureKeys.TITLE, ''))}</strong></h2>")
                 parts.append("")
                 parts.append(self._render_bullet_points_html(primary.get(NewsletterStructureKeys.BULLET_POINTS, [])))
-                attribution = self._render_discussion_attribution_html(primary)
+                attribution = self._render_discussion_attribution_html(primary, desired_language)
                 if attribution:
                     parts.append("")
                     parts.append(attribution)
@@ -222,7 +223,7 @@ class LangTalksRenderer:
                 parts.append(f"\n<h3><strong>{self._process_inline_formatting(discussion.get(NewsletterStructureKeys.TITLE, ''))}</strong></h3>")
                 parts.append("")
                 parts.append(self._render_bullet_points_html(discussion.get(NewsletterStructureKeys.BULLET_POINTS, [])))
-                attribution = self._render_discussion_attribution_html(discussion)
+                attribution = self._render_discussion_attribution_html(discussion, desired_language)
                 if attribution:
                     parts.append("")
                     parts.append(attribution)
@@ -232,7 +233,7 @@ class LangTalksRenderer:
             # Worth mentioning section
             worth_mentioning = response.get(NewsletterStructureKeys.WORTH_MENTIONING, [])
             if worth_mentioning:
-                parts.append(f"\n<h2>{LANGTALKS_WORTH_MENTIONING_HEADING}</h2>")
+                parts.append(f"\n<h2>{i18n['worth_mentioning_heading']}</h2>")
                 parts.append("")
                 items = [self._parse_worth_mentioning_item(point) for point in worth_mentioning]
                 parts.append("<ul>")
@@ -242,7 +243,7 @@ class LangTalksRenderer:
                 parts.append("<div><hr></div>")
 
             # Footer
-            parts.append(self._render_footer_html())
+            parts.append(self._render_footer_html(desired_language))
             parts.append("")
             parts.append("</article>")
 
@@ -497,6 +498,7 @@ class LangTalksRenderer:
         Each discussion and the worth-mentioning block gets wrapped in a
         contenteditable section-wrapper div with a hover-reveal copy button.
         """
+        i18n = get_langtalks_i18n(desired_language)
         parts = []
         parts.append("<article>")
         parts.append("<div><hr></div>")
@@ -506,7 +508,7 @@ class LangTalksRenderer:
         # Primary discussion
         primary = response.get(NewsletterStructureKeys.PRIMARY_DISCUSSION)
         if primary:
-            section_content = self._render_discussion_section_html(primary, heading_tag="h2")
+            section_content = self._render_discussion_section_html(primary, heading_tag="h2", desired_language=desired_language)
             parts.append(f'<div class="section-wrapper" data-section-id="section-{section_idx}" contenteditable="true">')
             parts.append(f'<button class="section-copy-btn" onclick="copySectionHtml(\'section-{section_idx}\')">Copy</button>')
             parts.append(section_content)
@@ -516,7 +518,7 @@ class LangTalksRenderer:
 
         # Secondary discussions
         for discussion in response.get(NewsletterStructureKeys.SECONDARY_DISCUSSIONS, []):
-            section_content = self._render_discussion_section_html(discussion, heading_tag="h3")
+            section_content = self._render_discussion_section_html(discussion, heading_tag="h3", desired_language=desired_language)
             parts.append(f'<div class="section-wrapper" data-section-id="section-{section_idx}" contenteditable="true">')
             parts.append(f'<button class="section-copy-btn" onclick="copySectionHtml(\'section-{section_idx}\')">Copy</button>')
             parts.append(section_content)
@@ -527,7 +529,7 @@ class LangTalksRenderer:
         # Worth mentioning
         worth_mentioning = response.get(NewsletterStructureKeys.WORTH_MENTIONING, [])
         if worth_mentioning:
-            wm_content = self._render_worth_mentioning_html(worth_mentioning)
+            wm_content = self._render_worth_mentioning_html(worth_mentioning, desired_language)
             parts.append(f'<div class="section-wrapper" data-section-id="section-{section_idx}" contenteditable="true">')
             parts.append(f'<button class="section-copy-btn" onclick="copySectionHtml(\'section-{section_idx}\')">Copy</button>')
             parts.append(wm_content)
@@ -536,28 +538,29 @@ class LangTalksRenderer:
             section_idx += 1
 
         # Footer (not editable)
-        parts.append(self._render_footer_html())
+        parts.append(self._render_footer_html(desired_language))
 
         parts.append("</article>")
         return "\n".join(parts)
 
-    def _render_discussion_section_html(self, discussion: dict, heading_tag: str = "h3") -> str:
+    def _render_discussion_section_html(self, discussion: dict, heading_tag: str = "h3", desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Render a single discussion's content (heading + bullets + attribution)."""
         parts = []
         title = self._process_inline_formatting(discussion.get(NewsletterStructureKeys.TITLE, ""))
         parts.append(f"<{heading_tag}><strong>{title}</strong></{heading_tag}>")
         parts.append("")
         parts.append(self._render_bullet_points_html(discussion.get(NewsletterStructureKeys.BULLET_POINTS, [])))
-        attribution = self._render_discussion_attribution_html(discussion)
+        attribution = self._render_discussion_attribution_html(discussion, desired_language)
         if attribution:
             parts.append("")
             parts.append(attribution)
         return "\n".join(parts)
 
-    def _render_worth_mentioning_html(self, worth_mentioning: list[str]) -> str:
+    def _render_worth_mentioning_html(self, worth_mentioning: list[str], desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Render the worth mentioning section content."""
+        i18n = get_langtalks_i18n(desired_language)
         parts = []
-        parts.append(f"<h2>{LANGTALKS_WORTH_MENTIONING_HEADING}</h2>")
+        parts.append(f"<h2>{i18n['worth_mentioning_heading']}</h2>")
         parts.append("")
         parts.append("<ul>")
         for point in worth_mentioning:
@@ -565,18 +568,19 @@ class LangTalksRenderer:
         parts.append("</ul>")
         return "\n".join(parts)
 
-    def _render_footer_html(self) -> str:
+    def _render_footer_html(self, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Render the static newsletter footer with CTA buttons."""
+        i18n = get_langtalks_i18n(desired_language)
         return "\n".join(
             [
-                f"\n<h1><strong>{LANGTALKS_FOOTER_THANKS}</strong></h1>",
+                f"\n<h1><strong>{i18n['footer_thanks']}</strong></h1>",
                 "",
-                f"<h4><strong>{LANGTALKS_FOOTER_DESCRIPTION}</strong></h4>",
+                f"<h4><strong>{i18n['footer_description']}</strong></h4>",
                 "",
-                f"<h4><strong>{LANGTALKS_FOOTER_SHARE_CTA}</strong></h4>",
+                f"<h4><strong>{i18n['footer_share_cta']}</strong></h4>",
                 "",
-                f'<p class="button-wrapper"><a class="button primary" href="{LANGTALKS_WHATSAPP_JOIN_URL}"><span>{LANGTALKS_FOOTER_WHATSAPP_BUTTON}</span></a></p>',
+                f'<p class="button-wrapper"><a class="button primary" href="{LANGTALKS_WHATSAPP_JOIN_URL}"><span>{i18n["footer_whatsapp_button"]}</span></a></p>',
                 "",
-                f'<p class="button-wrapper"><a class="button primary" href="{LANGTALKS_NEWSLETTER_SIGNUP_URL}"><span>{LANGTALKS_FOOTER_SIGNUP_BUTTON}</span></a></p>',
+                f'<p class="button-wrapper"><a class="button primary" href="{LANGTALKS_NEWSLETTER_SIGNUP_URL}"><span>{i18n["footer_signup_button"]}</span></a></p>',
             ]
         )

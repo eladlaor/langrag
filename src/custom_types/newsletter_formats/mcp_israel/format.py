@@ -120,7 +120,7 @@ class McpIsraelFormat(NewsletterFormatBase):
 
         return messages
 
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Convert LLM response to markdown format."""
         return self._renderer.render_markdown(response)
 

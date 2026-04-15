@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from custom_types.newsletter_formats.base import NewsletterFormatBase
 from custom_types.newsletter_formats.image_context import build_image_context_text
 from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys, LlmInputKeys
-from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole, SummaryFormats, LANGTALKS_DISPLAY_NAME
+from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, HEBREW_LANGUAGE_CODES, MessageRole, SummaryFormats, LANGTALKS_DISPLAY_NAME
 from .schema import LlmResponseLangTalksNewsletterContent
 from .prompt import (
     LANGTALKS_NEWSLETTER_PROMPT,
@@ -46,13 +46,13 @@ logger = logging.getLogger(__name__)
 
 class LangTalksFormat(NewsletterFormatBase):
     """
-    LangTalks newsletter format for Hebrew GenAI engineering communities.
+    LangTalks newsletter format for GenAI engineering communities.
 
     Features:
-    - Hebrew content with English technical terms
+    - Multilingual output (controlled by desired_language parameter)
     - Primary + secondary discussion structure
     - Worth mentioning section for brief insights
-    - RTL HTML rendering with professional styling
+    - RTL/LTR HTML rendering with professional styling
 
     Capabilities:
     - supports_hitl: True - Supports human selection of discussions
@@ -75,7 +75,7 @@ class LangTalksFormat(NewsletterFormatBase):
         """Return the Pydantic model for LLM response."""
         return LlmResponseLangTalksNewsletterContent
 
-    def get_system_prompt(self, brief_mention_items: list | None = None, non_featured_discussions: list | None = None, featured_discussions: list | None = None, **kwargs) -> str:
+    def get_system_prompt(self, brief_mention_items: list | None = None, non_featured_discussions: list | None = None, featured_discussions: list | None = None, desired_language: str = DEFAULT_LANGUAGE, **kwargs) -> str:
         """
         Build system prompt with worth_mentioning guidance.
 
@@ -88,6 +88,7 @@ class LangTalksFormat(NewsletterFormatBase):
             brief_mention_items: Optional list of candidate items for worth_mentioning
             non_featured_discussions: Optional list of non-featured discussions as fallback context
             featured_discussions: Optional list of featured discussion dicts (primary + secondary) for exclusion list
+            desired_language: Target language for newsletter output (default: DEFAULT_LANGUAGE)
 
         Returns:
             Complete system prompt string
@@ -99,17 +100,19 @@ class LangTalksFormat(NewsletterFormatBase):
                 num_candidates=len(brief_mention_items),
                 brief_mention_items=json.dumps(brief_mention_items, indent=2, ensure_ascii=False),
                 featured_topics_exclusion=featured_topics_exclusion,
+                desired_language=desired_language,
             )
         elif non_featured_discussions:
             worth_mentioning_guidance = WORTH_MENTIONING_FROM_RAW_DISCUSSIONS.format(
                 num_discussions=len(non_featured_discussions),
                 non_featured_discussions=json.dumps(non_featured_discussions, indent=2, ensure_ascii=False),
                 featured_topics_exclusion=featured_topics_exclusion,
+                desired_language=desired_language,
             )
         else:
-            worth_mentioning_guidance = WORTH_MENTIONING_WITHOUT_CANDIDATES
+            worth_mentioning_guidance = WORTH_MENTIONING_WITHOUT_CANDIDATES.format(desired_language=desired_language)
 
-        return LANGTALKS_NEWSLETTER_PROMPT.format(worth_mentioning_guidance=worth_mentioning_guidance)
+        return LANGTALKS_NEWSLETTER_PROMPT.format(worth_mentioning_guidance=worth_mentioning_guidance, desired_language=desired_language)
 
     @staticmethod
     def _build_featured_topics_exclusion(featured_discussions: list | None) -> str:
@@ -148,12 +151,16 @@ class LangTalksFormat(NewsletterFormatBase):
         Returns:
             List of message dictionaries ready for OpenAI API
         """
-        messages = [{"role": MessageRole.SYSTEM, "content": self.get_system_prompt(brief_mention_items, non_featured_discussions=non_featured_discussions, featured_discussions=discussions)}]
+        messages = [{"role": MessageRole.SYSTEM, "content": self.get_system_prompt(brief_mention_items, non_featured_discussions=non_featured_discussions, featured_discussions=discussions, desired_language=desired_language)}]
 
         # Add examples as assistant messages (few-shot prompting)
-        # Note: Examples are in Hebrew but we'll override with language instruction
+        # When generating in a non-Hebrew language, frame examples as format-only references
         for i, example in enumerate(self.get_examples()):
-            messages.append({"role": MessageRole.ASSISTANT, "content": f"Example {i+1}:\n\n{example}"})
+            if desired_language.lower() not in HEBREW_LANGUAGE_CODES:
+                example_content = f"[FORMAT EXAMPLE {i+1} — demonstrates structure only. Ignore the Hebrew language; generate your output in {desired_language}.]\n\n{example}"
+            else:
+                example_content = f"Example {i+1}:\n\n{example}"
+            messages.append({"role": MessageRole.ASSISTANT, "content": example_content})
 
         # Add user message with discussions to summarize
         # Include explicit language instruction
@@ -172,9 +179,9 @@ class LangTalksFormat(NewsletterFormatBase):
 
         return messages
 
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Convert LLM response to markdown format."""
-        return self._renderer.render_markdown(response)
+        return self._renderer.render_markdown(response, desired_language=desired_language)
 
     def render_html(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """
