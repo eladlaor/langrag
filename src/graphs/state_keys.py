@@ -304,6 +304,31 @@ class LinkEnricherStateKeys:
     NUM_LINKS_INSERTED = "num_links_inserted"
 
 
+class RAGConversationStateKeys:
+    """Keys for RAGConversationState TypedDict (RAG conversation graph)."""
+
+    # === Input Fields (Required) ===
+    SESSION_ID = "session_id"
+    QUERY = "query"
+    CONTENT_SOURCES = "content_sources"
+    CONVERSATION_HISTORY = "conversation_history"
+
+    # === Retrieval Fields ===
+    RETRIEVED_CHUNKS = "retrieved_chunks"
+    RERANKED_CHUNKS = "reranked_chunks"
+    CONTEXT = "context"
+
+    # === Generation Fields ===
+    ANSWER = "answer"
+    CITATIONS = "citations"
+
+    # === Evaluation Fields ===
+    EVALUATION_ID = "evaluation_id"
+
+    # === SSE Streaming ===
+    PROGRESS_QUEUE = "progress_queue"
+
+
 # ============================================================================
 # CONVENIENCE ALIASES
 # ============================================================================
@@ -318,3 +343,6 @@ OrchestratorKeys = ParallelOrchestratorStateKeys
 # Subgraph states
 RankerKeys = DiscussionRankerStateKeys
 EnricherKeys = LinkEnricherStateKeys
+
+# RAG conversation
+RAGKeys = RAGConversationStateKeys

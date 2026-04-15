@@ -2,6 +2,18 @@
  * TypeScript type definitions matching FastAPI Pydantic models
  */
 
+// RAG types
+export type {
+  RAGSession,
+  RAGCitation,
+  RAGMessage,
+  RAGSessionDetail,
+  RAGChatRequest,
+  RAGSourceStats,
+  RAGEvaluation,
+  RAGChatState,
+} from "./rag";
+
 // Request types
 export interface PeriodicNewsletterRequest {
   start_date: string; // YYYY-MM-DD format

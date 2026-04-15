@@ -222,6 +222,15 @@ ROUTE_MONGODB_RUN_DIAGNOSTICS = "/mongodb/runs/{run_id}/diagnostics"
 ROUTE_MONGODB_RUN_POLLS = "/mongodb/runs/{run_id}/polls"
 ROUTE_MONGODB_STATS = "/mongodb/stats"
 
+# RAG Routes (applied after /api prefix)
+ROUTE_RAG_CHAT_STREAM = "/rag/chat/stream"
+ROUTE_RAG_SESSIONS = "/rag/sessions"
+ROUTE_RAG_SESSION_BY_ID = "/rag/sessions/{session_id}"
+ROUTE_RAG_INGEST_PODCASTS = "/rag/ingest/podcasts"
+ROUTE_RAG_INGEST_PODCASTS_SCAN = "/rag/ingest/podcasts/scan"
+ROUTE_RAG_SOURCES_STATS = "/rag/sources/stats"
+ROUTE_RAG_EVALUATIONS = "/rag/evaluations/{session_id}"
+
 # Metrics Routes (no prefix)
 ROUTE_METRICS = "/metrics"
 
@@ -266,6 +275,12 @@ COLLECTION_IMAGES = "images"
 COLLECTION_TRANSLATION_CACHE = "translation_cache"
 COLLECTION_SENDER_MAPS = "sender_maps"
 COLLECTION_POLLS = "polls"
+COLLECTION_RAG_CHUNKS = "rag_chunks"
+COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
+COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
+
+# RAG Vector Search Index Name (must be created manually in MongoDB Atlas / mongot)
+RAG_VECTOR_INDEX_NAME = "rag_chunk_embeddings"
 
 # Default TTL for translation cache entries (days)
 DEFAULT_TRANSLATION_CACHE_TTL_DAYS = 30
@@ -373,6 +388,13 @@ DIR_NAME_TRANSLATED = "translated"
 DIR_NAME_SEPARATE_DISCUSSIONS = "separate_discussions"
 DIR_NAME_DISCUSSIONS_RANKING = "discussions_ranking"
 DIR_NAME_IMAGES = "images"
+DIR_NAME_PODCASTS = "podcasts"
+
+# RAG citation snippet max length
+RAG_CITATION_SNIPPET_MAX_LENGTH = 200
+
+# RAG vector search score field (added by $vectorSearch $meta)
+RAG_SEARCH_SCORE_FIELD = "search_score"
 
 
 # ============================================================================
@@ -491,6 +513,11 @@ class NodeNames:
         SEARCH_WEB_FOR_TOPICS = "search_web_for_topics"
         AGGREGATE_LINKS = "aggregate_links"
         INSERT_LINKS_INTO_CONTENT = "insert_links_into_content"
+
+    class RAGConversation(StrEnum):
+        RETRIEVE = "retrieve"
+        GENERATE = "generate"
+        EVALUATE = "evaluate"
 
 
 class GenericEdgeResolutions(StrEnum):
@@ -895,6 +922,54 @@ class SearchMethod(StrEnum):
 
     VECTOR = "vector_search"
     FULL_TEXT = "text_search"
+
+
+# ============================================================================
+# RAG (Retrieval-Augmented Generation) CONSTANTS
+# ============================================================================
+
+
+class ContentSourceType(StrEnum):
+    """Content source types for RAG ingestion."""
+
+    PODCAST = "podcast"
+    NEWSLETTER = "newsletter"
+    CHAT_MESSAGE = "chat_message"
+
+
+class RAGEventType(StrEnum):
+    """SSE event types for RAG chat streaming."""
+
+    TOKEN = "token"
+    CITATION = "citation"
+    DONE = "done"
+    ERROR = "error"
+    EVALUATION_SCORE = "evaluation_score"
+
+
+class EvaluationMetric(StrEnum):
+    """DeepEval metric types for RAG evaluation."""
+
+    FAITHFULNESS = "faithfulness"
+    ANSWER_RELEVANCY = "answer_relevancy"
+    CONTEXTUAL_RELEVANCY = "contextual_relevancy"
+    HALLUCINATION = "hallucination"
+
+
+class EvaluationStatus(StrEnum):
+    """Status values for RAG evaluation runs."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class TranscriptionProvider(StrEnum):
+    """Transcription provider types for RAG audio processing."""
+
+    OPENAI = "openai"
+    LOCAL = "local"
 
 
 class RunType(StrEnum):

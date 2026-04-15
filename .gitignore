@@ -276,3 +276,11 @@ examples/
 
 logs
 
+# Podcast audio files (large binaries - keep .gitkeep only)
+data/podcasts/*.mp3
+data/podcasts/*.wav
+data/podcasts/*.m4a
+data/podcasts/*.ogg
+data/podcasts/*.flac
+data/podcasts/*.webm
+

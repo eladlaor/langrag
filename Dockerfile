@@ -52,7 +52,7 @@ COPY src/ ./src/
 COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/examples /app/logs /app/output /app/secrets
+RUN mkdir -p /app/examples /app/logs /app/output /app/secrets /app/data/podcasts
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf

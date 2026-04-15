@@ -296,3 +296,58 @@ class Phase2GenerationResponse(BaseModel):
 
     # Link metadata
     links_metadata_path: str | None = Field(None, description="Path to aggregated links metadata JSON")
+
+
+# ============= RAG Conversation Models =============
+
+
+class RAGChatRequest(BaseModel):
+    """Request model for RAG streaming chat."""
+
+    session_id: str | None = Field(None, description="Existing session ID (creates new if None)")
+    query: str = Field(..., min_length=1, description="User question")
+    content_sources: list[str] = Field(default=["podcast"], description="Content source types to search")
+
+
+class RAGSessionCreateRequest(BaseModel):
+    """Request model for creating a new RAG session."""
+
+    content_sources: list[str] = Field(default=["podcast"], description="Content source types to search")
+    title: str | None = Field(None, description="Optional session title")
+
+
+class RAGSessionResponse(BaseModel):
+    """Response model for a RAG session."""
+
+    session_id: str
+    title: str | None = None
+    content_sources: list[str] = []
+    created_at: str | None = None
+    updated_at: str | None = None
+    message_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RAGPodcastIngestRequest(BaseModel):
+    """Request model for podcast ingestion (directory scan)."""
+
+    force_refresh: bool = Field(default=False, description="Re-ingest already processed sources")
+
+
+class RAGSourceStats(BaseModel):
+    """Response model for source statistics."""
+
+    source_type: str
+    chunk_count: int
+
+
+class RAGEvaluationResponse(BaseModel):
+    """Response model for evaluation scores."""
+
+    evaluation_id: str
+    session_id: str
+    scores: dict[str, float] = {}
+    overall_passed: bool = False
+    status: str = "pending"
+    duration_ms: int = 0

@@ -254,6 +254,69 @@ class ImageKeys:
     DATA_SOURCE_NAME = "data_source_name"
 
 
+class RAGChunkKeys:
+    """Keys for RAG chunk documents in rag_chunks collection."""
+
+    CHUNK_ID = "chunk_id"
+    CONTENT_SOURCE = "content_source"
+    SOURCE_ID = "source_id"
+    SOURCE_TITLE = "source_title"
+    CONTENT = "content"
+    EMBEDDING = "embedding"
+    EMBEDDING_MODEL = "embedding_model"
+    CHUNK_INDEX = "chunk_index"
+    METADATA = "metadata"
+    CREATED_AT = "created_at"
+
+
+class RAGConversationKeys:
+    """Keys for RAG conversation documents in rag_conversations collection."""
+
+    SESSION_ID = "session_id"
+    TITLE = "title"
+    CONTENT_SOURCES = "content_sources"
+    MESSAGES = "messages"
+    MESSAGE_ID = "message_id"
+    ROLE = "role"
+    CONTENT = "content"
+    CITATIONS = "citations"
+    EVALUATION_ID = "evaluation_id"
+    CREATED_AT = "created_at"
+    UPDATED_AT = "updated_at"
+
+    # Citation sub-keys
+    CITATION_CHUNK_ID = "chunk_id"
+    CITATION_SOURCE_TYPE = "source_type"
+    CITATION_SOURCE_TITLE = "source_title"
+    CITATION_SNIPPET = "snippet"
+    CITATION_METADATA = "metadata"
+
+
+class RAGEvaluationKeys:
+    """Keys for RAG evaluation documents in rag_evaluations collection."""
+
+    EVALUATION_ID = "evaluation_id"
+    SESSION_ID = "session_id"
+    MESSAGE_ID = "message_id"
+    QUERY = "query"
+    RESPONSE = "response"
+    RETRIEVED_CONTEXTS = "retrieved_contexts"
+    SCORES = "scores"
+    OVERALL_PASSED = "overall_passed"
+    EVALUATION_MODEL = "evaluation_model"
+    EVALUATION_DURATION_MS = "evaluation_duration_ms"
+    STATUS = "status"
+    ERROR = "error"
+    CREATED_AT = "created_at"
+    COMPLETED_AT = "completed_at"
+
+    # Score sub-keys
+    SCORE_FAITHFULNESS = "faithfulness"
+    SCORE_ANSWER_RELEVANCY = "answer_relevancy"
+    SCORE_CONTEXTUAL_RELEVANCY = "contextual_relevancy"
+    SCORE_HALLUCINATION = "hallucination"
+
+
 class DbFieldKeys:
     """Keys for MongoDB document fields shared across repositories.
 

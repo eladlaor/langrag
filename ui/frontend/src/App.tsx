@@ -10,6 +10,7 @@ import { PeriodicNewsletterForm } from "./components/PeriodicNewsletterForm";
 import { ResultsDisplay } from "./components/ResultsDisplay";
 import { RunsBrowser } from "./components/RunsBrowser";
 import { SchedulesPage } from "./components/SchedulesPage";
+import { RAGChatPage } from "./components/rag/RAGChatPage";
 import { PeriodicNewsletterResponse } from "./types";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./App.css";
@@ -51,6 +52,10 @@ function App() {
 
             <Tab eventKey="schedules" title="Schedules">
               <SchedulesPage />
+            </Tab>
+
+            <Tab eventKey="knowledge-chat" title="Knowledge Chat">
+              <RAGChatPage />
             </Tab>
           </Tabs>
         </Container>
