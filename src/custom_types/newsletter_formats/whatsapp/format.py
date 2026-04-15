@@ -147,7 +147,7 @@ class WhatsAppFormat(NewsletterFormatBase):
 
         return messages
 
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Convert LLM response to WhatsApp-formatted plain text."""
         return self._renderer.render_whatsapp_text(response)
 

@@ -177,6 +177,42 @@ LANGTALKS_WORTH_MENTIONING_HEADING = "🧰 נושאים נוספים שעלו"
 LANGTALKS_ATTRIBUTION_PREFIX = "📅 הדיון המלא התחיל בתאריך:"
 
 
+# LangTalks i18n strings for multilingual newsletter rendering
+LANGTALKS_I18N = {
+    "hebrew": {
+        "footer_thanks": "תודה שקראת!",
+        "footer_description": "הניוזלטר מכיל סיכום של התוכן הכי מעניין מהדיונים בקבוצות הוואטסאפ השונות של LangTalks.",
+        "footer_share_cta": "אפשר להעביר לחברים וחברות, ולהזמין אותם להצטרף לקהילה :)",
+        "footer_whatsapp_button": "הצטרפות לקבוצת הוואטסאפ",
+        "footer_signup_button": "הרשמה לניוזלטר",
+        "worth_mentioning_heading": "🧰 נושאים נוספים שעלו",
+        "attribution_prefix": "📅 הדיון המלא התחיל בתאריך:",
+        "merged_discussed_in": "📍 נדון ב-{count} קבוצות: {groups}",
+        "merged_attribution_header": "📅 **נדון בקבוצות הבאות:**",
+        "merged_started_at": "התחיל ב-{date}, {time}",
+    },
+    "english": {
+        "footer_thanks": "Thanks for reading!",
+        "footer_description": "This newsletter summarizes the most interesting discussions from the LangTalks WhatsApp groups.",
+        "footer_share_cta": "Feel free to share with friends and invite them to join the community :)",
+        "footer_whatsapp_button": "Join the WhatsApp group",
+        "footer_signup_button": "Subscribe to the newsletter",
+        "worth_mentioning_heading": "🧰 Additional Topics Worth Mentioning",
+        "attribution_prefix": "📅 Full discussion started on:",
+        "merged_discussed_in": "📍 Discussed in {count} groups: {groups}",
+        "merged_attribution_header": "📅 **Discussed in the following groups:**",
+        "merged_started_at": "started on {date}, {time}",
+    },
+}
+
+
+def get_langtalks_i18n(desired_language: str) -> dict:
+    """Get LangTalks i18n strings for the given language, defaulting to English."""
+    if desired_language.lower() in HEBREW_LANGUAGE_CODES:
+        return LANGTALKS_I18N["hebrew"]
+    return LANGTALKS_I18N["english"]
+
+
 # ============================================================================
 # API ROUTE CONSTANTS
 # ============================================================================

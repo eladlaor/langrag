@@ -247,7 +247,7 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
         """
         try:
             # Render content in all formats
-            md_content = self._format.render_markdown(response)
+            md_content = self._format.render_markdown(response, desired_language=desired_language)
             html_content = self._format.render_html(response, desired_language=desired_language)
 
             # MongoDB-first persistence

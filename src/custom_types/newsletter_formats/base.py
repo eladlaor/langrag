@@ -48,7 +48,7 @@ class NewsletterFormatProtocol(Protocol):
         """Build complete message list for LLM call."""
         ...
 
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """Convert LLM response to markdown format."""
         ...
 
@@ -150,12 +150,13 @@ class NewsletterFormatBase(ABC):
         pass
 
     @abstractmethod
-    def render_markdown(self, response: dict) -> str:
+    def render_markdown(self, response: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
         """
         Convert LLM response to markdown format.
 
         Args:
             response: Parsed LLM response dictionary
+            desired_language: Target language for content strings (default: DEFAULT_HTML_LANGUAGE)
 
         Returns:
             Markdown-formatted newsletter string
@@ -176,7 +177,7 @@ class NewsletterFormatBase(ABC):
         Returns:
             HTML-formatted newsletter string
         """
-        md = self.render_markdown(response)
+        md = self.render_markdown(response, desired_language=desired_language)
         return f"""<!DOCTYPE html>
 <html>
 <head>
