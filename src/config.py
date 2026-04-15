@@ -426,6 +426,62 @@ class RankingSettings(BaseSettings):
 
 
 # ============================================================================
+# RAG (RETRIEVAL-AUGMENTED GENERATION) CONFIGURATION
+# ============================================================================
+
+
+class RAGSettings(BaseSettings):
+    """RAG retrieval, chunking, transcription, and generation configuration."""
+
+    # Retrieval
+    vector_search_top_k: int = Field(default=20, description="Top-K candidates from vector search before reranking")
+    rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
+    min_similarity_score: float = Field(default=0.7, description="Minimum cosine similarity score for vector search results")
+    max_conversation_history: int = Field(default=10, description="Maximum number of previous messages to include as conversation context")
+
+    # Podcast chunking
+    podcast_chunk_size: int = Field(default=1000, description="Target chunk size in characters for podcast transcripts")
+    podcast_chunk_overlap: int = Field(default=200, description="Character overlap between consecutive podcast chunks")
+
+    # Newsletter chunking (Plan B)
+    newsletter_chunk_size: int = Field(default=1500, description="Target chunk size in characters for newsletter content")
+    newsletter_chunk_overlap: int = Field(default=300, description="Character overlap between consecutive newsletter chunks")
+
+    # Transcription
+    transcription_provider: str = Field(default="openai", description="Transcription provider: 'openai' (Whisper API) or 'local' (Docker sidecar)")
+    whisper_model: str = Field(default="whisper-1", description="OpenAI Whisper model name")
+    local_whisper_url: str = Field(default="http://whisper:9000", description="Local Whisper Docker service URL")
+
+    # Generation
+    rag_llm_provider: str = Field(default="openai", description="LLM provider for RAG answer generation")
+    rag_llm_model: str = Field(default="gpt-4.1", description="LLM model for RAG answer generation")
+
+    model_config = SettingsConfigDict(env_prefix="RAG_")
+
+
+# ============================================================================
+# DEEPEVAL CONFIGURATION
+# ============================================================================
+
+
+class DeepEvalSettings(BaseSettings):
+    """DeepEval quality evaluation configuration for RAG responses."""
+
+    enabled: bool = Field(default=False, description="Enable background DeepEval evaluation after each RAG response")
+    metrics: list[str] = Field(default=["faithfulness", "answer_relevancy", "hallucination"], description="DeepEval metrics to run")
+    sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Fraction of responses to evaluate (1.0 = all)")
+    faithfulness_threshold: float = Field(default=0.7, description="Minimum faithfulness score to pass")
+    answer_relevancy_threshold: float = Field(default=0.7, description="Minimum answer relevancy score to pass")
+    contextual_relevancy_threshold: float = Field(default=0.5, description="Minimum contextual relevancy score to pass")
+    hallucination_threshold: float = Field(default=0.5, description="Minimum hallucination score to pass")
+    eval_model: str = Field(default="gpt-4.1-mini", description="LLM model used for evaluation judgments")
+    evaluation_timeout_seconds: int = Field(default=120, description="Maximum time for a single evaluation run")
+    results_ttl_days: int = Field(default=90, description="TTL for evaluation results in MongoDB")
+
+    model_config = SettingsConfigDict(env_prefix="DEEPEVAL_")
+
+
+# ============================================================================
 # MAIN SETTINGS CLASS
 # ============================================================================
 
@@ -454,6 +510,8 @@ class Settings(BaseSettings):
     slm: SLMSettings = Field(default_factory=SLMSettings)
     slm_enrichment: SLMEnrichmentSettings = Field(default_factory=SLMEnrichmentSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
+    rag: RAGSettings = Field(default_factory=RAGSettings)
+    deepeval: DeepEvalSettings = Field(default_factory=DeepEvalSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

@@ -76,6 +76,8 @@ dependencies = [
     "rich==13.7.0",
     "sseclient-py==1.8.0",
     "langgraph-api>=0.7.50",
+    "python-multipart>=0.0.26",
+    "deepeval>=1.0.0",
 ]
 
 [project.scripts]

@@ -67,6 +67,19 @@ services:
       VISION_MODEL: ${VISION_MODEL:-gpt-4.1-mini}
       VISION_MAX_IMAGES_PER_CHAT: ${VISION_MAX_IMAGES_PER_CHAT:-50}
 
+      # RAG (Retrieval-Augmented Generation)
+      RAG_TRANSCRIPTION_PROVIDER: ${RAG_TRANSCRIPTION_PROVIDER:-openai}
+      RAG_WHISPER_MODEL: ${RAG_WHISPER_MODEL:-whisper-1}
+      RAG_VECTOR_SEARCH_TOP_K: ${RAG_VECTOR_SEARCH_TOP_K:-20}
+      RAG_RERANK_TOP_K: ${RAG_RERANK_TOP_K:-5}
+      RAG_MIN_SIMILARITY_SCORE: ${RAG_MIN_SIMILARITY_SCORE:-0.7}
+      RAG_LLM_PROVIDER: ${RAG_LLM_PROVIDER:-openai}
+      RAG_LLM_MODEL: ${RAG_LLM_MODEL:-gpt-4.1}
+
+      # DeepEval (RAG quality evaluation)
+      DEEPEVAL_ENABLED: ${DEEPEVAL_ENABLED:-false}
+      DEEPEVAL_EVAL_MODEL: ${DEEPEVAL_EVAL_MODEL:-gpt-4.1-mini}
+
       # Email delivery
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
       GMAIL_ADDRESS: ${GMAIL_ADDRESS:-}
@@ -87,6 +100,9 @@ services:
 
       # Persistent media storage (images)
       - ./data/media:/app/data/media
+
+      # Podcast audio files for RAG ingestion
+      - ./data/podcasts:/app/data/podcasts
 
       # Knowledge base (read-only)
       - ./knowledge:/app/knowledge:ro

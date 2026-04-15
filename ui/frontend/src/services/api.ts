@@ -15,7 +15,12 @@ import {
   RunsListResponse,
   NewsletterContentResponse,
   DiagnosticReport,
+  RAGSession,
+  RAGSessionDetail,
+  RAGSourceStats,
+  RAGEvaluation,
 } from "../types";
+import { RAG_API_ROUTES } from "../constants/rag";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -268,6 +273,113 @@ export const api = {
         throw error;
       }
       throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  },
+  // ==================== RAG Conversation ====================
+
+  /**
+   * Create a new RAG conversation session
+   */
+  async createRAGSession(contentSources: string[], title?: string): Promise<RAGSession> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.SESSIONS}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
+        body: JSON.stringify({ content_sources: contentSources, title }),
+      });
+      return handleResponse<RAGSession>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * List RAG conversation sessions
+   */
+  async listRAGSessions(limit: number = 20, skip: number = 0): Promise<RAGSession[]> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.SESSIONS}?limit=${limit}&skip=${skip}`;
+      const response = await fetch(url);
+      return handleResponse<RAGSession[]>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * Get a RAG session with full message history
+   */
+  async getRAGSession(sessionId: string): Promise<RAGSessionDetail> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.SESSIONS}/${encodeURIComponent(sessionId)}`;
+      const response = await fetch(url);
+      return handleResponse<RAGSessionDetail>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * Delete a RAG conversation session
+   */
+  async deleteRAGSession(sessionId: string): Promise<{ message: string }> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.SESSIONS}/${encodeURIComponent(sessionId)}`;
+      const response = await fetch(url, { method: "DELETE" });
+      return handleResponse<{ message: string }>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * Scan and ingest podcast audio files from data/podcasts/
+   */
+  async scanAndIngestPodcasts(forceRefresh: boolean = false): Promise<{ message: string; results: unknown[] }> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.INGEST_PODCASTS_SCAN}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
+        body: JSON.stringify({ force_refresh: forceRefresh }),
+      });
+      return handleResponse<{ message: string; results: unknown[] }>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * Get chunk counts per content source type
+   */
+  async getRAGSourceStats(): Promise<RAGSourceStats[]> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.SOURCES_STATS}`;
+      const response = await fetch(url);
+      return handleResponse<RAGSourceStats[]>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * Get evaluation scores for a session
+   */
+  async getRAGEvaluations(sessionId: string): Promise<RAGEvaluation[]> {
+    try {
+      const url = `${API_BASE_URL}${RAG_API_ROUTES.EVALUATIONS}/${encodeURIComponent(sessionId)}`;
+      const response = await fetch(url);
+      return handleResponse<RAGEvaluation[]>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   },
 };

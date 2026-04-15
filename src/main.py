@@ -33,7 +33,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Importing routers after logging setup
-from api import newsletter_gen, async_batch_orchestration, schedules
+from api import newsletter_gen, async_batch_orchestration, schedules, rag_conversation
 from api.observability import metrics_router, runs_router
 from constants import (
     API_V1_PREFIX,
@@ -149,6 +149,7 @@ app.include_router(async_batch_orchestration.router, prefix=API_V1_PREFIX, tags=
 app.include_router(runs_router, prefix=API_V1_PREFIX, tags=["observability-runs"])
 app.include_router(metrics_router, tags=["observability-metrics"])
 app.include_router(schedules.router, prefix=API_V1_PREFIX, tags=["schedules"])
+app.include_router(rag_conversation.router, prefix=API_V1_PREFIX, tags=["rag-conversation"])
 
 
 @app.get(ROUTE_ROOT)

@@ -54,6 +54,9 @@ Note: Vector search requires MongoDB Atlas or mongot sidecar service.
 import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING, TEXT
+from pymongo.operations import SearchIndexModel
+
+from constants import COLLECTION_RAG_CHUNKS, RAG_VECTOR_INDEX_NAME, DEFAULT_EMBEDDING_DIMENSION
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +188,32 @@ INDEXES = {
         # Primary lookup: unique per data source + chat
         {"keys": [("data_source_name", ASCENDING), ("chat_name", ASCENDING)], "unique": True},
     ],
+    "rag_chunks": [
+        # Primary lookup by chunk_id
+        {"keys": [("chunk_id", ASCENDING)], "unique": True},
+        # Query by source type + source ID (e.g., all chunks from a podcast episode)
+        {"keys": [("content_source", ASCENDING), ("source_id", ASCENDING)]},
+        # Query by source type + creation date (listing sources)
+        {"keys": [("content_source", ASCENDING), ("created_at", DESCENDING)]},
+        # Query by source ID + chunk order (reconstruct full document)
+        {"keys": [("source_id", ASCENDING), ("chunk_index", ASCENDING)]},
+    ],
+    "rag_conversations": [
+        # Primary lookup by session_id
+        {"keys": [("session_id", ASCENDING)], "unique": True},
+        # List sessions by recency
+        {"keys": [("created_at", DESCENDING)]},
+    ],
+    "rag_evaluations": [
+        # Primary lookup by evaluation_id
+        {"keys": [("evaluation_id", ASCENDING)], "unique": True},
+        # Query evaluations by session
+        {"keys": [("session_id", ASCENDING)]},
+        # Query specific message evaluation
+        {"keys": [("session_id", ASCENDING), ("message_id", ASCENDING)]},
+        # TTL index for automatic cleanup (90 days)
+        {"keys": [("created_at", ASCENDING)], "expireAfterSeconds": 7776000},
+    ],
     "room_id_cache": [
         # Primary lookup - UNIQUE constraint prevents duplicates
         {"keys": [("chat_name", ASCENDING)], "unique": True},
@@ -222,9 +251,62 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
         logger.info("All indexes created successfully")
 
+        # Create vector search index for RAG chunks (idempotent)
+        await _ensure_vector_search_index(db)
+
     except Exception as e:
         logger.error(f"Failed to create indexes: {e}")
         raise RuntimeError(f"Index creation failed: {e}") from e
+
+
+async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
+    """
+    Create the vector search index on rag_chunks if it doesn't already exist.
+
+    Uses MongoDB's create_search_index API (requires mongot sidecar or Atlas).
+    Idempotent: checks existing search indexes first.
+    """
+    collection = db[COLLECTION_RAG_CHUNKS]
+
+    try:
+        # Check if vector search index already exists
+        existing_indexes = []
+        async for idx in collection.list_search_indexes():
+            existing_indexes.append(idx.get("name", ""))
+
+        if RAG_VECTOR_INDEX_NAME in existing_indexes:
+            logger.debug(f"Vector search index '{RAG_VECTOR_INDEX_NAME}' already exists")
+            return
+
+        # Create the vector search index
+        search_index = SearchIndexModel(
+            definition={
+                "mappings": {
+                    "dynamic": True,
+                    "fields": {
+                        "embedding": {
+                            "dimensions": DEFAULT_EMBEDDING_DIMENSION,
+                            "similarity": "cosine",
+                            "type": "knnVector",
+                        }
+                    },
+                }
+            },
+            name=RAG_VECTOR_INDEX_NAME,
+            type="vectorSearch",
+        )
+
+        await collection.create_search_index(search_index)
+        logger.info(f"Created vector search index: {RAG_VECTOR_INDEX_NAME}")
+
+    except Exception as e:
+        # Vector search index creation can fail if mongot is not available
+        # (e.g., local dev without Atlas or mongot sidecar). Log and continue.
+        logger.warning(
+            f"Could not create vector search index '{RAG_VECTOR_INDEX_NAME}': {e}. "
+            f"RAG vector search will not work until this index is created. "
+            f"If using local MongoDB, ensure the mongot sidecar service is running."
+        )
 
 
 async def drop_all_indexes(db: AsyncIOMotorDatabase) -> None:
