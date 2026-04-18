@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.7.0
+- LangGraph graph state checkpointing with AsyncSqliteSaver. Lazy async graph compilation, Docker volume mount for checkpoint persistence, integrated across orchestrator, scheduler, and batch worker.
+
+## v1.6.5
+- Email notification HTML template extracted to standalone file with template rendering. Expanded docstrings for field_keys and state_keys modules. Emoji-free log messages across decryption strategies and Beeper extractor.
+
+## v1.6.4
+- Async consistency: migrated requests to httpx, converted sync methods to async in Beeper extractor, discussion ranker, LinkedIn draft creator, and web searcher.
+
+## v1.6.3
+- Typo corrections (e.g., disussion to discussion), timezone.utc to UTC modernization, unused import cleanup across 53 files in src, tests, and CLI.
+
 ## v1.6.2
 - DeepEval newsletter RAG test suite: 46 unit tests and 50 integration tests covering markdown chunking, newsletter source extraction, evaluation metrics, and golden dataset validation.
 
