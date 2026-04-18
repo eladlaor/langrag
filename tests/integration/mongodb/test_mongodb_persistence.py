@@ -28,7 +28,7 @@ from db.repositories.messages import MessagesRepository
 from db.repositories.discussions import DiscussionsRepository
 
 # Import workflow execution
-from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 
 # Import FastAPI app for API testing
@@ -103,7 +103,8 @@ async def test_workflow_execution_creates_mongodb_run(test_output_dir):
     print(f"📅 Date range: {TEST_START_DATE} to {TEST_END_DATE}")
     print(f"📂 Output: {base_output_path}\n")
 
-    result_state = await parallel_orchestrator_graph.ainvoke(state)
+    graph = await get_parallel_orchestrator_graph()
+    result_state = await graph.ainvoke(state)
 
     # Verify workflow completed successfully
     assert result_state is not None, "Workflow returned None"

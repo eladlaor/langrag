@@ -69,7 +69,7 @@ async def run_scheduled_newsletter(schedule: dict) -> None:
     Raises:
         Exception: If newsletter generation fails
     """
-    from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+    from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
     from graphs.state_keys import ParallelOrchestratorStateKeys as OrchestratorKeys
     from constants import OutputAction, SCHEDULE_FIELD_INTERVAL_DAYS
 
@@ -108,7 +108,8 @@ async def run_scheduled_newsletter(schedule: dict) -> None:
     logger.info(f"Starting scheduled newsletter generation: " f"{state[OrchestratorKeys.DATA_SOURCE_NAME]} " f"({state[OrchestratorKeys.START_DATE]} to {state[OrchestratorKeys.END_DATE]})")
 
     # Execute the graph
-    result = await parallel_orchestrator_graph.ainvoke(state, config)
+    graph = await get_parallel_orchestrator_graph()
+    result = await graph.ainvoke(state, config)
 
     # Check for failures
     failed_chats = result.get(OrchestratorKeys.FAILED_CHATS, 0)

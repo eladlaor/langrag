@@ -258,6 +258,19 @@ class DatabaseSettings(BaseSettings):
 
 
 # ============================================================================
+# CHECKPOINTER CONFIGURATION
+# ============================================================================
+
+
+class CheckpointerSettings(BaseSettings):
+    """LangGraph checkpoint persistence configuration."""
+
+    sqlite_path: str = Field(default="data/checkpoints/langgraph.db", description="Path to SQLite checkpoint database file")
+
+    model_config = SettingsConfigDict(env_prefix="CHECKPOINTER_")
+
+
+# ============================================================================
 # API CONFIGURATION
 # ============================================================================
 
@@ -512,6 +525,7 @@ class Settings(BaseSettings):
     vision: VisionSettings = Field(default_factory=VisionSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
     deepeval: DeepEvalSettings = Field(default_factory=DeepEvalSettings)
+    checkpointer: CheckpointerSettings = Field(default_factory=CheckpointerSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

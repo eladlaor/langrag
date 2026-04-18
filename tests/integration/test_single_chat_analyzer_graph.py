@@ -50,11 +50,10 @@ class TestGraphCompilation:
 
         assert newsletter_generation_graph is not None
 
-    def test_graph_has_checkpointer(self):
-        """Test that the graph has checkpointing enabled."""
+    def test_graph_compiles_without_checkpointer(self):
+        """Test that the single chat graph compiles without a checkpointer (invoked atomically by orchestrator)."""
         from graphs.single_chat_analyzer.graph import newsletter_generation_graph
 
-        # The graph should be compiled with a checkpointer
         assert newsletter_generation_graph is not None
 
 

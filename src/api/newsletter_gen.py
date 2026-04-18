@@ -50,7 +50,7 @@ from custom_types.api_schemas import (
 )
 from custom_types.field_keys import RankingResultKeys, DiscussionKeys
 from db.batch_jobs import BatchJobManager, BatchJobStatus
-from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.state_keys import (
     ParallelOrchestratorStateKeys as OrchestratorKeys,
     SingleChatStateKeys as SingleChatKeys,
@@ -400,7 +400,8 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
 
         logger.info(f"Invoking parallel orchestrator graph for {len(request.whatsapp_chat_names_to_include)} chats")
 
-        result = await parallel_orchestrator_graph.ainvoke(state, config)
+        graph = await get_parallel_orchestrator_graph()
+        result = await graph.ainvoke(state, config)
 
         logger.info(f"Workflow completed: {result.get('successful_chats', 0)}/{result.get('total_chats', 0)} successful")
 
@@ -777,7 +778,8 @@ async def run_workflow_with_progress(request: PeriodicNewsletterRequest, run_out
     logger.info(f"Starting workflow with progress tracking: {thread_id}")
 
     # Native async graph invocation (LangGraph 1.0+)
-    result = await parallel_orchestrator_graph.ainvoke(state, config)
+    graph = await get_parallel_orchestrator_graph()
+    result = await graph.ainvoke(state, config)
 
     logger.info(f"Workflow completed: {result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0)}/{result.get(OrchestratorKeys.TOTAL_CHATS, 0)} successful")
 

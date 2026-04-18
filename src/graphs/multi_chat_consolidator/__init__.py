@@ -9,10 +9,10 @@ START → ensure_valid_session → dispatch_chats → [chat_worker*] → aggrega
       → [consolidation flow] → output_handler → END
 """
 
-from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 
 __all__ = [
-    "parallel_orchestrator_graph",
+    "get_parallel_orchestrator_graph",
     "ParallelOrchestratorState",
 ]
