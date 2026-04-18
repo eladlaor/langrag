@@ -17,8 +17,7 @@ import glob
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime
+from typing import Any
 
 
 class ValidationResult:
@@ -31,7 +30,7 @@ class ValidationResult:
         details: Additional details about the validation
     """
 
-    def __init__(self, passed: bool, message: str, details: Optional[Dict[str, Any]] = None):
+    def __init__(self, passed: bool, message: str, details: dict[str, Any] | None = None):
         self.passed = passed
         self.message = message
         self.details = details or {}
@@ -99,7 +98,7 @@ def validate_json_file(file_path: str, description: str = "JSON file") -> Valida
 
     # Try to parse JSON
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, encoding='utf-8') as f:
             data = json.load(f)
 
         return ValidationResult(
@@ -516,7 +515,7 @@ def validate_newsletter_content(
 
     # Read MD content
     try:
-        with open(md_path, 'r', encoding='utf-8') as f:
+        with open(md_path, encoding='utf-8') as f:
             md_content = f.read()
     except Exception as e:
         return ValidationResult(False, f"Failed to read MD file: {e}")
@@ -602,7 +601,7 @@ def validate_link_enrichment(
 
     # Count HTTP links in MD
     try:
-        with open(enriched_md_path, 'r', encoding='utf-8') as f:
+        with open(enriched_md_path, encoding='utf-8') as f:
             enriched_md = f.read()
         link_count = enriched_md.count("http://") + enriched_md.count("https://")
     except Exception as e:
@@ -622,7 +621,7 @@ def validate_link_enrichment(
 # AGGREGATED VALIDATION FUNCTIONS
 # ============================================================================
 
-def validate_full_pipeline_output(output_dir: str, workflow_type: str = "periodic_newsletter") -> Dict[str, ValidationResult]:
+def validate_full_pipeline_output(output_dir: str, workflow_type: str = "periodic_newsletter") -> dict[str, ValidationResult]:
     """
     Validate all outputs from a complete pipeline run.
 
@@ -661,7 +660,7 @@ def validate_full_pipeline_output(output_dir: str, workflow_type: str = "periodi
     return results
 
 
-def print_validation_report(results: Dict[str, ValidationResult]) -> Tuple[int, int]:
+def print_validation_report(results: dict[str, ValidationResult]) -> tuple[int, int]:
     """
     Print a formatted validation report.
 

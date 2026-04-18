@@ -4,7 +4,6 @@ Unit tests for persistence policy.
 
 import pytest
 import logging
-from unittest.mock import patch, MagicMock
 
 from db.persistence_policy import (
     PersistencePolicy,

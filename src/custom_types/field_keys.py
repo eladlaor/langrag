@@ -32,7 +32,7 @@ class DiscussionKeys:
     NUM_MESSAGES = "num_messages"
     NUM_UNIQUE_PARTICIPANTS = "num_unique_participants"
     FIRST_MESSAGE_TIMESTAMP = "first_message_timestamp"
-    FIRST_MESSAGE_IN_DISCUSSION_TIMESTAMP = "first_message_in_disussion_timestamp"
+    FIRST_MESSAGE_IN_DISCUSSION_TIMESTAMP = "first_message_in_discussion_timestamp"
     SAMPLE_MESSAGES = "sample_messages"
     MESSAGES = "messages"
     IS_MERGED = "is_merged"

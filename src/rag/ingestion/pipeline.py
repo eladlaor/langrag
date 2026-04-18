@@ -13,7 +13,7 @@ from config import get_settings
 from custom_types.field_keys import RAGChunkKeys as Keys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
-from rag.sources.base import ContentChunk, ContentSourceInterface
+from rag.sources.base import ContentSourceInterface
 from utils.embedding.factory import EmbeddingProviderFactory
 
 logger = logging.getLogger(__name__)

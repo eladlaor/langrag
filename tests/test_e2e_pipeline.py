@@ -37,18 +37,10 @@ import requests
 import json
 import time
 import os
-from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 # Import validation helpers
 from helpers.pipeline_validator import (
-    validate_extracted_messages,
-    validate_preprocessed_messages,
-    validate_translated_messages,
-    validate_discussions,
-    validate_discussions_ranking,
-    validate_newsletter_content,
-    validate_link_enrichment,
     validate_full_pipeline_output,
     print_validation_report,
     ValidationResult
@@ -120,7 +112,7 @@ def cleanup_test_output():
 
 def wait_for_workflow_completion(
     endpoint: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     timeout: int = 600
 ) -> requests.Response:
     """
@@ -187,7 +179,7 @@ def validate_stage_outputs(
     output_dir: str,
     expected_stages: list,
     workflow_name: str
-) -> Dict[str, ValidationResult]:
+) -> dict[str, ValidationResult]:
     """
     Validate outputs from specific pipeline stages.
 
@@ -493,26 +485,26 @@ def test_suite_summary(docker_health_check):
     print("\n" + "=" * 80)
     print("E2E PIPELINE TEST SUITE")
     print("=" * 80)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Base URL: {BASE_URL}")
     print(f"  Test Data Source: {TEST_DATA_SOURCE}")
     print(f"  Test Chat: {TEST_CHAT_NAME}")
     print(f"  Test Date Range: {TEST_START_DATE} to {TEST_END_DATE}")
     print(f"  Test Single Date: {TEST_SINGLE_DATE}")
     print(f"  Output Directory: {TEST_OUTPUT_BASE}")
-    print(f"\nTest Coverage:")
-    print(f"  - Periodic newsletter generation")
-    print(f"  - Cross-chat consolidation (multi-chat)")
-    print(f"  - Error handling")
-    print(f"\nValidation Coverage:")
-    print(f"  - Message extraction (Beeper/Matrix)")
-    print(f"  - Preprocessing (parsing, threading)")
-    print(f"  - Translation (OpenAI batch)")
-    print(f"  - Discussion separation (LLM grouping)")
-    print(f"  - Discussion ranking (cross-day, cross-chat)")
-    print(f"  - Newsletter generation")
-    print(f"  - Link enrichment")
-    print(f"  - Final translation")
+    print("\nTest Coverage:")
+    print("  - Periodic newsletter generation")
+    print("  - Cross-chat consolidation (multi-chat)")
+    print("  - Error handling")
+    print("\nValidation Coverage:")
+    print("  - Message extraction (Beeper/Matrix)")
+    print("  - Preprocessing (parsing, threading)")
+    print("  - Translation (OpenAI batch)")
+    print("  - Discussion separation (LLM grouping)")
+    print("  - Discussion ranking (cross-day, cross-chat)")
+    print("  - Newsletter generation")
+    print("  - Link enrichment")
+    print("  - Final translation")
     print("\n" + "=" * 80 + "\n")
 
     assert True  # Always passes

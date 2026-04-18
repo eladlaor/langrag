@@ -12,7 +12,6 @@ The utils/observability/__init__.py uses 'from src.' prefix which fails outside 
 Run in Docker: docker compose exec backend pytest tests/unit/test_llm_utils.py
 """
 
-import json
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest

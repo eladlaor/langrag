@@ -9,7 +9,6 @@ NOTE: Tests require Docker environment due to import dependencies.
 Run in Docker: docker compose exec backend pytest tests/unit/subgraphs/test_subgraph_states.py
 """
 
-import pytest
 from typing import get_origin, Annotated
 
 from tests.unit.subgraphs.conftest import requires_docker

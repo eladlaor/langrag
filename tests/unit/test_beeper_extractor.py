@@ -18,7 +18,7 @@ import json
 import os
 import tempfile
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 
@@ -112,7 +112,7 @@ class TestDecryptionKeysParsing:
                 json.dump(test_keys, f)
 
             # Verify we can read and parse it
-            with open(keys_path, 'r') as f:
+            with open(keys_path) as f:
                 loaded = json.load(f)
 
             assert len(loaded) == 1
@@ -128,7 +128,7 @@ class TestDecryptionKeysParsing:
                 f.write("invalid json content {")
 
             with pytest.raises(json.JSONDecodeError):
-                with open(keys_path, 'r') as f:
+                with open(keys_path) as f:
                     json.load(f)
 
 
@@ -216,7 +216,7 @@ class TestCacheFilePaths:
                 json.dump(cache_data, f)
 
             # Verify cache can be read back
-            with open(cache_path, 'r') as f:
+            with open(cache_path) as f:
                 loaded = json.load(f)
 
             assert loaded["Test Room"] == "!test_room_id:beeper.com"
@@ -232,7 +232,7 @@ class TestCacheFilePaths:
                 json.dump(initial_cache, f)
 
             # Load, update, save
-            with open(cache_path, 'r') as f:
+            with open(cache_path) as f:
                 cache = json.load(f)
 
             cache["Room B"] = "!room_b:beeper.com"
@@ -241,7 +241,7 @@ class TestCacheFilePaths:
                 json.dump(cache, f)
 
             # Verify both entries exist
-            with open(cache_path, 'r') as f:
+            with open(cache_path) as f:
                 final_cache = json.load(f)
 
             assert "Room A" in final_cache

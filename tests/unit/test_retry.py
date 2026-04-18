@@ -2,9 +2,8 @@
 Unit tests for LLM retry utilities.
 """
 
-import asyncio
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock
 
 import openai
 

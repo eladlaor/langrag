@@ -16,11 +16,8 @@ Test Structure:
 """
 
 import asyncio
-import json
 import os
 import pytest
-from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi.testclient import TestClient
 
@@ -114,7 +111,7 @@ async def test_workflow_execution_creates_mongodb_run(test_output_dir):
     assert result_state.get("mongodb_run_id") is not None, "MongoDB run_id not created"
 
     mongodb_run_id = result_state["mongodb_run_id"]
-    print(f"\n✅ Workflow completed successfully")
+    print("\n✅ Workflow completed successfully")
     print(f"📝 MongoDB run_id: {mongodb_run_id}\n")
 
     # Store run_id for subsequent tests
@@ -143,7 +140,7 @@ async def test_mongodb_run_document_exists(test_workflow_execution_creates_mongo
     assert run["status"] in ["completed", "running"], f"Unexpected status: {run['status']}"
     assert TEST_CHAT_NAME in run.get("chat_names", [])
 
-    print(f"\n✅ Run document verified")
+    print("\n✅ Run document verified")
     print(f"   Status: {run['status']}")
     print(f"   Chats: {run.get('chat_names', [])}")
 
@@ -194,7 +191,7 @@ async def test_mongodb_messages_persisted(test_workflow_execution_creates_mongod
     assert "short_id" in sample_msg, "short_id field missing"
     # replies_to may be None for messages that don't reply to anything
 
-    print(f"\n✅ Messages verified")
+    print("\n✅ Messages verified")
     print(f"   Total messages: {len(messages)}")
     print(f"   Sample sender: {sample_msg.get('sender', 'unknown')}")
     print(f"   Sample content (truncated): {sample_msg.get('content', '')[:50]}...")
@@ -246,7 +243,7 @@ async def test_mongodb_discussions_persisted(test_workflow_execution_creates_mon
             f"Message ID format incorrect: {first_msg_id} (CRITICAL FIX #3 failed)"
         print(f"   ✅ Discussion-to-message mapping verified: {first_msg_id}")
 
-    print(f"\n✅ Discussions verified")
+    print("\n✅ Discussions verified")
     print(f"   Total discussions: {len(discussions)}")
     print(f"   Top discussion: {sample_disc.get('title', 'unknown')}")
     print(f"   Ranking score: {sample_disc.get('ranking_score', 0)}")
@@ -279,7 +276,7 @@ async def test_mongodb_chat_status_tracked(test_workflow_execution_creates_mongo
     if "message_count" in chat_status:
         assert chat_status["message_count"] > 0, "Message count not tracked"
 
-    print(f"\n✅ Chat status verified")
+    print("\n✅ Chat status verified")
     print(f"   Chat: {TEST_CHAT_NAME}")
     print(f"   Status: {chat_status.get('status')}")
     print(f"   Message count: {chat_status.get('message_count', 'N/A')}")
@@ -309,7 +306,7 @@ async def test_mongodb_output_paths_stored(test_workflow_execution_creates_mongo
         assert len(output_paths) > 0, "No output paths stored"
         assert "newsletter_md" in output_paths or "newsletter_json" in output_paths
 
-        print(f"\n✅ Output paths verified")
+        print("\n✅ Output paths verified")
         print(f"   Paths stored: {list(output_paths.keys())}")
     else:
         print(f"\n⚠️  Chat {TEST_CHAT_NAME} not found in run chats (may still be processing)")
@@ -335,7 +332,7 @@ def test_api_list_runs():
         assert "data_source_name" in run
         assert "status" in run
 
-    print(f"\n✅ API /runs endpoint verified")
+    print("\n✅ API /runs endpoint verified")
     print(f"   Runs found: {len(runs)}")
 
 
@@ -416,7 +413,7 @@ def test_api_get_stats():
     assert stats["total_messages"] >= 0
     assert stats["total_discussions"] >= 0
 
-    print(f"\n✅ API /stats endpoint verified")
+    print("\n✅ API /stats endpoint verified")
     print(f"   Total runs: {stats['total_runs']}")
     print(f"   Total messages: {stats['total_messages']}")
     print(f"   Total discussions: {stats['total_discussions']}")
@@ -435,22 +432,22 @@ async def test_mongodb_indexes_created():
     messages_indexes = await db.messages.index_information()
     assert "run_id_1" in messages_indexes, "Missing index on messages.run_id (CRITICAL FIX #4 failed)"
     assert "run_id_1_chat_name_1" in messages_indexes, "Missing compound index on messages.run_id+chat_name"
-    print(f"\n✅ Messages indexes verified:")
+    print("\n✅ Messages indexes verified:")
     print(f"   Total indexes: {len(messages_indexes)}")
-    print(f"   Key indexes: run_id_1, run_id_1_chat_name_1, matrix_event_id_1")
+    print("   Key indexes: run_id_1, run_id_1_chat_name_1, matrix_event_id_1")
 
     # Check discussions collection indexes
     discussions_indexes = await db.discussions.index_information()
     assert "run_id_1" in discussions_indexes, "Missing index on discussions.run_id (CRITICAL FIX #4 failed)"
     assert "run_id_1_ranking_score_-1" in discussions_indexes, "Missing compound index on discussions.run_id+ranking_score"
-    print(f"\n✅ Discussions indexes verified:")
+    print("\n✅ Discussions indexes verified:")
     print(f"   Total indexes: {len(discussions_indexes)}")
-    print(f"   Key indexes: run_id_1, run_id_1_ranking_score_-1")
+    print("   Key indexes: run_id_1, run_id_1_ranking_score_-1")
 
     # Check runs collection indexes
     runs_indexes = await db.runs.index_information()
     assert "run_id_1" in runs_indexes, "Missing unique index on runs.run_id"
-    print(f"\n✅ Runs indexes verified:")
+    print("\n✅ Runs indexes verified:")
     print(f"   Total indexes: {len(runs_indexes)}")
 
 

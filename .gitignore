@@ -245,6 +245,9 @@ temp_decrypted_*.json
 # Ruff cache
 .ruff_cache/
 
+# DeepEval
+.deepeval/
+
 # Images/pics
 pics/
 

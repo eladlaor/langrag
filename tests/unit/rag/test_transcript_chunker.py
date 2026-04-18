@@ -4,7 +4,6 @@ Unit tests for TranscriptChunker.
 Tests chunking logic: segment boundaries, overlap, timestamp preservation, speaker tracking.
 """
 
-import pytest
 
 from rag.chunking.transcript_chunker import TranscriptChunker
 from rag.transcription.interface import TranscriptionSegment

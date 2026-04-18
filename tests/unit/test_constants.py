@@ -2,7 +2,6 @@
 Unit tests for constants module.
 """
 
-import pytest
 
 from constants import (
     # Newsletter constants
@@ -16,8 +15,6 @@ from constants import (
     StageStatus,
     ProgressEventType,
     # LLM enums
-    LLMCallType,
-    # Route constants
     API_V1_PREFIX,
     ROUTE_GENERATE_PERIODIC_NEWSLETTER,
     # HTTP status codes

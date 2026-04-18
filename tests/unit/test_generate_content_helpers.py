@@ -3,10 +3,8 @@ Unit tests for generate_content helper functions.
 """
 
 import json
-import os
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import tempfile
+from unittest.mock import MagicMock, patch
 
 from graphs.single_chat_analyzer.generate_content_helpers import (
     validate_ranking_file,

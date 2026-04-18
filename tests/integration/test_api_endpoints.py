@@ -13,10 +13,6 @@ doesn't work outside the Docker environment. Run full API tests in Docker:
     docker compose exec backend pytest tests/integration/test_api_endpoints.py
 """
 
-import json
-import os
-import tempfile
-from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
 

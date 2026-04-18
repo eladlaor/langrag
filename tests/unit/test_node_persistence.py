@@ -3,7 +3,7 @@ Unit tests for node persistence helpers.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 from db.node_persistence import (
     generate_newsletter_id,
@@ -11,7 +11,6 @@ from db.node_persistence import (
     NodePersistence,
 )
 from db.persistence_policy import PersistencePolicy
-from constants import NewsletterVersionType, NewsletterType
 
 
 class TestGenerateNewsletterId:

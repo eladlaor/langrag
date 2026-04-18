@@ -6,12 +6,12 @@ Supports streaming tokens via an async callback.
 """
 
 import logging
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import get_settings
-from constants import MessageRole
 from custom_types.field_keys import RAGConversationKeys as ConvKeys
 from rag.generation.prompts import (
     RAG_SYSTEM_PROMPT,

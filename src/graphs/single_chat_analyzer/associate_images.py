@@ -86,13 +86,13 @@ def _build_image_discussion_map(manifest_path: str, discussions_path: str) -> di
         Empty dict if no matches found.
     """
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
+        with open(manifest_path, encoding="utf-8") as f:
             images = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         raise ValueError(f"Failed to load image manifest from {manifest_path}: {e}") from e
 
     try:
-        with open(discussions_path, "r", encoding="utf-8") as f:
+        with open(discussions_path, encoding="utf-8") as f:
             discussions_data = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         raise ValueError(f"Failed to load discussions from {discussions_path}: {e}") from e

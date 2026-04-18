@@ -9,8 +9,7 @@ Tests cover:
 - Helper functions
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from custom_types.slm_schemas import (
     MessageClassification,

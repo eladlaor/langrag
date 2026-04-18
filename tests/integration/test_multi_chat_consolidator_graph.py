@@ -18,10 +18,9 @@ NOTE: These tests require Docker environment due to dependency on matrix_decrypt
 Run in Docker: docker compose exec backend pytest tests/integration/test_multi_chat_consolidator_graph.py
 """
 
-import json
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import pytest
 
 

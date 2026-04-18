@@ -3,7 +3,7 @@ Unit tests for observability decorators.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 from observability.decorators import with_trace_span
 

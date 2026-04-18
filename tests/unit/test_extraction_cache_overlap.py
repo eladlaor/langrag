@@ -6,7 +6,6 @@ SenderMapRepository persistence (Phase 3).
 """
 
 import pytest
-from datetime import datetime, timedelta, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from db.repositories.extraction_cache import ExtractionCacheRepository

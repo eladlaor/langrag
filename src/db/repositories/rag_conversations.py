@@ -5,7 +5,7 @@ CRUD operations for the rag_conversations collection (chat sessions with history
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -40,7 +40,7 @@ class ConversationsRepository(BaseRepository):
         Returns:
             session_id
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         document = {
             Keys.SESSION_ID: session_id,
             Keys.TITLE: title,
@@ -76,7 +76,7 @@ class ConversationsRepository(BaseRepository):
             {Keys.SESSION_ID: session_id},
             {
                 "$push": {Keys.MESSAGES: message},
-                "$set": {Keys.UPDATED_AT: datetime.now(timezone.utc)},
+                "$set": {Keys.UPDATED_AT: datetime.now(UTC)},
             },
         )
 
@@ -84,7 +84,7 @@ class ConversationsRepository(BaseRepository):
         """Set or update session title (typically auto-generated from first query)."""
         return await self.update_one(
             {Keys.SESSION_ID: session_id},
-            {"$set": {Keys.TITLE: title, Keys.UPDATED_AT: datetime.now(timezone.utc)}},
+            {"$set": {Keys.TITLE: title, Keys.UPDATED_AT: datetime.now(UTC)}},
         )
 
     async def list_sessions(
