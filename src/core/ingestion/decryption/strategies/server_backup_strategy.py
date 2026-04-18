@@ -115,7 +115,7 @@ class ServerBackupStrategy:
             result[DecryptionResultKeys.DECRYPTED] = True
             result[DecryptionResultKeys.DECRYPTION_METHOD] = DecryptionMethod.SERVER_BACKUP
 
-            logger.debug(f"✅ Decrypted with server backup: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
+            logger.debug(f"Decrypted with server backup: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
             return result
 
         except Exception as e:

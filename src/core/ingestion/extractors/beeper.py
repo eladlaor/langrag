@@ -236,7 +236,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
             if row:
                 user_id, device_id, access_token, homeserver = row
-                logging.info(f"✅ Found Beeper Desktop session for {user_id}")
+                logging.info(f"Found Beeper Desktop session for {user_id}")
                 return {"user_id": user_id, "device_id": device_id, "access_token": access_token, "homeserver": homeserver}
 
             return None
@@ -253,10 +253,10 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             AsyncClient instance with persistent store and encryption enabled
         """
         if self.client and hasattr(self.client, "logged_in") and self.client.logged_in:
-            logging.info("✅ Using existing Matrix session")
+            logging.info("Using existing Matrix session")
             return self.client
 
-        logging.info("🔐 Initializing Matrix persistent session...")
+        logging.info("Initializing Matrix persistent session...")
 
         # Trying to get session info from Beeper Desktop
         beeper_info = self._get_beeper_session_info()
@@ -268,7 +268,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             homeserver = beeper_info["homeserver"].rstrip("/")  # Stripping trailing slash to avoid double slash in URLs
         else:
             # Falling back to environment variables
-            logging.warning("⚠️  Could not find Beeper Desktop session, using environment variables")
+            logging.warning("Could not find Beeper Desktop session, using environment variables")
 
             access_token = os.getenv("BEEPER_ACCESS_TOKEN")
             if not access_token:
@@ -301,12 +301,12 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         self.client.user_id = user_id
         self.client.device_id = device_id  # Always setting, even if None (will be auto-assigned on first sync)
 
-        logging.info(f"✅ Session credentials loaded for {self.client.user_id}")
+        logging.info(f"Session credentials loaded for {self.client.user_id}")
 
         # Trying to load existing store if it exists (gracefully handling if device_id not yet set)
         try:
             self.client.load_store()
-            logging.info("✅ Loaded existing encryption store")
+            logging.info("Loaded existing encryption store")
         except Exception as e:
             logging.info(f"No existing store to load (this is normal for first run): {e}")
 
@@ -315,9 +315,9 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         # 2. Initializing encryption if needed
         # 3. Receiving/updating encryption keys
         beeper_settings = get_settings().beeper
-        logging.info("🔄 Syncing to initialize/update encryption keys...")
+        logging.info("Syncing to initialize/update encryption keys...")
         await self.client.sync(timeout=beeper_settings.matrix_sync_timeout_ms, full_state=False)
-        logging.info(f"✅ Sync completed - device_id: {self.client.device_id}")
+        logging.info(f"Sync completed - device_id: {self.client.device_id}")
 
         return self.client
 
@@ -379,13 +379,13 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             if not isinstance(response, LoginResponse):
                 raise RuntimeError(f"Login failed: {response}")
 
-            logging.info(f"✅ Login successful - User: {response.user_id}, Device: {response.device_id}")
+            logging.info(f"Login successful - User: {response.user_id}, Device: {response.device_id}")
 
             # Performing initial sync to download encryption keys
             beeper_settings = get_settings().beeper
-            logging.info("🔄 Syncing to initialize encryption keys...")
+            logging.info("Syncing to initialize encryption keys...")
             await client.sync(timeout=beeper_settings.matrix_sync_timeout_ms, full_state=False)
-            logging.info("✅ Sync completed - encryption keys downloaded")
+            logging.info("Sync completed - encryption keys downloaded")
 
             # Closing the client
             await client.close()
@@ -397,10 +397,10 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                 if backup_path.exists():
                     shutil.rmtree(backup_path)
                 shutil.move(str(old_store), str(backup_path))
-                logging.info(f"📦 Backed up old session to {backup_path}")
+                logging.info(f"Backed up old session to {backup_path}")
 
             shutil.move(str(temp_store_path), str(old_store))
-            logging.info(f"✅ Fresh session installed to {old_store}")
+            logging.info(f"Fresh session installed to {old_store}")
 
             # Resetting client so next call to _init_persistent_client will use new session
             self.client = None
@@ -611,17 +611,17 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             client = await self._init_persistent_client()
             if client and client.olm:
                 strategies.append(PersistentSessionStrategy(client))
-                logging.debug("✅ Added PersistentSessionStrategy")
+                logging.debug("Added PersistentSessionStrategy")
             else:
-                logging.warning("⚠️ Client has no olm machine - persistent session strategy disabled")
+                logging.warning("Client has no olm machine - persistent session strategy disabled")
         except Exception as e:
-            logging.warning(f"⚠️ Could not initialize PersistentSessionStrategy: {e}")
+            logging.warning(f"Could not initialize PersistentSessionStrategy: {e}")
 
         # Strategy 2: Server Backup (if BEEPER_RECOVERY_CODE is set)
         recovery_code = os.getenv("BEEPER_RECOVERY_CODE")
         if recovery_code:
             try:
-                logging.info("🔄 Setting up server backup strategy...")
+                logging.info("Setting up server backup strategy...")
                 cache = JSONFileCacheAdapter(Path(DEFAULT_SERVER_BACKUP_KEYS_PATH))
                 key_manager = MatrixKeyBackupManager(
                     homeserver=self.homeserver,
@@ -630,12 +630,12 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                     cache=cache,
                 )
                 strategies.append(ServerBackupStrategy(key_manager))
-                logging.debug("✅ Added ServerBackupStrategy")
+                logging.debug("Added ServerBackupStrategy")
             except InvalidRecoveryCodeError as e:
-                logging.warning(f"⚠️ Invalid recovery code: {e}")
+                logging.warning(f"Invalid recovery code: {e}")
                 logging.warning("   Check BEEPER_RECOVERY_CODE in your .env file")
             except Exception as e:
-                logging.warning(f"⚠️ Could not initialize ServerBackupStrategy: {e}")
+                logging.warning(f"Could not initialize ServerBackupStrategy: {e}")
         else:
             logging.debug("BEEPER_RECOVERY_CODE not set, skipping ServerBackupStrategy")
 
@@ -646,9 +646,9 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         if exported_keys_path.exists() and export_password:
             try:
                 strategies.append(ManualExportStrategy(keys_file_path=str(exported_keys_path), passphrase=export_password))
-                logging.debug("✅ Added ManualExportStrategy (fresh decrypt from element-keys.txt)")
+                logging.debug("Added ManualExportStrategy (fresh decrypt from element-keys.txt)")
             except Exception as e:
-                logging.warning(f"⚠️ Could not initialize ManualExportStrategy from element-keys.txt: {e}")
+                logging.warning(f"Could not initialize ManualExportStrategy from element-keys.txt: {e}")
         else:
             # Fall back to pre-decrypted keys if element-keys.txt or password unavailable
             decrypted_keys_path = _get_decrypted_keys_path()
@@ -660,9 +660,9 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                             passphrase=None,  # Already decrypted
                         )
                     )
-                    logging.debug("✅ Added ManualExportStrategy (cached decrypted-keys.json)")
+                    logging.debug("Added ManualExportStrategy (cached decrypted-keys.json)")
                 except Exception as e:
-                    logging.warning(f"⚠️ Could not initialize ManualExportStrategy: {e}")
+                    logging.warning(f"Could not initialize ManualExportStrategy: {e}")
             else:
                 logging.debug("No manual export keys found")
 
@@ -673,7 +673,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         manager = HybridDecryptionManager(strategies)
         await manager.initialize()
 
-        logging.info(f"✅ Decryption manager initialized with {len(strategies)} strategies: {manager.get_strategy_names()}")
+        logging.info(f"Decryption manager initialized with {len(strategies)} strategies: {manager.get_strategy_names()}")
         return manager
 
     async def _extract_whatsapp_group_chat_messages_async(self, **kwargs) -> str:
@@ -753,7 +753,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                 if cached_extraction:
                     # Exact cache hit — use cached messages directly
                     decrypted_messages = cached_extraction.get(DiscussionKeys.MESSAGES, [])
-                    logging.info(f"✓ MongoDB cache hit (exact): {len(decrypted_messages)} messages " f"(cached at {cached_extraction.get('created_at')})")
+                    logging.info(f"MongoDB cache hit (exact): {len(decrypted_messages)} messages " f"(cached at {cached_extraction.get('created_at')})")
 
                     safe_room_name = room_name.replace(" ", "_").replace("/", "_")
                     start_date_formatted = start_date_str.replace("-", "")
@@ -905,7 +905,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
             # Getting statistics from the manager
             stats = decryption_manager.get_statistics()
-            logging.info(f"✅ Successfully decrypted {stats['total_successes']}/{encrypted_count} messages")
+            logging.info(f"Successfully decrypted {stats['total_successes']}/{encrypted_count} messages")
             for strategy_name, count in stats["strategy_successes"].items():
                 logging.info(f"   - {strategy_name}: {count}")
 
@@ -913,11 +913,11 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             if encrypted_count > 0 and stats["total_successes"] == 0:
                 error_message = (
                     f"\n{'='*70}\n"
-                    f"❌ DECRYPTION FAILED: Could not decrypt {encrypted_count} encrypted messages\n"
+                    f"DECRYPTION FAILED: Could not decrypt {encrypted_count} encrypted messages\n"
                     f"{'='*70}\n\n"
                     f"These messages are from {start_date_str} to {end_date_str}.\n\n"
                     f"To decrypt PAST messages, you need to export encryption keys:\n\n"
-                    f"📋 ONE-TIME SETUP (2 steps):\n\n"
+                    f"ONE-TIME SETUP (2 steps):\n\n"
                     f"1. EXPORT KEYS from Beeper Web UI:\n"
                     f"   a. Open https://app.beeper.com in your browser\n"
                     f"   b. Click profile icon → All Settings → Security & Privacy\n"
@@ -927,8 +927,8 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                     f"2. ADD PASSWORD to .env:\n"
                     f"   BEEPER_EXPORT_PASSWORD=<your_export_password>\n\n"
                     f"3. Try your extraction again (decryption is now automatic!)\n\n"
-                    f"📖 Detailed guide: knowledge/beeper/HOW_TO_EXPORT_KEYS.md\n\n"
-                    f"💡 NOTE: This is a ONE-TIME step for past messages.\n"
+                    f"Detailed guide: knowledge/beeper/HOW_TO_EXPORT_KEYS.md\n\n"
+                    f"NOTE: This is a ONE-TIME step for past messages.\n"
                     f"   Future messages will decrypt automatically.\n"
                     f"{'='*70}\n"
                 )
@@ -938,7 +938,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             # PARTIAL SUCCESS: Some messages couldn't be decrypted
             elif encrypted_count > 0 and stats["total_successes"] < encrypted_count:
                 failed_count = encrypted_count - stats["total_successes"]
-                logging.warning(f"\n⚠️  PARTIAL DECRYPTION: {failed_count}/{encrypted_count} messages could not be decrypted.\n" f"   This might be normal if:\n" f"   - Some messages are from before you joined the room\n" f"   - Some messages are from devices that never shared keys\n" f"   - Some encryption sessions expired\n")
+                logging.warning(f"\nPARTIAL DECRYPTION: {failed_count}/{encrypted_count} messages could not be decrypted.\n" f"   This might be normal if:\n" f"   - Some messages are from before you joined the room\n" f"   - Some messages are from devices that never shared keys\n" f"   - Some encryption sessions expired\n")
 
             # Merge with overlap-cached messages if available
             # Fresh decryptions take priority over cached versions (in case of re-encrypted messages)
@@ -988,7 +988,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                     # Saving to MongoDB cache
                     await cache_repo.set_cached_extraction(cache_key=cache_key, chat_name=room_name, room_id=room_id, start_date=start_date_str, end_date=end_date_str, messages=decrypted_messages, extraction_metadata=extraction_metadata)
 
-                    logging.info(f"✓ Extraction cached to MongoDB: {cache_key}")
+                    logging.info(f"Extraction cached to MongoDB: {cache_key}")
 
                 except Exception as e:
                     # Don't fail the extraction if caching fails
@@ -1000,7 +1000,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             # Closing client after extraction
             if self.client:
                 await self.client.close()
-                logging.info("✅ Matrix session closed")
+                logging.info("Matrix session closed")
 
             return decrypted_messages_file_path
 
@@ -1042,7 +1042,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         compatibility without event loop conflicts.
         """
         try:
-            logging.info("✨ Using new persistent session approach (no manual key export needed)")
+            logging.info("Using new persistent session approach (no manual key export needed)")
 
             # Checking if we're already in an async context (like FastAPI)
             try:
@@ -1069,7 +1069,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
                 if result_dict["success"]:
                     result_path = result_dict["result"]
-                    logging.info("✅ Successfully extracted messages using multiprocessing")
+                    logging.info("Successfully extracted messages using multiprocessing")
                     return result_path
                 else:
                     error_msg = result_dict["error"]

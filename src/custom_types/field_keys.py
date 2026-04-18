@@ -1,5 +1,12 @@
 """
-Field Key Constants for Discussion, Ranking, Newsletter, and MMR Data Structures.
+Field key constants for data structure dictionaries (discussions, rankings, newsletters,
+DB documents, decryption results, images, RAG chunks, etc.).
+
+These keys are used for accessing fields in domain data dictionaries that flow through
+the pipeline — NOT for LangGraph workflow state fields.
+
+For LangGraph workflow state keys (SingleChatState, ParallelOrchestratorState, etc.), see:
+    src/graphs/state_keys.py
 
 CRITICAL: All dictionary key access for these data structures MUST use these constants.
 Never hardcode field keys as strings - use these constants instead.

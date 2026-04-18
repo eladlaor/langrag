@@ -1,5 +1,11 @@
 """
-State key constants for LangGraph workflows.
+State key constants for LangGraph workflow state dictionaries (TypedDict fields).
+
+These keys are used ONLY for accessing LangGraph workflow state — the TypedDict objects
+that flow between graph nodes (SingleChatState, ParallelOrchestratorState, etc.).
+
+For data structure keys (discussions, rankings, DB documents, newsletter JSON), see:
+    src/custom_types/field_keys.py
 
 CRITICAL: All state dictionary access MUST use these constants.
 Never hardcode state keys as strings - use these constants instead.
@@ -9,11 +15,11 @@ This prevents typos, enables refactoring, and provides IDE autocomplete support.
 Usage:
     from graphs.state_keys import SingleChatStateKeys as Keys
 
-    # ✅ GOOD
+    # GOOD
     chat_name = state[Keys.CHAT_NAME]
     json_path = result.get(Keys.NEWSLETTER_JSON_PATH)
 
-    # ❌ BAD (brittle, typo-prone)
+    # BAD (brittle, typo-prone)
     chat_name = state["chat_name"]
     json_path = result.get("newsletter_json_path")
 """

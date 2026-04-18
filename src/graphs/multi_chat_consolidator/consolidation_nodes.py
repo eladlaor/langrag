@@ -534,7 +534,7 @@ async def merge_similar_discussions(state: ParallelOrchestratorState, config: Ru
 
     if merge_result.merge_operations > 0:
         merge_group_summaries = [f"'{mg.suggested_title}' ({len(mg.discussion_ids)} discussions from {', '.join(mg.source_groups)})" for mg in merge_result.merge_groups]
-        logger.info(f"🔗 Merged {merge_result.merge_operations} groups: {'; '.join(merge_group_summaries)}")
+        logger.info(f"Merged {merge_result.merge_operations} groups: {'; '.join(merge_group_summaries)}")
 
     logger.info(f"Discussion merging complete: {merge_result.original_count} → {merge_result.merged_count} " f"({merge_result.merge_operations} merge operations)")
 

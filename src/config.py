@@ -26,7 +26,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from constants import SimilarityThreshold, VisionDescribeScope
+from constants import APP_VERSION, SimilarityThreshold, VisionDescribeScope
 
 
 # ============================================================================
@@ -496,7 +496,7 @@ class Settings(BaseSettings):
 
     # App metadata
     app_name: str = Field(default="LangRAG Newsletter", description="Application name")
-    app_version: str = Field(default="2.0.0", description="Application version")
+    app_version: str = Field(default=APP_VERSION, description="Application version")
     debug: bool = Field(default=False, description="Debug mode flag")
 
     # Nested settings
