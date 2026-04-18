@@ -17,10 +17,13 @@ export const RAG_SSE_EVENTS = {
 } as const;
 
 export const RAG_API_ROUTES = {
+  CHAT: "/api/rag/chat",
   CHAT_STREAM: "/api/rag/chat/stream",
   SESSIONS: "/api/rag/sessions",
   INGEST_PODCASTS: "/api/rag/ingest/podcasts",
   INGEST_PODCASTS_SCAN: "/api/rag/ingest/podcasts/scan",
+  INGEST_NEWSLETTERS: "/api/rag/ingest/newsletters",
+  SOURCES_NEWSLETTERS: "/api/rag/sources/newsletters",
   SOURCES_STATS: "/api/rag/sources/stats",
   EVALUATIONS: "/api/rag/evaluations",
 } as const;

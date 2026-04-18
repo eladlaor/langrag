@@ -1,6 +1,8 @@
 # Changelog
 
 ## Table of Contents
+- [2026-04-18: Codebase Audit (B+ 82/100) & force_refresh_extraction Bug Fix](#2026-04-18-codebase-audit-b-82100--force_refresh_extraction-bug-fix)
+- [2026-04-15: RAG Newsletter Conversation (Plan B)](#2026-04-15-rag-newsletter-conversation-plan-b)
 - [2026-04-08: Overlap Extraction Cache & Sender Map Persistence (Phases 2-3)](#2026-04-08-overlap-extraction-cache--sender-map-persistence-phases-2-3)
 - [2026-04-06: Per-Message Translation Cache (Phase 1 - Incremental Caching)](#2026-04-06-per-message-translation-cache-phase-1---incremental-caching)
 - [2026-03-29: Image-to-Discussion Association (Phase 6)](#2026-03-29-image-to-discussion-association-phase-6)
@@ -20,6 +22,48 @@
 - [2025-12-12: Anti-Repetition System](#2025-12-12-anti-repetition-system)
 - [2025-12-06: Fail-Fast Error Handling Improvements](#2025-12-06-fail-fast-error-handling-improvements)
 - [2025-12-06: Worth Mentioning Enhancement](#2025-12-06-worth-mentioning-enhancement)
+
+---
+
+## 2026-04-18: Codebase Audit (B+ 82/100) & force_refresh_extraction Bug Fix
+
+**What Changed:**
+- Full codebase audit conducted — graded B+ (82/100). Full report: `knowledge/audits/AUDIT_2026_04_18.md`
+- Bug fix: `force_refresh_extraction` was not propagated from graph state to the Beeper extractor's internal MongoDB cache check (`src/graphs/single_chat_analyzer/graph.py:248`). The `@with_cache_check` decorator bypassed the file-level cache, but the extractor's `kwargs.get("force_refresh", False)` always defaulted to `False`.
+
+**Why:**
+- Audit: periodic code health assessment to identify architectural risks and prioritize improvements.
+- Bug fix: discovered during newsletter generation for AIL and AI Transformation Guild communities — stale empty extraction cache entries were being served despite `force_refresh_extraction: true`.
+
+**Key audit findings (top 3):**
+1. Sync `requests` blocking async event loop in `beeper.py` — production performance risk
+2. No production checkpointer for LangGraph workflows — no crash recovery
+3. `beeper.py` at 1504 lines is a God class needing decomposition
+
+---
+
+## 2026-04-15: RAG Newsletter Conversation (Plan B)
+
+**What Changed:**
+
+Implemented newsletter-specific RAG content source and ingestion pipeline (Plan B of the RAG conversation feature). Newsletters stored in MongoDB can now be chunked, embedded, and queried alongside podcast content.
+
+**New Files:**
+- `src/rag/sources/newsletter_source.py` -- Newsletter content source (reads from MongoDB `newsletters` collection, selects best version, delegates to MarkdownChunker)
+- `src/rag/chunking/markdown_chunker.py` -- Section-aware markdown chunking (splits on headers, preserves discussion boundaries, classifies section types)
+- `tests/golden_datasets/newsletters_v1.json` -- 15 Q&A golden dataset for newsletter RAG evaluation
+
+**Modified Files:**
+- `src/constants.py` -- Added `ROUTE_RAG_CHAT`, `ROUTE_RAG_INGEST_NEWSLETTERS`, `ROUTE_RAG_SOURCES_NEWSLETTERS`
+- `src/custom_types/api_schemas.py` -- Added `RAGChatResponse`, `RAGCitationResponse`, `RAGNewsletterIngestRequest`
+- `src/api/rag_conversation.py` -- Added 3 endpoints: `POST /rag/chat` (non-streaming), `POST /rag/ingest/newsletters`, `GET /rag/sources/newsletters`
+- `ui/frontend/src/components/rag/CitationCard.tsx` -- Newsletter-specific citation rendering (date range, section title, section type badges)
+- `ui/frontend/src/constants/rag.ts` -- Added new API routes
+
+**Why:**
+- Newsletter content was already in MongoDB but not searchable via RAG
+- Non-streaming chat endpoint enables CLI/agent interaction without SSE
+- Cross-source queries (podcast + newsletter) work out of the box via the shared retrieval pipeline
 
 ---
 

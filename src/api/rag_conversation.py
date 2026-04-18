@@ -19,10 +19,13 @@ from constants import (
     HTTP_STATUS_NOT_FOUND,
     HTTP_STATUS_INTERNAL_SERVER_ERROR,
     ROUTE_RAG_CHAT_STREAM,
+    ROUTE_RAG_CHAT,
     ROUTE_RAG_SESSIONS,
     ROUTE_RAG_SESSION_BY_ID,
     ROUTE_RAG_INGEST_PODCASTS,
     ROUTE_RAG_INGEST_PODCASTS_SCAN,
+    ROUTE_RAG_INGEST_NEWSLETTERS,
+    ROUTE_RAG_SOURCES_NEWSLETTERS,
     ROUTE_RAG_SOURCES_STATS,
     ROUTE_RAG_EVALUATIONS,
     RAGEventType,
@@ -30,6 +33,9 @@ from constants import (
 )
 from custom_types.api_schemas import (
     RAGChatRequest,
+    RAGChatResponse,
+    RAGCitationResponse,
+    RAGNewsletterIngestRequest,
     RAGSessionCreateRequest,
     RAGSessionResponse,
     RAGPodcastIngestRequest,
@@ -40,7 +46,7 @@ from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
 from db.repositories.rag_evaluations import EvaluationsRepository
 from rag.conversation.manager import ConversationManager
-from rag.generation.rag_chain import generate_answer_stream
+from rag.generation.rag_chain import generate_answer, generate_answer_stream
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.sources.podcast_source import PodcastSource, PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS
 
@@ -282,6 +288,161 @@ async def get_source_stats() -> list[RAGSourceStats]:
         RAGSourceStats(source_type=source_type, chunk_count=count)
         for source_type, count in stats.items()
     ]
+
+
+# ============================================================================
+# EVALUATIONS
+# ============================================================================
+
+
+# ============================================================================
+# NON-STREAMING CHAT (CLI / Agent-friendly)
+# ============================================================================
+
+
+@router.post(ROUTE_RAG_CHAT)
+async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
+    """
+    Non-streaming chat endpoint for CLI and agent consumption.
+
+    Creates or reuses a session, retrieves relevant context,
+    and returns the full answer with citations as JSON.
+    """
+    manager = ConversationManager()
+
+    # Create or reuse session
+    session_id = request.session_id
+    if not session_id:
+        session_id = await manager.create_session(request.content_sources)
+
+    session = await manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
+
+    # Record user message
+    await manager.add_user_message(session_id, request.query)
+
+    # Get conversation history
+    history = await manager.get_conversation_history(session_id)
+
+    try:
+        # Retrieve context
+        pipeline = RetrievalPipeline()
+        retrieval_result = await pipeline.retrieve(
+            query=request.query,
+            content_sources=request.content_sources or None,
+        )
+
+        context = retrieval_result["context"]
+        citations = retrieval_result["citations"]
+
+        # Generate answer (non-streaming)
+        answer = await generate_answer(
+            query=request.query,
+            context=context,
+            conversation_history=history,
+        )
+
+        # Record assistant message
+        await manager.add_assistant_message(
+            session_id=session_id,
+            content=answer,
+            citations=citations,
+        )
+
+        return RAGChatResponse(
+            session_id=session_id,
+            answer=answer,
+            citations=[
+                RAGCitationResponse(
+                    index=c.get("index", 0),
+                    chunk_id=c.get("chunk_id", ""),
+                    source_type=c.get("source_type", ""),
+                    source_title=c.get("source_title", ""),
+                    snippet=c.get("snippet", ""),
+                    search_score=c.get("search_score", 0.0),
+                    metadata=c.get("metadata", {}),
+                )
+                for c in citations
+            ],
+        )
+
+    except Exception as e:
+        logger.error(f"RAG chat error: {e}", extra={"session_id": session_id})
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# ============================================================================
+# NEWSLETTER INGESTION
+# ============================================================================
+
+
+@router.post(ROUTE_RAG_INGEST_NEWSLETTERS)
+async def ingest_newsletters(request: RAGNewsletterIngestRequest):
+    """
+    Ingest newsletters from MongoDB into RAG chunks.
+
+    Reads newsletters from the newsletters collection, chunks markdown content,
+    embeds, and stores in rag_chunks.
+    """
+    try:
+        from rag.ingestion.pipeline import IngestionPipeline
+        from rag.sources.newsletter_source import NewsletterSource
+
+        source = NewsletterSource()
+        newsletters = await source.list_sources_filtered(
+            data_source_name=request.data_source_name,
+            limit=request.limit,
+            start_date=request.start_date,
+            end_date=request.end_date,
+        )
+
+        if not newsletters:
+            return {
+                "message": "No newsletters found matching filters",
+                "ingested_count": 0,
+                "skipped_count": 0,
+                "total_chunks": 0,
+            }
+
+        pipeline = IngestionPipeline()
+        results = await pipeline.ingest_batch(
+            source=source,
+            source_ids=[nl["source_id"] for nl in newsletters],
+            force_refresh=request.force_refresh,
+        )
+
+        ingested_count = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+        skipped_count = sum(1 for r in results if r.get("skipped"))
+        total_chunks = sum(r.get("chunks_stored", 0) for r in results)
+
+        return {
+            "message": f"Processed {len(results)} newsletters",
+            "ingested_count": ingested_count,
+            "skipped_count": skipped_count,
+            "total_chunks": total_chunks,
+            "results": results,
+        }
+
+    except Exception as e:
+        logger.error(f"Newsletter ingestion failed: {e}")
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(ROUTE_RAG_SOURCES_NEWSLETTERS)
+async def list_newsletter_sources():
+    """List ingested newsletters with metadata."""
+    try:
+        db = await get_database()
+        repo = ChunksRepository(db)
+
+        # Get all ingested newsletter sources
+        ingested = await repo.list_ingested_sources(str(ContentSourceType.NEWSLETTER))
+        return ingested
+
+    except Exception as e:
+        logger.error(f"Failed to list newsletter sources: {e}")
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # ============================================================================
