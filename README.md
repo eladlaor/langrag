@@ -29,12 +29,14 @@
 
 - [Overview](#why)
   - [Why](#why)
-  - [How](#how)
   - [What](#what)
+  - [How](#how)
 - [Chosen By Leading AI-Engineering Communities](#chosen-by-leading-ai-engineering-communities)
   - [LangTalks](#langtalks)
   - [API: AI Protocols Israel](#api--ai-protocols-israel)
   - [n8n Israel](#n8n-israel)
+  - [AI Transformation Guild](#ai-transformation-guild)
+  - [AIL - AI Leaders](#ail---ai-leaders)
 - [How It Works](#how-it-works)
   - [Pipeline Overview](#pipeline-overview)
   - [What Gives This Solution an Edge](#what-gives-this-solution-an-edge)
@@ -55,30 +57,27 @@
 
 ### Why
 
-If you're an AI engineer, you're dealing with FOMO.<br>
-So community discussions are the best place for you to be up to speed, learn what's worth your attention, and sharpen your knowledge by discussing real-world challenges with peers.<br>
-AI practitioners sharing nuanced, battle-tested insights and perspectives.<br>
-**The problem:** the messages are too valuable to miss, but too many to keep up with.
-
-### How
-
-LangRAG uses **Beeper** for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process group-chats in parallel, and generates structured newsletters. The analysis settings and output destinations are **deeply configurable**.<br> Currently works with OpenAI or Anthropic as the LLM provider.<br> **Cost-optimized** with Batch API (50% savings) and local SLM pre-filtering (15-30% additional savings).<br> Full observability via Langfuse, Prometheus, and Grafana.
+If you're in AI engineering, you're probably in FOMO.<br>
+**The good news:** There are some great Whatsapp communities, facilitating daily discussions with experts and peers, which are the best place to solve this constantly-buzzing problem. The perfect places for you to always remain up to speed, learn what's worth actually your attention, and sharpen your knowledge by discussing real-world challenges with real people, sharing nuanced, battle-tested insights and perspectives.<br>
+**The bad news:** the messages are too valuable to miss, but waaaaaaay too many to keep up with.
 
 ### What
 
-Generating newsletters since November 2024 across lively communities containing 12+ active WhatsApp groups with more than 8,000 distinct members.
+Generating newsletters since November 2024 across lively communities containing 17+ active WhatsApp groups with more than 8,000 distinct members, in order to separate the noise from the valuable actionable insights.
+
+### How
+
+LangRAG uses **Beeper** for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process group-chats in parallel, and generates structured newsletters. The analysis settings and output destinations are **deeply configurable**.<br> Currently works with OpenAI or Anthropic as the LLM provider.<br> **Cost-optimized** with Batch API (50% savings) and local SLM pre-filtering (15-30% additional savings). Optional SLM semantic enrichment for improved discussion ranking.<br> Full observability via Langfuse, DeepEval, Prometheus, and Grafana.
 
 ---
 
 ## Chosen By Leading AI-Engineering Communities
 
-<!-- TODO: Replace placeholder logos, LinkedIn URLs, and join links with real ones -->
-
 ### LangTalks
 
 <img src="docs/figures/images/langtalks.jpg" alt="LangTalks" width="100" align="left" style="margin-right: 16px; border-radius: 12px;">
 
-![6 WhatsApp groups](https://img.shields.io/badge/-6_WhatsApp_groups-555?logo=whatsapp&logoColor=25D366)
+![8 WhatsApp groups](https://img.shields.io/badge/-8_WhatsApp_groups-555?logo=whatsapp&logoColor=25D366)
 
 Israel's largest AI-engineering community.
 
@@ -120,6 +119,38 @@ Founded by [Elay Guez](https://www.linkedin.com/in/elay-g/), [Gilad Shoham](http
 
 <br clear="left">
 
+<hr width="50%" align="center">
+
+### AI Transformation Guild
+
+<img src="docs/figures/images/ai_transformation.jpg" alt="AI Transformation Guild" width="100" align="left" style="margin-right: 16px; border-radius: 12px;">
+
+![1 WhatsApp group](https://img.shields.io/badge/-1_WhatsApp_group-555?logo=whatsapp&logoColor=25D366)
+
+A community for those who are leading AI transformation processes in mid-to-large scale organizations. 
+
+Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melamud](https://www.linkedin.com/in/leon-melamud/), [Tomer Shahar](https://www.linkedin.com/in/tommer-shahar/) & [Oren Melamed](https://www.linkedin.com/in/orenmelamed/)
+
+[Apply to join](https://docs.google.com/forms/d/e/1FAIpQLScU8vIRAG_QlMqX3zlbhVc8etyVpeZcjb7xbe__sA2ajKp2sQ/viewform)
+
+<br clear="left">
+
+<hr width="50%" align="center">
+
+### AIL - AI Leaders
+
+<img src="docs/figures/images/ai_leaders.jpg" alt="AIL - AI Leaders" width="100" align="left" style="margin-right: 16px; border-radius: 12px;">
+
+![1 WhatsApp group](https://img.shields.io/badge/-1_WhatsApp_group-555?logo=whatsapp&logoColor=25D366)
+
+A community for AI\Data Leads. 
+
+Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melamud](https://www.linkedin.com/in/leon-melamud/), [Tomer Shahar](https://www.linkedin.com/in/tommer-shahar/) & [Oren Melamed](https://www.linkedin.com/in/orenmelamed/)
+
+[Apply to join](https://docs.google.com/forms/d/e/1FAIpQLScU8vIRAG_QlMqX3zlbhVc8etyVpeZcjb7xbe__sA2ajKp2sQ/viewform)
+
+<br clear="left">
+
 ---
 
 ## How It Works
@@ -151,6 +182,7 @@ Founded by [Elay Guez](https://www.linkedin.com/in/elay-g/), [Gilad Shoham](http
 | Human-in-the-Loop | Two-phase pipeline with Web UI discussion selector | Editorial control over final newsletter content |
 | Batch API | JSONL serialization, async polling, exponential backoff | 50% cost reduction |
 | SLM Pre-filtering | Configurable local SLM classifies KEEP/FILTER/UNCERTAIN before LLM | 15-30% additional savings |
+| SLM Semantic Enrichment | Fine-tuned DeBERTa-v3 model tags messages with 15 semantic labels for ranking | Richer discussion scoring signals |
 | Hybrid Anti-Repetition | Embedding cosine similarity + LLM validation vs. last N editions | No repetition of content from previous N newsletters |
 | Smart Discussion Merging | Configurable similarity thresholds + LLM validation | Better handling of cross-group similar discussions |
 | Full Observability | Langfuse + Prometheus + Loki/Grafana, all fail-soft | Production monitoring |
@@ -196,19 +228,23 @@ Normalize all messages to English using gpt-4o-mini in batch mode. Messages alre
 
 Group messages into topical discussions. Uses reply-to chains as the primary signal, with LLM-based content analysis as a secondary signal for standalone messages. Outputs a structured list of discussions, each with its constituent messages.
 
-#### 7. Rank Discussions
+#### 7. SLM Enrichment *(optional)*
+
+Enriches messages with 15 semantic labels (professional, question, resource, experience_sharing, how_to, humor, etc.) using a fine-tuned DeBERTa-v3 model from HuggingFace. These labels feed into the discussion ranker as pre-computed signals, improving ranking quality. Runs locally with no API calls. Fail-soft: if the model is unavailable, ranking proceeds without enrichment signals.
+
+#### 8. Rank Discussions
 
 Score discussions by importance and diversity. Uses a **discussion ranker subgraph** that combines multi-factor scoring with Maximal Marginal Relevance (MMR) re-ranking. Includes anti-repetition checks against previous newsletters (embedding cosine similarity + LLM validation) | reducing repeated content by up to 80%.
 
-#### 8. Associate Images
+#### 9. Associate Images
 
 Maps extracted image descriptions to their parent discussions. The generation stage receives both the text content and the visual context of each discussion, producing richer and more accurate summaries.
 
-#### 9. Generate Summary
+#### 10. Generate Summary
 
 Create the newsletter content from the top-ranked discussions. Uses format plugins (`langtalks_format`, `mcp_israel_format`) to produce output as JSON, Markdown, and HTML. Each format defines its own structure, section ordering, and editorial style. Image context is included where relevant.
 
-#### 10. Link Enrichment
+#### 11. Link Enrichment
 
 Extract URLs from the original messages and optionally perform web searches to find additional relevant links. Inserts markdown hyperlinks into the newsletter content non-destructively | existing text is preserved, links are woven in contextually.
 
@@ -359,7 +395,7 @@ See: **[docs/setup/SETUP_LINKEDIN_WEBHOOK.md](docs/setup/SETUP_LINKEDIN_WEBHOOK.
 
 | Parameter | Description | Options | Default |
 |-----------|-------------|---------|---------|
-| `data_source_name` | Which community to generate a newsletter for | `langtalks`, `mcp_israel`, `n8n_israel`, `ai_transformation_guild` | required |
+| `data_source_name` | Which community to generate a newsletter for | `langtalks`, `mcp_israel`, `n8n_israel`, `ai_transformation_guild`, `ail` | required |
 | `consolidate_chats` | Merge results from multiple chats into a single newsletter | `true` / `false` | `true` |
 | `force_refresh_extraction` | Re-extract messages from Beeper, ignoring cached data | `true` / `false` | `false` |
 | `previous_newsletters_to_consider` | Number of past newsletters checked for anti-repetition | `0`-`20` | `5` |
@@ -380,6 +416,7 @@ See `.env.example` for the full list. Key variables:
 | `BEEPER_HOMESERVER` | Matrix homeserver (default: `beeper.local`) |
 | `BEEPER_RECOVERY_CODE` | Optional, enables server-side key backup |
 | `SLM_ENABLED` | Enable Ollama SLM pre-filtering (`true`/`false`) |
+| `SLM_ENRICHMENT_ENABLED` | Enable DeBERTa semantic enrichment for ranking (`true`/`false`) |
 | `MONGODB_URI` | MongoDB connection string |
 
 ---
