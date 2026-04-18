@@ -8,14 +8,14 @@ CLI flags (highest) > Environment variables > Config file (lowest)
 import json
 import yaml
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class ConfigLoader:
     """Load and merge YAML/JSON configurations with CLI arguments."""
 
     @staticmethod
-    def load_config_file(file_path: str) -> Dict[str, Any]:
+    def load_config_file(file_path: str) -> dict[str, Any]:
         """
         Load configuration from YAML or JSON file.
 
@@ -52,10 +52,10 @@ class ConfigLoader:
 
     @staticmethod
     def merge_configs(
-        config_file: Optional[Dict[str, Any]] = None,
-        cli_args: Optional[Dict[str, Any]] = None,
-        env_vars: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        config_file: dict[str, Any] | None = None,
+        cli_args: dict[str, Any] | None = None,
+        env_vars: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Merge configurations from multiple sources with priority.
 
@@ -82,7 +82,7 @@ class ConfigLoader:
             >>> config["top_k_discussions"]
             5
         """
-        merged: Dict[str, Any] = {}
+        merged: dict[str, Any] = {}
 
         # Priority order: config_file (lowest) -> env_vars -> cli_args (highest)
         for source in [config_file, env_vars, cli_args]:
@@ -95,7 +95,7 @@ class ConfigLoader:
         return merged
 
     @staticmethod
-    def validate_required_fields(config: Dict[str, Any], required_fields: list[str]) -> list[str]:
+    def validate_required_fields(config: dict[str, Any], required_fields: list[str]) -> list[str]:
         """
         Check which required fields are missing from config.
 

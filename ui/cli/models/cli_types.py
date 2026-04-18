@@ -5,7 +5,6 @@ Defines enums for data sources, languages, formats, and chat name mappings.
 """
 
 from enum import Enum
-from typing import Dict, List
 
 
 class DataSource(str, Enum):
@@ -52,12 +51,12 @@ class OutputAction(str, Enum):
 
 # Chat name mappings by data source (case-sensitive)
 # Source of Truth: frontend/src/constants/index.ts
-CHAT_NAMES: Dict[DataSource, List[str]] = {
+CHAT_NAMES: dict[DataSource, list[str]] = {
     DataSource.LANGTALKS: [
         "LangTalks Community",
         "LangTalks Community 2",
         "LangTalks Community 3",
-        "LangTalks community 4",  # intentional lowercase - group is named with a lowercase c
+        "LangTalks Community 4",
         "LangTalks - Code Generation Agents",
         "LangTalks - English",
         "LangTalks - AI driven coding",

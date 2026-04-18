@@ -30,7 +30,7 @@ INSTRUCTIONS FOR DISCUSSION SEPARATION:
    - A list of chronologically sorted messages (messages)
    - A concise summary of the discussion (nutshell)
    - The number of messages in the discussion (num_messages)
-   - The timestamp of the first message in the discussion (first_message_in_disussion_timestamp)
+   - The timestamp of the first message in the discussion (first_message_in_discussion_timestamp)
 
 Note: The group_name will be assigned automatically during post-processing.
 
@@ -50,7 +50,7 @@ Output:
       ],
       "nutshell": "A detailed analysis of GPT-4's hallucination problems and potential solutions",
       "num_messages": 8,
-      "first_message_in_disussion_timestamp": 1642345678000
+      "first_message_in_discussion_timestamp": 1642345678000
     }},
     // More discussions...
   ]

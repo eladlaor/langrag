@@ -452,7 +452,7 @@ class TestAggregateLinksNode:
             assert os.path.exists(result["aggregated_links_file_path"])
 
             # Verify deduplication
-            with open(result["aggregated_links_file_path"], 'r') as f:
+            with open(result["aggregated_links_file_path"]) as f:
                 data = json.load(f)
                 # Should have 3 unique links (one duplicate removed)
                 assert data["count"] == 3

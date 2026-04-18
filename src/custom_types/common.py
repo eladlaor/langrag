@@ -64,7 +64,7 @@ class Discussion(BaseModel):
     messages: list[Message] = Field(description="A sorted list of the messages that belong to the discussion, oldest one on index 0", default=[])
     nutshell: str = Field(description="A short summary of the discussion", default="")
     num_messages: int = Field(description="The number of messages in the discussion", default=0)
-    first_message_in_disussion_timestamp: int = Field(
+    first_message_in_discussion_timestamp: int = Field(
         description="The unix timestamp of the first message in the discussion, taken from the Message timestamp attribute",
         default=0,
     )

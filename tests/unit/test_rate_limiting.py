@@ -2,10 +2,7 @@
 Unit tests for API rate limiting.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from api.rate_limiting import (
     setup_rate_limiting,
@@ -70,7 +67,6 @@ class TestLimiterInstance:
     def test_limiter_uses_remote_address(self):
         """Limiter uses client IP as key function."""
         # The limiter's key function should be get_remote_address
-        from slowapi.util import get_remote_address
 
         # Verify limiter is configured (it exists)
         assert limiter is not None

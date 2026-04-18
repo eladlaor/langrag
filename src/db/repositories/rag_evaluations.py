@@ -5,7 +5,7 @@ CRUD operations for the rag_evaluations collection (DeepEval quality scores).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -59,7 +59,7 @@ class EvaluationsRepository(BaseRepository):
             Keys.EVALUATION_DURATION_MS: 0,
             Keys.STATUS: EvaluationStatus.PENDING,
             Keys.ERROR: None,
-            Keys.CREATED_AT: datetime.now(timezone.utc),
+            Keys.CREATED_AT: datetime.now(UTC),
             Keys.COMPLETED_AT: None,
         }
         await self.create(document)
@@ -92,7 +92,7 @@ class EvaluationsRepository(BaseRepository):
                     Keys.EVALUATION_MODEL: evaluation_model,
                     Keys.EVALUATION_DURATION_MS: duration_ms,
                     Keys.STATUS: EvaluationStatus.COMPLETED,
-                    Keys.COMPLETED_AT: datetime.now(timezone.utc),
+                    Keys.COMPLETED_AT: datetime.now(UTC),
                 }
             },
         )
@@ -105,7 +105,7 @@ class EvaluationsRepository(BaseRepository):
                 "$set": {
                     Keys.STATUS: EvaluationStatus.FAILED,
                     Keys.ERROR: error,
-                    Keys.COMPLETED_AT: datetime.now(timezone.utc),
+                    Keys.COMPLETED_AT: datetime.now(UTC),
                 }
             },
         )

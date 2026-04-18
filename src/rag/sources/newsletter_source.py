@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from config import get_settings
-from constants import ContentSourceType, NewsletterVersionType, FileFormat, NewsletterStatus
+from constants import ContentSourceType, NewsletterVersionType, NewsletterStatus
 from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys
 from db.connection import get_database
 from db.repositories.newsletters import NewslettersRepository

@@ -5,7 +5,6 @@ Provides functions for validating input and prompting users for required fields.
 """
 
 from datetime import datetime
-from typing import List
 from rich.prompt import Prompt
 from rich.console import Console
 
@@ -38,7 +37,7 @@ def validate_date(date_str: str) -> bool:
         return False
 
 
-def prompt_chat_selection(data_source: DataSource) -> List[str]:
+def prompt_chat_selection(data_source: DataSource) -> list[str]:
     """
     Prompt user to select chats for given data source.
 

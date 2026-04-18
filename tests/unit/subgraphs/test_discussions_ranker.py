@@ -73,7 +73,7 @@ class TestAnalyzeDiscussionsNode:
             assert result["discussions_ranking_file_path"] == expected_file
 
             # Verify content was updated (not old data)
-            with open(expected_file, 'r') as f:
+            with open(expected_file) as f:
                 data = json.load(f)
                 assert "old" not in data
 
@@ -98,7 +98,7 @@ class TestAnalyzeDiscussionsNode:
 
             result = await analyze_discussions(state)
 
-            with open(result["discussions_ranking_file_path"], 'r') as f:
+            with open(result["discussions_ranking_file_path"]) as f:
                 data = json.load(f)
                 assert data["ranked_discussions"] == []
                 assert data["editorial_notes"] == "No discussions to rank"

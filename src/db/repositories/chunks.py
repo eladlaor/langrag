@@ -5,7 +5,7 @@ CRUD operations for the rag_chunks collection (embedded content chunks).
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -36,7 +36,7 @@ class ChunksRepository(BaseRepository):
         if not chunks:
             return 0
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for chunk in chunks:
             chunk[Keys.CREATED_AT] = now
 

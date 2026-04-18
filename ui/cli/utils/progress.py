@@ -15,7 +15,6 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.table import Table
-from typing import Dict, List, Optional
 
 
 class ProgressTracker:
@@ -37,12 +36,12 @@ class ProgressTracker:
             TimeElapsedColumn(),
             console=console,
         )
-        self.overall_task: Optional[int] = None
-        self.chat_tasks: Dict[str, int] = {}
-        self.results: List[Dict[str, str]] = []
+        self.overall_task: int | None = None
+        self.chat_tasks: dict[str, int] = {}
+        self.results: list[dict[str, str]] = []
         self.started = False
 
-    def handle_event(self, event: Dict[str, any]):
+    def handle_event(self, event: dict[str, any]):
         """
         Process SSE event and update progress displays.
 
@@ -69,7 +68,7 @@ class ProgressTracker:
         if handler:
             handler(data)
 
-    def _on_workflow_started(self, data: Dict[str, any]):
+    def _on_workflow_started(self, data: dict[str, any]):
         """Handle workflow_started event - create overall progress bar."""
         if not self.started:
             self.progress.start()
@@ -81,7 +80,7 @@ class ProgressTracker:
             total=total_chats,
         )
 
-    def _on_chat_started(self, data: Dict[str, any]):
+    def _on_chat_started(self, data: dict[str, any]):
         """Handle chat_started event - create chat-specific progress bar."""
         chat_name = data.get("chat_name", "Unknown")
         task_id = self.progress.add_task(
@@ -90,7 +89,7 @@ class ProgressTracker:
         )
         self.chat_tasks[chat_name] = task_id
 
-    def _on_stage_progress(self, data: Dict[str, any]):
+    def _on_stage_progress(self, data: dict[str, any]):
         """Handle stage_progress event - update chat progress and stage label."""
         chat_name = data.get("chat_name")
         stage = data.get("stage")
@@ -120,7 +119,7 @@ class ProgressTracker:
         stage_label = stage.replace("_", " ").title()
         self.progress.update(task_id, description=f"[cyan]{chat_name}[/cyan] {emoji} {stage_label}")
 
-    def _on_chat_completed(self, data: Dict[str, any]):
+    def _on_chat_completed(self, data: dict[str, any]):
         """Handle chat_completed event - mark chat as done."""
         chat_name = data.get("chat_name")
 
@@ -137,7 +136,7 @@ class ProgressTracker:
 
         self.results.append({"chat": chat_name, "status": "success"})
 
-    def _on_chat_failed(self, data: Dict[str, any]):
+    def _on_chat_failed(self, data: dict[str, any]):
         """Handle chat_failed event - mark chat as failed with error."""
         chat_name = data.get("chat_name")
         error = data.get("error", "Unknown error")
@@ -154,11 +153,11 @@ class ProgressTracker:
 
         self.results.append({"chat": chat_name, "status": "failed", "error": error})
 
-    def _on_consolidation_started(self, data: Dict[str, any]):
+    def _on_consolidation_started(self, data: dict[str, any]):
         """Handle consolidation_started event - show consolidation message."""
         self.console.print("\n[bold magenta]🔀 Starting cross-chat consolidation...[/bold magenta]")
 
-    def _on_consolidation_completed(self, data: Dict[str, any]):
+    def _on_consolidation_completed(self, data: dict[str, any]):
         """Handle consolidation_completed event - show completion message."""
         self.console.print("[green]✅ Consolidation completed[/green]")
 
@@ -171,12 +170,12 @@ class ProgressTracker:
                 f"[dim]Consolidated {total_discussions} discussions from {total_chats} chats[/dim]"
             )
 
-    def _on_workflow_completed(self, data: Dict[str, any]):
+    def _on_workflow_completed(self, data: dict[str, any]):
         """Handle workflow_completed event - stop progress and show summary."""
         if self.started:
             self.progress.stop()
 
-    def _on_error(self, data: Dict[str, any]):
+    def _on_error(self, data: dict[str, any]):
         """Handle error event - display error message."""
         message = data.get("message", "Unknown error occurred")
         self.console.print(f"[red bold]❌ Error: {message}[/red bold]")

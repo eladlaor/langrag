@@ -8,7 +8,6 @@ and provides instructions for adding it to your .env file.
 SECURITY NOTE: Your access token is sensitive. Never commit it to git!
 """
 
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -106,7 +105,7 @@ def extract_beeper_access_token():
             print("➕ Adding BEEPER_ACCESS_TOKEN to .env...")
             if not env_content.endswith('\n'):
                 env_content += '\n'
-            env_content += f"\n# Matrix Access Token (extracted from Beeper Desktop)\n"
+            env_content += "\n# Matrix Access Token (extracted from Beeper Desktop)\n"
             env_content += f"BEEPER_ACCESS_TOKEN={access_token}\n"
 
         # Write back to .env

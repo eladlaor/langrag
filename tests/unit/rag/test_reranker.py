@@ -2,7 +2,6 @@
 Unit tests for RAG chunk reranker (MMR diversity).
 """
 
-import pytest
 
 from rag.retrieval.reranker import rerank_chunks_mmr, _cosine_similarity
 from constants import RAG_SEARCH_SCORE_FIELD

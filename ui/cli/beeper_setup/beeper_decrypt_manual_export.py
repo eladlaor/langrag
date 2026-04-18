@@ -34,10 +34,10 @@ def decrypt_manual_export():
     print()
 
     # Prompt for export file location
-    print(f"📁 Default export file location:")
+    print("📁 Default export file location:")
     print(f"   {default_export_file}")
     print()
-    user_path = input(f"Press Enter to use default, or enter custom path: ").strip()
+    user_path = input("Press Enter to use default, or enter custom path: ").strip()
 
     manual_export_file = user_path if user_path else default_export_file
 
@@ -93,13 +93,13 @@ def decrypt_manual_export():
             stdout, stderr = proc.communicate()
 
         if proc.returncode != 0:
-            print(f"❌ Decryption failed")
+            print("❌ Decryption failed")
             if stderr:
                 print(f"Error: {stderr}")
             return False
 
         # Validate
-        with open(temp_output, 'r') as f:
+        with open(temp_output) as f:
             keys = json.load(f)
 
         print(f"✅ Decrypted {len(keys):,} key entries")
@@ -112,7 +112,7 @@ def decrypt_manual_export():
 
         # Show stats
         unique_rooms = len(set(k['room_id'] for k in keys))
-        print(f"📊 Stats:")
+        print("📊 Stats:")
         print(f"   🔑 Total keys: {len(keys):,}")
         print(f"   🏠 Unique rooms: {unique_rooms:,}")
         print(f"   📦 File size: {os.path.getsize(output_path):,} bytes")

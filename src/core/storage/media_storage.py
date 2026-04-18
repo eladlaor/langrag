@@ -14,7 +14,7 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import aiofiles
 
@@ -79,7 +79,7 @@ class LocalMediaStorage(MediaStorageInterface):
     ) -> str:
         chat_slug = _slugify(chat_name)
         ts_seconds = timestamp_ms / MS_TO_SECONDS_MULTIPLIER if timestamp_ms > _MS_TIMESTAMP_THRESHOLD else timestamp_ms
-        month_str = datetime.fromtimestamp(ts_seconds, tz=timezone.utc).strftime("%Y-%m")
+        month_str = datetime.fromtimestamp(ts_seconds, tz=UTC).strftime("%Y-%m")
         safe_filename = _safe_filename(filename) or "image"
         return os.path.join(data_source_name, chat_slug, month_str, f"{image_id}_{safe_filename}")
 

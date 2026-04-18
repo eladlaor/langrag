@@ -6,7 +6,8 @@ Handles all API interactions including synchronous requests and SSE streaming.
 
 import json
 import httpx
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
+from collections.abc import Iterator
 from rich.console import Console
 
 
@@ -27,9 +28,9 @@ class NewsletterAPIClient:
 
     def generate_periodic_newsletter(
         self,
-        request: Dict[str, Any],
+        request: dict[str, Any],
         stream: bool = True,
-    ) -> Dict[str, Any] | Iterator[Dict[str, Any]]:
+    ) -> dict[str, Any] | Iterator[dict[str, Any]]:
         """
         Generate periodic newsletter from WhatsApp chats.
 
@@ -53,7 +54,7 @@ class NewsletterAPIClient:
             response.raise_for_status()
             return response.json()
 
-    def _stream_sse(self, endpoint: str, request: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+    def _stream_sse(self, endpoint: str, request: dict[str, Any]) -> Iterator[dict[str, Any]]:
         """
         Stream SSE events from endpoint.
 
@@ -96,11 +97,11 @@ class NewsletterAPIClient:
 
     def get_runs(
         self,
-        run_type: Optional[str] = "periodic",
-        data_source: Optional[str] = None,
+        run_type: str | None = "periodic",
+        data_source: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List past newsletter generation runs.
 
@@ -132,7 +133,7 @@ class NewsletterAPIClient:
         run_type: str = "periodic",
         format: str = "html",
         source: str = "consolidated",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Get newsletter content for specific run.
 
@@ -153,7 +154,7 @@ class NewsletterAPIClient:
         response.raise_for_status()
         return response.json()
 
-    def get_batch_job_status(self, job_id: str) -> Dict[str, Any]:
+    def get_batch_job_status(self, job_id: str) -> dict[str, Any]:
         """
         Check status of batch job.
 
@@ -172,10 +173,10 @@ class NewsletterAPIClient:
 
     def list_batch_jobs(
         self,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         List batch jobs with optional filtering.
 
@@ -198,7 +199,7 @@ class NewsletterAPIClient:
         response.raise_for_status()
         return response.json()
 
-    def cancel_batch_job(self, job_id: str) -> Dict[str, Any]:
+    def cancel_batch_job(self, job_id: str) -> dict[str, Any]:
         """
         Cancel pending/processing batch job.
 
@@ -215,7 +216,7 @@ class NewsletterAPIClient:
         response.raise_for_status()
         return response.json()
 
-    def get_discussion_selection(self, run_directory: str) -> Dict[str, Any]:
+    def get_discussion_selection(self, run_directory: str) -> dict[str, Any]:
         """
         Load ranked discussions for HITL selection.
 
@@ -235,8 +236,8 @@ class NewsletterAPIClient:
     def save_discussion_selections(
         self,
         run_directory: str,
-        selected_discussion_ids: List[str],
-    ) -> Dict[str, Any]:
+        selected_discussion_ids: list[str],
+    ) -> dict[str, Any]:
         """
         Save user-selected discussion IDs for Phase 2.
 
@@ -258,7 +259,7 @@ class NewsletterAPIClient:
         response.raise_for_status()
         return response.json()
 
-    def generate_newsletter_phase2(self, run_directory: str) -> Dict[str, Any]:
+    def generate_newsletter_phase2(self, run_directory: str) -> dict[str, Any]:
         """
         Generate newsletter using selected discussions (Phase 2).
 

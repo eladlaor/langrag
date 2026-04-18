@@ -13,9 +13,8 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from datetime import datetime
-from unittest.mock import MagicMock, patch, AsyncMock
-from typing import List, Dict, Any, Optional
+from unittest.mock import MagicMock, patch
+from typing import Any
 import pytest
 
 # Ensure src directory is in the Python path
@@ -42,10 +41,10 @@ class MessageFactory:
         cls,
         sender: str = "@user1:beeper.com",
         body: str = "Test message content",
-        timestamp: Optional[int] = None,
-        event_id: Optional[str] = None,
-        reply_to: Optional[str] = None
-    ) -> Dict[str, Any]:
+        timestamp: int | None = None,
+        event_id: str | None = None,
+        reply_to: str | None = None
+    ) -> dict[str, Any]:
         """Create a raw Matrix/Beeper message."""
         if event_id is None:
             event_id = f"$event_{cls._counter}"
@@ -72,10 +71,10 @@ class MessageFactory:
         cls,
         sender_id: str = "user_1",
         content: str = "Parsed message content",
-        timestamp: Optional[int] = None,
-        msg_id: Optional[str] = None,
-        replies_to: Optional[str] = None
-    ) -> Dict[str, Any]:
+        timestamp: int | None = None,
+        msg_id: str | None = None,
+        replies_to: str | None = None
+    ) -> dict[str, Any]:
         """Create a parsed/standardized message."""
         if msg_id is None:
             msg_id = str(cls._counter)
@@ -96,8 +95,8 @@ class MessageFactory:
     def create_message_batch(
         cls,
         count: int = 5,
-        senders: List[str] = None
-    ) -> List[Dict[str, Any]]:
+        senders: list[str] = None
+    ) -> list[dict[str, Any]]:
         """Create a batch of parsed messages."""
         if senders is None:
             senders = ["user_1", "user_2", "user_3"]
@@ -127,11 +126,11 @@ class DiscussionFactory:
         cls,
         title: str = "Test Discussion",
         nutshell: str = "Summary of the discussion",
-        messages: Optional[List[Dict]] = None,
-        num_messages: Optional[int] = None,
+        messages: list[dict] | None = None,
+        num_messages: int | None = None,
         chat_name: str = "Test Chat",
-        disc_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        disc_id: str | None = None
+    ) -> dict[str, Any]:
         """Create a discussion object."""
         if disc_id is None:
             disc_id = f"disc_{cls._counter}"
@@ -147,7 +146,7 @@ class DiscussionFactory:
             "messages": messages,
             "num_messages": len(messages),
             "num_unique_participants": len(set(m["sender_id"] for m in messages)),
-            "first_message_in_disussion_timestamp": messages[0]["timestamp"] if messages else 1699999999000,
+            "first_message_in_discussion_timestamp": messages[0]["timestamp"] if messages else 1699999999000,
             "last_message_timestamp": messages[-1]["timestamp"] if messages else 1699999999100,
             "source_chat": chat_name
         }
@@ -157,7 +156,7 @@ class DiscussionFactory:
         cls,
         count: int = 3,
         chat_name: str = "Test Chat"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Create a batch of discussions."""
         discussions = []
         for i in range(count):
@@ -181,8 +180,8 @@ class RankingFactory:
         title: str = "Ranked Discussion",
         relevance_score: float = 8.5,
         category: str = "featured",
-        skip_reason: Optional[str] = None
-    ) -> Dict[str, Any]:
+        skip_reason: str | None = None
+    ) -> dict[str, Any]:
         """Create a ranked discussion entry."""
         return {
             "discussion_id": disc_id,
@@ -198,9 +197,9 @@ class RankingFactory:
     @classmethod
     def create_ranking_result(
         cls,
-        discussions: List[Dict[str, Any]] = None,
+        discussions: list[dict[str, Any]] = None,
         top_k: int = 5
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a full ranking result object."""
         if discussions is None:
             discussions = [
@@ -232,7 +231,7 @@ class NewsletterFactory:
         cls,
         label: str = "Key Point",
         content: str = "Important content here"
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Create a newsletter bullet point."""
         return {"label": label, "content": content}
 
@@ -240,10 +239,10 @@ class NewsletterFactory:
     def create_summarized_discussion(
         cls,
         title: str = "Featured Discussion",
-        bullet_points: Optional[List[Dict]] = None,
+        bullet_points: list[dict] | None = None,
         timestamp: int = 1699999999000,
         chat_name: str = "Test Chat"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a summarized discussion for newsletter."""
         if bullet_points is None:
             bullet_points = [
@@ -267,8 +266,8 @@ class NewsletterFactory:
         cls,
         primary_title: str = "Primary Discussion",
         secondary_count: int = 2,
-        worth_mentioning: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        worth_mentioning: list[str] | None = None
+    ) -> dict[str, Any]:
         """Create a full newsletter response object."""
         secondary = [
             cls.create_summarized_discussion(title=f"Secondary {i + 1}")
@@ -471,14 +470,14 @@ def assert_file_exists(file_path: str, message: str = None):
 def assert_json_file_valid(file_path: str):
     """Assert that a file is valid JSON."""
     assert_file_exists(file_path)
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding='utf-8') as f:
         try:
             json.load(f)
         except json.JSONDecodeError as e:
             pytest.fail(f"Invalid JSON in {file_path}: {e}")
 
 
-def assert_dict_has_keys(d: dict, keys: List[str], message: str = None):
+def assert_dict_has_keys(d: dict, keys: list[str], message: str = None):
     """Assert that a dictionary has all specified keys."""
     missing = [k for k in keys if k not in d]
     assert not missing, message or f"Missing keys: {missing}"

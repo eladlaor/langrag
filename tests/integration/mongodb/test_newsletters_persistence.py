@@ -17,18 +17,13 @@ Test Structure:
 9. Verify fail-soft behavior (MongoDB unavailable)
 """
 
-import asyncio
-import json
 import os
 import pytest
-from datetime import datetime
-from typing import Optional
 
 from fastapi.testclient import TestClient
 
 # Import MongoDB repositories
 from db.connection import get_database
-from db.repositories.runs import RunsRepository
 from db.repositories.newsletters import NewslettersRepository
 
 # Import workflow execution
@@ -121,7 +116,7 @@ async def test_per_chat_newsletter_original_persisted(test_output_dir, mongodb_r
     assert result_state.get("mongodb_run_id") is not None, "MongoDB run_id not created"
 
     mongodb_run_id = result_state["mongodb_run_id"]
-    print(f"\n✅ Workflow completed successfully")
+    print("\n✅ Workflow completed successfully")
     print(f"📝 MongoDB run_id: {mongodb_run_id}\n")
 
     # Store run_id for subsequent tests
@@ -169,7 +164,7 @@ async def test_per_chat_newsletter_original_persisted(test_output_dir, mongodb_r
     # Verify featured_discussion_ids
     assert "featured_discussion_ids" in newsletter, "No featured_discussion_ids in newsletter"
 
-    print(f"\n✅ Original newsletter verified")
+    print("\n✅ Original newsletter verified")
     print(f"   Newsletter ID: {newsletter_id}")
     print(f"   Type: {newsletter['newsletter_type']}")
     print(f"   Status: {newsletter.get('status', 'unknown')}")
@@ -209,17 +204,17 @@ async def test_per_chat_newsletter_enriched_persisted(mongodb_run_id_and_newslet
         # Verify links_added stat (may be 0 if no links found)
         if "links_added" in enriched:
             links_added = enriched.get("links_added", 0)
-            print(f"\n✅ Enriched newsletter verified")
+            print("\n✅ Enriched newsletter verified")
             print(f"   Links added: {links_added}")
             print(f"   Created at: {enriched.get('created_at')}")
         else:
-            print(f"\n✅ Enriched newsletter verified (no links added)")
+            print("\n✅ Enriched newsletter verified (no links added)")
 
         # Verify status updated
         assert newsletter.get("status") in ["enriched", "completed"], \
             f"Status should be enriched or completed, got: {newsletter.get('status')}"
     else:
-        print(f"\n⚠️  Enriched version not present (link enrichment may have been skipped)")
+        print("\n⚠️  Enriched version not present (link enrichment may have been skipped)")
 
 
 # ============================================================================
@@ -249,7 +244,7 @@ async def test_per_chat_newsletter_translated_persisted(mongodb_run_id_and_newsl
         assert "target_language" in translated, "No target_language in translated version"
         assert "file_paths" in translated, "No file_paths in translated version"
 
-        print(f"\n✅ Translated newsletter verified")
+        print("\n✅ Translated newsletter verified")
         print(f"   Target language: {translated.get('target_language')}")
         print(f"   Created at: {translated.get('created_at')}")
         print(f"   Markdown length: {len(translated.get('markdown_content', ''))} chars")
@@ -258,7 +253,7 @@ async def test_per_chat_newsletter_translated_persisted(mongodb_run_id_and_newsl
         assert newsletter.get("status") == "completed", \
             f"Status should be completed after translation, got: {newsletter.get('status')}"
     else:
-        print(f"\n⚠️  Translated version not present (translation not required for this language)")
+        print("\n⚠️  Translated version not present (translation not required for this language)")
 
 
 # ============================================================================
@@ -296,7 +291,7 @@ async def test_consolidated_newsletter_persisted(test_output_dir, mongodb_run_id
     }
 
     # Execute consolidated workflow (async - LangGraph 1.0+)
-    print(f"\n🚀 Executing consolidated newsletter generation...")
+    print("\n🚀 Executing consolidated newsletter generation...")
     print(f"📅 Date range: {TEST_START_DATE} to {TEST_END_DATE}")
 
     # Provide config with thread_id for checkpointer
@@ -315,7 +310,7 @@ async def test_consolidated_newsletter_persisted(test_output_dir, mongodb_run_id
     consolidated_newsletter_id = f"{mongodb_run_id}_nl_consolidated"
     mongodb_run_id_and_newsletter_ids["consolidated_newsletter_id"] = consolidated_newsletter_id
 
-    print(f"\n✅ Consolidated workflow completed")
+    print("\n✅ Consolidated workflow completed")
     print(f"📝 MongoDB run_id: {mongodb_run_id}")
     print(f"📝 Consolidated newsletter_id: {consolidated_newsletter_id}")
 
@@ -338,7 +333,7 @@ async def test_consolidated_newsletter_persisted(test_output_dir, mongodb_run_id
     assert original.get("json_content") is not None
     assert original.get("markdown_content") is not None
 
-    print(f"\n✅ Consolidated newsletter verified")
+    print("\n✅ Consolidated newsletter verified")
     print(f"   Newsletter ID: {consolidated_newsletter_id}")
     print(f"   Type: {newsletter['newsletter_type']}")
     print(f"   Chat name: {newsletter.get('chat_name', 'null')} (null expected)")
@@ -370,7 +365,7 @@ def test_api_list_newsletters():
         assert "created_at" in newsletter
         assert "stats" in newsletter
 
-    print(f"\n✅ API /newsletters endpoint verified")
+    print("\n✅ API /newsletters endpoint verified")
     print(f"   Newsletters found: {len(newsletters)}")
 
 
@@ -388,7 +383,7 @@ def test_api_list_newsletters_with_filters():
     for nl in newsletters:
         assert nl["data_source_name"] == TEST_DATA_SOURCE
 
-    print(f"\n✅ API /newsletters with filters verified")
+    print("\n✅ API /newsletters with filters verified")
     print(f"   Filtered newsletters: {len(newsletters)}")
 
 
@@ -505,9 +500,9 @@ async def test_newsletter_indexes_created():
     assert "summary_format_1_created_at_-1" in newsletters_indexes, \
         "Missing compound index on summary_format+created_at"
 
-    print(f"\n✅ Newsletters indexes verified:")
+    print("\n✅ Newsletters indexes verified:")
     print(f"   Total indexes: {len(newsletters_indexes)}")
-    print(f"   Key indexes: newsletter_id_1 (unique), run_id_1, summary_format_1_created_at_-1")
+    print("   Key indexes: newsletter_id_1 (unique), run_id_1, summary_format_1_created_at_-1")
     print(f"   All indexes: {list(newsletters_indexes.keys())}")
 
 
@@ -536,7 +531,7 @@ async def test_repository_get_recent_newsletters():
             assert recent[i]["created_at"] >= recent[i + 1]["created_at"], \
                 "Newsletters not sorted by created_at descending"
 
-    print(f"\n✅ Repository get_recent_newsletters verified")
+    print("\n✅ Repository get_recent_newsletters verified")
     print(f"   Recent newsletters: {len(recent)}")
 
 
@@ -558,7 +553,7 @@ async def test_repository_get_newsletters_by_run(mongodb_run_id_and_newsletter_i
     for nl in newsletters:
         assert nl["run_id"] == run_id
 
-    print(f"\n✅ Repository get_newsletters_by_run verified")
+    print("\n✅ Repository get_newsletters_by_run verified")
     print(f"   Newsletters for run: {len(newsletters)}")
 
 
@@ -579,7 +574,7 @@ async def test_repository_search_similar_newsletters():
     assert isinstance(similar, list)
     # May be empty if no similar newsletters exist yet
 
-    print(f"\n✅ Repository search_similar_newsletters verified")
+    print("\n✅ Repository search_similar_newsletters verified")
     print(f"   Similar newsletters found: {len(similar)}")
 
 

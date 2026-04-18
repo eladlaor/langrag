@@ -5,8 +5,7 @@ Provides functions to format API responses into readable terminal output
 (tables, lists, JSON) to match frontend display capabilities.
 """
 
-import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -17,7 +16,7 @@ from rich.tree import Tree
 console = Console()
 
 
-def format_periodic_newsletter_response(response: Dict[str, Any], json_mode: bool = False) -> None:
+def format_periodic_newsletter_response(response: dict[str, Any], json_mode: bool = False) -> None:
     """
     Format and display PeriodicNewsletterResponse.
 
@@ -46,7 +45,7 @@ def format_periodic_newsletter_response(response: Dict[str, Any], json_mode: boo
         _display_consolidation_results(response["consolidated_newsletter"])
 
 
-def _display_chat_results_table(results: List[Dict[str, Any]]) -> None:
+def _display_chat_results_table(results: list[dict[str, Any]]) -> None:
     """Display per-chat results in a table."""
     table = Table(title="Per-Chat Results", show_header=True, header_style="bold magenta")
     table.add_column("Chat Name", style="cyan", no_wrap=True)
@@ -77,7 +76,7 @@ def _display_chat_results_table(results: List[Dict[str, Any]]) -> None:
     console.print("\n", table)
 
 
-def _display_consolidation_results(consolidated: Dict[str, Any]) -> None:
+def _display_consolidation_results(consolidated: dict[str, Any]) -> None:
     """Display consolidation results in a panel."""
     console.print("\n[bold magenta]🔀 Cross-Chat Consolidation Results[/bold magenta]")
 
@@ -119,7 +118,7 @@ def _display_consolidation_results(consolidated: Dict[str, Any]) -> None:
         console.print(f"\n[dim]Sources: {chats_text}[/dim]")
 
 
-def format_runs_list(runs: List[Dict[str, Any]], total: int) -> None:
+def format_runs_list(runs: list[dict[str, Any]], total: int) -> None:
     """
     Format and display runs list.
 
@@ -158,7 +157,7 @@ def format_runs_list(runs: List[Dict[str, Any]], total: int) -> None:
     console.print("\n", table)
 
 
-def format_batch_jobs(jobs: List[Dict[str, Any]], total: int) -> None:
+def format_batch_jobs(jobs: list[dict[str, Any]], total: int) -> None:
     """
     Format and display batch jobs list.
 
@@ -190,7 +189,7 @@ def format_batch_jobs(jobs: List[Dict[str, Any]], total: int) -> None:
     console.print("\n", table)
 
 
-def format_batch_job_status(job: Dict[str, Any]) -> None:
+def format_batch_job_status(job: dict[str, Any]) -> None:
     """
     Format and display detailed batch job status.
 
@@ -237,7 +236,7 @@ def format_batch_job_status(job: Dict[str, Any]) -> None:
         console.print(f"\n[red]❌ Error:[/red] {job['error_message']}")
 
 
-def format_newsletter_content(content: Dict[str, Any], format_type: str = "html") -> None:
+def format_newsletter_content(content: dict[str, Any], format_type: str = "html") -> None:
     """
     Format and display newsletter content.
 
@@ -276,7 +275,7 @@ def format_newsletter_content(content: Dict[str, Any], format_type: str = "html"
         console.print(f"\n[dim]File: {content['file_path']}[/dim]")
 
 
-def format_discussion_selection(discussions: List[Dict[str, Any]], total: int, deadline: Optional[str] = None) -> None:
+def format_discussion_selection(discussions: list[dict[str, Any]], total: int, deadline: str | None = None) -> None:
     """
     Format and display discussions for HITL selection.
 

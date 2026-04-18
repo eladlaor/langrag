@@ -17,8 +17,6 @@ Test Coverage (documented, partial implementation):
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
 import pytest
 
 
@@ -256,7 +254,7 @@ class TestPreprocessingOutputPaths:
             # Verify file was created and can be read
             assert os.path.exists(output_path)
 
-            with open(output_path, 'r', encoding='utf-8') as f:
+            with open(output_path, encoding='utf-8') as f:
                 loaded = json.load(f)
 
             assert len(loaded) == 2
@@ -278,7 +276,7 @@ class TestUnicodeHandling:
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(test_data, f, ensure_ascii=False)
 
-            with open(output_path, 'r', encoding='utf-8') as f:
+            with open(output_path, encoding='utf-8') as f:
                 loaded = json.load(f)
 
             assert loaded["content"] == "שלום עולם 👋 Hello World"

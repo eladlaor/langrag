@@ -19,7 +19,7 @@ Run in Docker: docker compose exec backend pytest tests/integration/test_single_
 import json
 import os
 import tempfile
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 import pytest
 
 
@@ -52,7 +52,7 @@ class TestGraphCompilation:
 
     def test_graph_has_checkpointer(self):
         """Test that the graph has checkpointing enabled."""
-        from graphs.single_chat_analyzer.graph import newsletter_generation_graph, MemorySaver
+        from graphs.single_chat_analyzer.graph import newsletter_generation_graph
 
         # The graph should be compiled with a checkpointer
         assert newsletter_generation_graph is not None

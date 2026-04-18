@@ -15,7 +15,6 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Dict, Optional
 
 from dotenv import load_dotenv
 
@@ -40,7 +39,7 @@ class BeeperLocalKeyExtractor:
         result = subprocess.run(['pgrep', '-f', 'beeper'], capture_output=True)
         return result.returncode == 0
 
-    def extract_from_account_db(self) -> Optional[Dict]:
+    def extract_from_account_db(self) -> dict | None:
         """Extract keys from account.db SQLite database"""
         print(f"📂 Reading from: {self.account_db}")
 
@@ -79,7 +78,7 @@ class BeeperLocalKeyExtractor:
             print(f"❌ SQLite error: {e}")
             return None
 
-    def extract_megolm_backup(self) -> Optional[Dict]:
+    def extract_megolm_backup(self) -> dict | None:
         """Extract Megolm backup data from store"""
         print("\n🔍 Looking for Megolm backup...")
 
@@ -98,7 +97,7 @@ class BeeperLocalKeyExtractor:
 
             if row and row[0]:
                 backup_data = json.loads(row[0])
-                print(f"✅ Found Megolm backup:")
+                print("✅ Found Megolm backup:")
                 print(f"   Algorithm: {backup_data.get('algorithm', 'unknown')}")
                 print(f"   Auth data: {'yes' if backup_data.get('auth_data') else 'no'}")
                 return backup_data
@@ -110,7 +109,7 @@ class BeeperLocalKeyExtractor:
             print(f"❌ Error reading backup: {e}")
             return None
 
-    def extract_room_keys_from_index_db(self) -> Optional[Dict]:
+    def extract_room_keys_from_index_db(self) -> dict | None:
         """Try to extract room-specific encryption keys from index.db"""
         print(f"\n📂 Reading from: {self.index_db}")
 

@@ -12,13 +12,10 @@ Tests cover:
 
 import json
 import os
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from conftest import (
-    DiscussionFactory,
-    RankingFactory,
     assert_file_exists,
     assert_json_file_valid
 )
@@ -378,7 +375,7 @@ class TestSaveRankingResult:
         output_file = os.path.join(temp_output_dir, "unicode_ranking.json")
         save_ranking_result(ranking_result, output_file)
 
-        with open(output_file, 'r', encoding='utf-8') as f:
+        with open(output_file, encoding='utf-8') as f:
             loaded = json.load(f)
 
         assert loaded["ranked_discussions"][0]["title"] == "שלום עולם 👋"

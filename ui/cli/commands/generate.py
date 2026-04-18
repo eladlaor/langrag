@@ -12,23 +12,19 @@ Handles periodic newsletter generation with support for:
 import json
 import typer
 import httpx
-from datetime import datetime
 from rich.console import Console
 from rich.prompt import Prompt
-from typing import Optional, List
 
 from ui.cli.utils.api_client import NewsletterAPIClient
 from ui.cli.utils.config_loader import ConfigLoader
 from ui.cli.utils.progress import ProgressTracker
-from ui.cli.utils.validators import prompt_chat_selection, prompt_date_range, prompt_yes_no
+from ui.cli.utils.validators import prompt_chat_selection
 from ui.cli.utils import formatters
 from ui.cli.models.cli_types import (
     DataSource,
     Language,
     SummaryFormat,
     SimilarityThreshold,
-    OutputAction,
-    CHAT_NAMES,
 )
 
 
@@ -39,38 +35,38 @@ console = Console()
 @app.command()
 def periodic(
     # Required (if not in config)
-    start_date: Optional[str] = typer.Option(
+    start_date: str | None = typer.Option(
         None,
         "--start-date",
         help="Start date in YYYY-MM-DD format",
     ),
-    end_date: Optional[str] = typer.Option(
+    end_date: str | None = typer.Option(
         None,
         "--end-date",
         help="End date in YYYY-MM-DD format",
     ),
-    data_source: Optional[DataSource] = typer.Option(
+    data_source: DataSource | None = typer.Option(
         None,
         "--data-source",
         help="Data source (langtalks, mcp_israel, n8n_israel)",
     ),
-    chats: Optional[List[str]] = typer.Option(
+    chats: list[str] | None = typer.Option(
         None,
         "--chats",
         help="Chat names to include (can specify multiple times)",
     ),
-    language: Optional[Language] = typer.Option(
+    language: Language | None = typer.Option(
         None,
         "--language",
         help="Target language for newsletter",
     ),
-    summary_format: Optional[SummaryFormat] = typer.Option(
+    summary_format: SummaryFormat | None = typer.Option(
         None,
         "--format",
         help="Newsletter format template",
     ),
     # Config file
-    config: Optional[str] = typer.Option(
+    config: str | None = typer.Option(
         None,
         "--config",
         help="Path to YAML/JSON config file",
@@ -167,7 +163,7 @@ def periodic(
         help="Use OpenAI Batch API (50%% cost savings, async)",
     ),
     # Output
-    output_dir: Optional[str] = typer.Option(
+    output_dir: str | None = typer.Option(
         None,
         "--output-dir",
         help="Override default output directory",

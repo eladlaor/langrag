@@ -10,7 +10,6 @@ Key: (data_source_name, chat_name) — one sender map per chat.
 
 import logging
 from datetime import datetime, UTC
-from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 

@@ -756,12 +756,12 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                         discussion.num_messages = len(discussion.messages)
 
                     # Calculate first message timestamp if not set
-                    if not discussion.first_message_in_disussion_timestamp and discussion.messages:
+                    if not discussion.first_message_in_discussion_timestamp and discussion.messages:
                         try:
-                            discussion.first_message_in_disussion_timestamp = min(msg.timestamp for msg in discussion.messages)
+                            discussion.first_message_in_discussion_timestamp = min(msg.timestamp for msg in discussion.messages)
                         except Exception as e:
                             logging.warning(f"Error calculating first message timestamp: {e}")
-                            discussion.first_message_in_disussion_timestamp = 0
+                            discussion.first_message_in_discussion_timestamp = 0
 
                 processed_discussions.append(discussion)
 

@@ -6,7 +6,7 @@ extracted from WhatsApp messages.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -55,7 +55,7 @@ class ImagesRepository(BaseRepository):
                 ImageKeys.DESCRIPTION: image.description,
                 ImageKeys.DESCRIPTION_MODEL: image.description_model,
                 ImageKeys.DISCUSSION_ID: image.discussion_id,
-                DbFieldKeys.CREATED_AT: datetime.now(timezone.utc).isoformat(),
+                DbFieldKeys.CREATED_AT: datetime.now(UTC).isoformat(),
             }
             await self.collection.update_one(
                 {ImageKeys.MXC_URL: image.mxc_url},
@@ -159,7 +159,7 @@ class ImagesRepository(BaseRepository):
 
 def _date_to_timestamp_ms(date_str: str, end_of_day: bool = False) -> int:
     """Convert ISO date string to millisecond timestamp."""
-    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
     if end_of_day:
         dt = dt.replace(hour=23, minute=59, second=59)
     return int(dt.timestamp() * 1000)

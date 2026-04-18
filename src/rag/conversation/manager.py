@@ -7,7 +7,7 @@ Acts as a thin coordination layer between the API and the repository.
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from config import get_settings
@@ -83,7 +83,7 @@ class ConversationManager:
             Keys.MESSAGE_ID: message_id,
             Keys.ROLE: str(MessageRole.USER),
             Keys.CONTENT: content,
-            Keys.CREATED_AT: datetime.now(timezone.utc),
+            Keys.CREATED_AT: datetime.now(UTC),
         }
         await repo.append_message(session_id, message)
 
@@ -125,7 +125,7 @@ class ConversationManager:
             Keys.CONTENT: content,
             Keys.CITATIONS: citations or [],
             Keys.EVALUATION_ID: evaluation_id,
-            Keys.CREATED_AT: datetime.now(timezone.utc),
+            Keys.CREATED_AT: datetime.now(UTC),
         }
         await repo.append_message(session_id, message)
         return message_id
