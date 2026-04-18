@@ -37,6 +37,8 @@ pytest tests/test_e2e_pipeline.py -v                                          # 
 pytest tests/test_e2e_pipeline.py::test_periodic_newsletter_generation -v     # Single test
 pytest tests/unit/ -v                                                         # Unit tests
 pytest tests/unit/test_discussion_ranker.py -v                               # Single unit test file
+pytest tests/unit/rag/ -v                                                     # RAG unit tests (chunker, source, evaluator, metrics)
+pytest tests/integration/rag/ -v                                              # RAG integration tests (Docker required, auto-skip otherwise)
 ```
 
 Pytest config is in `pyproject.toml`: `pythonpath = ["src", "."]`, `asyncio_mode = "auto"`. Tests require Docker running.
@@ -301,7 +303,7 @@ Iteration methodology documented in: `knowledge/newsletter/ITERATION_METHODOLOGY
 - `/pipeline-test` - Iterative self-healing test runner
 - `/extract-substack-newsletters` - Substack newsletter extraction
 - `/push-public` - Nuclear squash-push of entire repo to public remote (single v1.0.0 commit)
-- `/push-public-update` - Incremental delta push to public remote as a single versioned commit (preserves history)
+- `/push-public-update` - Incremental delta push to public remote with version tags, changelog, and GitHub Releases
 
 Skills use single-file pattern: one `SKILL.md` per skill, no README files.
 

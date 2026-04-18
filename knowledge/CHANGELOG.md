@@ -1,6 +1,7 @@
 # Changelog
 
 ## Table of Contents
+- [2026-04-18: DeepEval newsletter RAG test suite](#2026-04-18-deepeval-newsletter-rag-test-suite)
 - [2026-04-18: Codebase Audit (B+ 82/100) & force_refresh_extraction Bug Fix](#2026-04-18-codebase-audit-b-82100--force_refresh_extraction-bug-fix)
 - [2026-04-15: RAG Newsletter Conversation (Plan B)](#2026-04-15-rag-newsletter-conversation-plan-b)
 - [2026-04-08: Overlap Extraction Cache & Sender Map Persistence (Phases 2-3)](#2026-04-08-overlap-extraction-cache--sender-map-persistence-phases-2-3)
@@ -22,6 +23,19 @@
 - [2025-12-12: Anti-Repetition System](#2025-12-12-anti-repetition-system)
 - [2025-12-06: Fail-Fast Error Handling Improvements](#2025-12-06-fail-fast-error-handling-improvements)
 - [2025-12-06: Worth Mentioning Enhancement](#2025-12-06-worth-mentioning-enhancement)
+
+---
+
+## 2026-04-18: DeepEval newsletter RAG test suite
+
+**What Changed:**
+- Added 46 unit tests covering MarkdownChunker, NewsletterSource, DeepEval evaluator, and metrics factory
+- Added 50 integration tests: newsletter ingestion pipeline (5) and golden dataset DeepEval evaluation (45 parametrized across 15 Q&A cases x 3 test types: retrieval, topic coverage, DeepEval metrics)
+- Integration tests auto-skip without Docker; golden dataset loading is failure-safe
+
+**Why:**
+- Newsletter RAG production code (Plan B) shipped with 0% test coverage — this brings the DeepEval integration and newsletter-specific code to full test coverage
+- Golden dataset tests establish the framework for collecting baseline quality scores and tuning thresholds
 
 ---
 
