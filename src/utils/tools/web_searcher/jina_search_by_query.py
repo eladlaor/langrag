@@ -4,7 +4,7 @@ import os
 import urllib
 from typing import Any
 
-import requests
+import httpx
 
 from utils.tools.web_searcher.base_web_searcher import BaseWebSearcher
 from constants import (
@@ -58,7 +58,7 @@ class JinaSearcherWithReRanking(BaseWebSearcher):
         }
         self.jina_reranker_model = JINA_RERANKER_MODEL
 
-    def search(self, query: str, start: int = 1, num_results: int = 2) -> list[dict[str, Any]]:
+    async def search(self, query: str, start: int = 1, num_results: int = 2) -> list[dict[str, Any]]:
         """
         Search using Jina AI and return re-ranked results.
 
@@ -77,7 +77,8 @@ class JinaSearcherWithReRanking(BaseWebSearcher):
             encoded_query = urllib.parse.quote(query)
             url = f"{self.jina_reader_query_search_uri_prefix}/{encoded_query}"
 
-            response = requests.get(url, headers=self.jina_reader_headers)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=self.jina_reader_headers)
 
             if response.status_code == 422:
                 logger.warning(f"No relevant results found for query: '{query}'")
@@ -87,15 +88,15 @@ class JinaSearcherWithReRanking(BaseWebSearcher):
                 raise ValueError(f"Jina search API returned status {response.status_code}: {response.text}")
 
             search_results_list = response.json()["data"]
-            most_relevant_search_results = self.rerank(query, num_results, search_results_list)
+            most_relevant_search_results = await self.rerank(query, num_results, search_results_list)
 
             return most_relevant_search_results
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             raise ValueError(f"Network error during Jina search: {str(e)}") from e
         except (KeyError, ValueError) as e:
             raise ValueError(f"Invalid response from Jina search API: {str(e)}") from e
 
-    def rerank(self, query: str, top_n: int, search_results_list: list[dict[str, Any]], threshold: float = 0.8) -> list[dict[str, Any]]:
+    async def rerank(self, query: str, top_n: int, search_results_list: list[dict[str, Any]], threshold: float = 0.8) -> list[dict[str, Any]]:
         """
         Re-rank search results using Jina's reranker API.
 
@@ -119,7 +120,8 @@ class JinaSearcherWithReRanking(BaseWebSearcher):
                 "documents": [json.dumps(doc) for doc in search_results_list],
             }
 
-            response = requests.post(self.jina_reranker_uri, headers=self.jina_reranker_headers, json=data)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(self.jina_reranker_uri, headers=self.jina_reranker_headers, json=data)
 
             if response.status_code != 200:
                 raise ValueError(f"Jina reranker API returned status {response.status_code}: {response.text}")
@@ -129,7 +131,7 @@ class JinaSearcherWithReRanking(BaseWebSearcher):
             most_relevant_search_results = [search_results_list[i] for i in top_n_result_indices if i < len(search_results_list)]
 
             return most_relevant_search_results
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             raise ValueError(f"Network error during Jina reranking: {str(e)}") from e
         except (KeyError, ValueError) as e:
             raise ValueError(f"Invalid response from Jina reranker API: {str(e)}") from e

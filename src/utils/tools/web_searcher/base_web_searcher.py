@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 class BaseWebSearcher(ABC):
     @abstractmethod
-    def search(self, query, start=1, num_results=3):
+    async def search(self, query, start=1, num_results=3):
         """
         Perform a web search using a query and return search results.
 

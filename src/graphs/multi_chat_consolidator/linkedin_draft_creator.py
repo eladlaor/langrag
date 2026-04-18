@@ -10,7 +10,7 @@ Provides:
 
 import os
 import logging
-import requests
+import httpx
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 from graphs.state_keys import OrchestratorKeys
 from constants import N8N_LINKEDIN_WEBHOOK_URL, TIMEOUT_HTTP_REQUEST
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 LINKEDIN_CHAR_LIMIT = 3000
 
 
-def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
+async def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
     """
     Deliver newsletter content to LinkedIn as a draft post via n8n webhook.
 
@@ -72,7 +72,8 @@ def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
     # Call n8n webhook
     try:
         logger.info("Sending LinkedIn draft request to n8n webhook")
-        response = requests.post(N8N_LINKEDIN_WEBHOOK_URL, json={"content": content, "data_source": state.get(OrchestratorKeys.DATA_SOURCE_NAME), "date_range": f"{state[OrchestratorKeys.START_DATE]} to {state[OrchestratorKeys.END_DATE]}"}, timeout=TIMEOUT_HTTP_REQUEST)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(N8N_LINKEDIN_WEBHOOK_URL, json={"content": content, "data_source": state.get(OrchestratorKeys.DATA_SOURCE_NAME), "date_range": f"{state[OrchestratorKeys.START_DATE]} to {state[OrchestratorKeys.END_DATE]}"}, timeout=TIMEOUT_HTTP_REQUEST)
 
         response.raise_for_status()
 
@@ -83,11 +84,11 @@ def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
             "draft_response": draft_response,
         }
 
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         logger.error("n8n webhook timeout (30s) - LinkedIn draft NOT created")
         return {"success": False, "error": "timeout"}
 
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"n8n webhook error for LinkedIn delivery: {e}")
         return {"success": False, "error": str(e)}
 

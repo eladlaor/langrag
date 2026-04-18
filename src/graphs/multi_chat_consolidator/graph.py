@@ -715,7 +715,7 @@ async def output_handler(state: ParallelOrchestratorState, config: RunnableConfi
 
         elif action == OutputAction.SEND_LINKEDIN:
             logger.info(f"Action '{OutputAction.SEND_LINKEDIN}': Creating LinkedIn draft via n8n webhook")
-            linkedin_result = await asyncio.to_thread(deliver_to_linkedin, state)
+            linkedin_result = await deliver_to_linkedin(state)
             delivery_results[OutputAction.SEND_LINKEDIN] = linkedin_result
             if linkedin_result.get("success"):
                 logger.info("LinkedIn draft created successfully")
