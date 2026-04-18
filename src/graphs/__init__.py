@@ -8,9 +8,9 @@ This package contains the main graph implementations:
 """
 
 from graphs.single_chat_analyzer.graph import newsletter_generation_graph
-from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 
 __all__ = [
     "newsletter_generation_graph",
-    "parallel_orchestrator_graph",
+    "get_parallel_orchestrator_graph",
 ]

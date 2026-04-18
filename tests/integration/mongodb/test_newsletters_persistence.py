@@ -27,7 +27,7 @@ from db.connection import get_database
 from db.repositories.newsletters import NewslettersRepository
 
 # Import workflow execution
-from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 
 # Import FastAPI app for API testing
@@ -108,7 +108,8 @@ async def test_per_chat_newsletter_original_persisted(test_output_dir, mongodb_r
 
     # Provide config with thread_id for checkpointer
     config = {"configurable": {"thread_id": "test_newsletters_per_chat"}}
-    result_state = await parallel_orchestrator_graph.ainvoke(state, config)
+    graph = await get_parallel_orchestrator_graph()
+    result_state = await graph.ainvoke(state, config)
 
     # Verify workflow completed successfully
     assert result_state is not None, "Workflow returned None"
@@ -296,7 +297,8 @@ async def test_consolidated_newsletter_persisted(test_output_dir, mongodb_run_id
 
     # Provide config with thread_id for checkpointer
     config = {"configurable": {"thread_id": "test_newsletters_consolidated"}}
-    result_state = await parallel_orchestrator_graph.ainvoke(state, config)
+    graph = await get_parallel_orchestrator_graph()
+    result_state = await graph.ainvoke(state, config)
 
     assert result_state is not None, "Workflow returned None"
     mongodb_run_id = result_state.get("mongodb_run_id")

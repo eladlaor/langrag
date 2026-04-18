@@ -28,7 +28,7 @@ import pytest
 def _can_import_graphs():
     """Check if graph modules can be imported (requires matrix_decryption)."""
     try:
-        from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+        from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
         return True
     except ImportError:
         return False
@@ -45,17 +45,19 @@ requires_docker = pytest.mark.skipif(
 class TestGraphCompilation:
     """Test that the graph compiles correctly."""
 
-    def test_parallel_orchestrator_graph_compiles(self):
+    async def test_parallel_orchestrator_graph_compiles(self):
         """Test that the parallel orchestrator graph compiles without errors."""
-        from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+        from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 
-        assert parallel_orchestrator_graph is not None
+        graph = await get_parallel_orchestrator_graph()
+        assert graph is not None
 
-    def test_graph_has_checkpointer(self):
-        """Test that the graph has checkpointing enabled."""
-        from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+    async def test_graph_has_checkpointer(self):
+        """Test that the graph has checkpointing enabled with AsyncSqliteSaver."""
+        from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 
-        assert parallel_orchestrator_graph is not None
+        graph = await get_parallel_orchestrator_graph()
+        assert graph.checkpointer is not None
 
 
 @requires_docker

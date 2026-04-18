@@ -941,7 +941,7 @@ def should_consolidate_chats(state: ParallelOrchestratorState) -> str:
 # ============================================================================
 
 
-def build_parallel_orchestrator_graph() -> StateGraph:
+def build_parallel_orchestrator_graph(checkpointer=None) -> StateGraph:
     """
     Build and compile the parent orchestrator graph for parallel chat processing.
 
@@ -987,7 +987,7 @@ def build_parallel_orchestrator_graph() -> StateGraph:
 
     Notes:
     - Uses newsletter_generation_graph as the "chat_worker" subgraph
-    - Checkpointer configured with MemorySaver (use SqliteSaver for production)
+    - Checkpointer configured via get_parallel_orchestrator_graph() with AsyncSqliteSaver
     - Each worker failure is isolated (doesn't stop other workers)
     - Fail-fast only if ALL workers fail
     - Consolidation only triggers if consolidate_chats=True and >1 successful chats
@@ -1060,7 +1060,7 @@ def build_parallel_orchestrator_graph() -> StateGraph:
     # Final edge to END
     builder.add_edge(NodeNames.MultiChatConsolidator.OUTPUT_HANDLER, END)
 
-    compiled_graph = builder.compile()
+    compiled_graph = builder.compile(checkpointer=checkpointer)
 
     logger.info("Parallel orchestrator graph compiled successfully")
     logger.info("Graph includes cross-chat consolidation flow (enabled by default)")
@@ -1069,5 +1069,35 @@ def build_parallel_orchestrator_graph() -> StateGraph:
     return compiled_graph
 
 
-# Create and export the compiled graph
-parallel_orchestrator_graph = build_parallel_orchestrator_graph()
+# Lazy async singleton — replaces module-level compilation to support async checkpointer init
+_compiled_graph = None
+_graph_lock: asyncio.Lock | None = None
+
+
+async def get_parallel_orchestrator_graph():
+    """
+    Get the compiled parallel orchestrator graph with production checkpointer.
+
+    Uses lazy initialization with double-checked locking (same pattern as db/connection.py).
+    The checkpointer requires async setup, so the graph cannot be compiled at module level.
+    """
+    global _compiled_graph, _graph_lock
+
+    # Fast path: already compiled
+    if _compiled_graph is not None:
+        return _compiled_graph
+
+    # Slow path: acquire lock for compilation
+    if _graph_lock is None:
+        _graph_lock = asyncio.Lock()
+
+    async with _graph_lock:
+        if _compiled_graph is not None:
+            return _compiled_graph
+
+        from graphs.checkpointer import get_checkpointer
+
+        checkpointer = await get_checkpointer()
+        _compiled_graph = build_parallel_orchestrator_graph(checkpointer=checkpointer)
+
+    return _compiled_graph

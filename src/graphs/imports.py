@@ -8,7 +8,7 @@ in graph implementation files.
 Usage:
     from graphs.imports import (
         # LangGraph core
-        StateGraph, START, END, MemorySaver, RunnableConfig,
+        StateGraph, START, END, AsyncSqliteSaver, RunnableConfig,
         # Progress tracking
         with_cache_check, with_progress, with_logging,
         STAGE_EXTRACT, STAGE_PREPROCESS, ...
@@ -20,7 +20,7 @@ Usage:
 
 # LangGraph core
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_core.runnables import RunnableConfig
 
 # Graph states
@@ -89,7 +89,7 @@ __all__ = [
     "StateGraph",
     "START",
     "END",
-    "MemorySaver",
+    "AsyncSqliteSaver",
     "RunnableConfig",
     # States
     "SingleChatState",

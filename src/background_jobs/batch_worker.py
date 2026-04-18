@@ -162,7 +162,7 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
 
     try:
         # Importing workflow components
-        from graphs.multi_chat_consolidator.graph import parallel_orchestrator_graph
+        from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
         from custom_types.api_schemas import PeriodicNewsletterRequest
 
         # Reconstructing request object
@@ -233,7 +233,8 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
         logger.info(f"Starting workflow for batch job: {job_id}")
 
         # Invoking the workflow (async - LangGraph 1.0+)
-        result = await parallel_orchestrator_graph.ainvoke(state, config)
+        graph = await get_parallel_orchestrator_graph()
+        result = await graph.ainvoke(state, config)
 
         # Checking results using state key constants
         successful_chats = result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0)

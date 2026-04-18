@@ -107,6 +107,9 @@ services:
       # Knowledge base (read-only)
       - ./knowledge:/app/knowledge:ro
 
+      # LangGraph checkpoint persistence
+      - ./data/checkpoints:/app/data/checkpoints
+
       # Secrets (read-write for Matrix session store)
       - ./secrets:/app/secrets
     healthcheck:
@@ -179,6 +182,9 @@ services:
 
       # Knowledge base (read-only)
       - ./knowledge:/app/knowledge:ro
+
+      # LangGraph checkpoint persistence
+      - ./data/checkpoints:/app/data/checkpoints
 
       # Secrets (read-write for Matrix session store)
       - ./secrets:/app/secrets

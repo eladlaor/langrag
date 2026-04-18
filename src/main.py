@@ -95,6 +95,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Error stopping newsletter scheduler: {e}")
 
     try:
+        from graphs.checkpointer import close_checkpointer
+
+        await close_checkpointer()
+    except Exception as e:
+        logger.warning(f"Error closing checkpointer: {e}")
+
+    try:
         from db.connection import close_connection
 
         logger.info("Closing MongoDB connection...")
