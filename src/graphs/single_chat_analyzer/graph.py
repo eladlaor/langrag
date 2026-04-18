@@ -245,7 +245,8 @@ async def extract_messages(state: SingleChatState, config: RunnableConfig | None
 
         # LangGraph 1.0: Using direct async call (no multiprocessing)
         try:
-            decrypted_file_path = await raw_data_extractor.extract_messages(messaging_platform=MESSAGING_PLATFORM_WHATSAPP, extraction_strategy_name=EXTRACTION_STRATEGY_GROUP_CHAT, groupchat_name=chat_name, start_date=start_date, end_date=end_date, output_dir=extraction_dir)
+            force_refresh = state.get(Keys.FORCE_REFRESH_EXTRACTION, False)
+            decrypted_file_path = await raw_data_extractor.extract_messages(messaging_platform=MESSAGING_PLATFORM_WHATSAPP, extraction_strategy_name=EXTRACTION_STRATEGY_GROUP_CHAT, groupchat_name=chat_name, start_date=start_date, end_date=end_date, output_dir=extraction_dir, force_refresh=force_refresh)
         finally:
             # Cleanup per-worker store copy to avoid disk bloat
             if worker_store_path and os.path.exists(worker_store_path):
