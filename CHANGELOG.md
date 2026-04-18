@@ -1,13 +1,13 @@
 # Changelog
 
+## v1.6.2
+- DeepEval newsletter RAG test suite: 46 unit tests and 50 integration tests covering markdown chunking, newsletter source extraction, evaluation metrics, and golden dataset validation.
+
 ## v1.6.1
 - Propagate force_refresh_extraction parameter to Beeper extractor for cache bypass support.
 
 ## v1.6.0
 - RAG newsletter conversation: chat with past newsletters using retrieval-augmented generation.
-
-## v1.5.1
-- Merge English Substack rendering support into main.
 
 ## v1.5.0
 - English newsletter rendering support: generate and render newsletters in English with Substack-compatible HTML output.
