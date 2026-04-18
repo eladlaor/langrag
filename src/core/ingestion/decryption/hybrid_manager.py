@@ -119,7 +119,7 @@ class HybridDecryptionManager:
                 strategy_name = strategy.get_strategy_name()
                 logger.debug(f"Initializing strategy: {strategy_name}")
                 await strategy.initialize()
-                logger.info(f"✅ Strategy initialized: {strategy_name}")
+                logger.info(f"Strategy initialized: {strategy_name}")
             except Exception as e:
                 strategy_name = strategy.get_strategy_name()
                 logger.warning(f"Failed to initialize strategy {strategy_name}: {e}. " f"Will continue with other strategies.")
@@ -161,7 +161,7 @@ class HybridDecryptionManager:
                 if result:
                     # Success - record and return
                     self.stats.record_success(strategy_name)
-                    logger.debug(f"✅ Decrypted {event_id} with {strategy_name} " f"(success rate: {self.stats.get_success_rate():.1%})")
+                    logger.debug(f"Decrypted {event_id} with {strategy_name} " f"(success rate: {self.stats.get_success_rate():.1%})")
                     return result
                 else:
                     # Strategy couldn't decrypt - try next one
@@ -174,7 +174,7 @@ class HybridDecryptionManager:
 
         # All strategies failed
         self.stats.record_failure()
-        logger.debug(f"❌ Failed to decrypt {event_id} with any strategy " f"(success rate: {self.stats.get_success_rate():.1%})")
+        logger.debug(f"Failed to decrypt {event_id} with any strategy " f"(success rate: {self.stats.get_success_rate():.1%})")
         return None
 
     async def cleanup(self) -> None:

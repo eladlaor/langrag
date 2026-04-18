@@ -129,7 +129,7 @@ class ManualExportStrategy:
             result[DecryptionResultKeys.DECRYPTED] = True
             result[DecryptionResultKeys.DECRYPTION_METHOD] = DecryptionMethod.MANUAL_EXPORT
 
-            logger.debug(f"✅ Decrypted with manual export: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
+            logger.debug(f"Decrypted with manual export: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
             return result
 
         except Exception as e:

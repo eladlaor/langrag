@@ -104,7 +104,7 @@ class PersistentSessionStrategy:
             result[DecryptionResultKeys.DECRYPTED] = True
             result[DecryptionResultKeys.DECRYPTION_METHOD] = DecryptionMethod.PERSISTENT_SESSION
 
-            logger.debug(f"✅ Decrypted with persistent session: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
+            logger.debug(f"Decrypted with persistent session: {encrypted_event.get(DecryptionResultKeys.EVENT_ID)}")
             return result
 
         except Exception as e:

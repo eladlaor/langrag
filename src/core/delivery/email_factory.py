@@ -22,9 +22,12 @@ Configuration:
 
 import logging
 import os
+from pathlib import Path
 from typing import Protocol
 
 from constants import EmailProvider
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +92,28 @@ def _get_sendgrid_sender() -> EmailSender:
         raise RuntimeError("SendGrid requires EMAIL_SENDER_ADDRESS to be set. " "This must be a verified sender in your SendGrid account.")
 
     return SendGridEmailSender(sender_email_address=sender_address)
+
+
+def render_email_template(template_name: str, **kwargs: str) -> str:
+    """
+    Load and render an HTML email template from the templates directory.
+
+    Args:
+        template_name: Filename of the template (e.g., "newsletter_notification.html")
+        **kwargs: Template variables to substitute
+
+    Returns:
+        Rendered HTML string
+
+    Raises:
+        FileNotFoundError: If the template file does not exist
+    """
+    template_path = TEMPLATES_DIR / template_name
+    if not template_path.exists():
+        raise FileNotFoundError(f"Email template not found: {template_path}")
+
+    template = template_path.read_text(encoding="utf-8")
+    return template.format(**kwargs)
 
 
 def send_email(subject: str, html_content: str, recipient_emails: list[str]) -> None:
