@@ -266,6 +266,9 @@ ROUTE_RAG_INGEST_PODCASTS = "/rag/ingest/podcasts"
 ROUTE_RAG_INGEST_PODCASTS_SCAN = "/rag/ingest/podcasts/scan"
 ROUTE_RAG_SOURCES_STATS = "/rag/sources/stats"
 ROUTE_RAG_EVALUATIONS = "/rag/evaluations/{session_id}"
+ROUTE_RAG_CHAT = "/rag/chat"
+ROUTE_RAG_INGEST_NEWSLETTERS = "/rag/ingest/newsletters"
+ROUTE_RAG_SOURCES_NEWSLETTERS = "/rag/sources/newsletters"
 
 # Metrics Routes (no prefix)
 ROUTE_METRICS = "/metrics"

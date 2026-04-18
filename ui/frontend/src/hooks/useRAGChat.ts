@@ -42,6 +42,7 @@ export function useRAGChat(): UseRAGChatReturn {
       currentAnswer: "",
       citations: [],
       error: null,
+      sessionId: null,
     });
 
     const url = `${API_BASE_URL}${RAG_API_ROUTES.CHAT_STREAM}`;

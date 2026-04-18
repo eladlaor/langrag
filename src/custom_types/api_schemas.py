@@ -351,3 +351,34 @@ class RAGEvaluationResponse(BaseModel):
     overall_passed: bool = False
     status: str = "pending"
     duration_ms: int = 0
+
+
+class RAGNewsletterIngestRequest(BaseModel):
+    """Request model for newsletter ingestion."""
+
+    data_source_name: str = Field(default="langtalks", description="Community to ingest newsletters from")
+    limit: int = Field(default=10, ge=1, le=100, description="Number of most recent newsletters to ingest")
+    start_date: str | None = Field(None, description="Start date filter (YYYY-MM-DD)")
+    end_date: str | None = Field(None, description="End date filter (YYYY-MM-DD)")
+    force_refresh: bool = Field(default=False, description="Re-ingest already processed newsletters")
+
+
+class RAGCitationResponse(BaseModel):
+    """Citation metadata in a non-streaming chat response."""
+
+    index: int
+    chunk_id: str
+    source_type: str
+    source_title: str
+    snippet: str
+    search_score: float
+    metadata: dict = {}
+
+
+class RAGChatResponse(BaseModel):
+    """Response model for non-streaming RAG chat."""
+
+    session_id: str
+    answer: str
+    citations: list[RAGCitationResponse] = []
+    evaluation_id: str | None = None

@@ -1,0 +1,112 @@
+{
+  "version": "1.0",
+  "description": "Newsletter RAG golden dataset for DeepEval evaluation. Questions span specific discussions, cross-newsletter trends, and technology comparisons.",
+  "source_type": "newsletter",
+  "test_cases": [
+    {
+      "test_id": "newsletter_001",
+      "query": "What were the main discussions about MCP in the recent newsletters?",
+      "expected_topics": ["MCP protocol", "tool use", "server implementations", "MCP Israel community"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval from newsletter sections"
+    },
+    {
+      "test_id": "newsletter_002",
+      "query": "What AI coding tools were discussed in the LangTalks community?",
+      "expected_topics": ["AI-driven coding", "code generation agents", "Cursor", "Copilot", "Claude Code"],
+      "difficulty": "easy",
+      "reasoning": "Topic aggregation across newsletter sections"
+    },
+    {
+      "test_id": "newsletter_003",
+      "query": "How has the community's opinion on AI agents evolved across newsletters?",
+      "expected_topics": ["AI agents", "agent frameworks", "LangGraph", "multi-agent systems", "evolution of opinion"],
+      "difficulty": "hard",
+      "reasoning": "Requires cross-newsletter temporal reasoning"
+    },
+    {
+      "test_id": "newsletter_004",
+      "query": "What practical LangGraph patterns were shared in the community?",
+      "expected_topics": ["LangGraph", "graph patterns", "state management", "workflow design"],
+      "difficulty": "medium",
+      "reasoning": "Technical detail extraction from discussion summaries"
+    },
+    {
+      "test_id": "newsletter_005",
+      "query": "Which newsletters discussed RAG implementations and what were the key takeaways?",
+      "expected_topics": ["RAG", "retrieval augmented generation", "vector search", "embeddings", "chunking strategies"],
+      "difficulty": "medium",
+      "reasoning": "Cross-newsletter topic search with detail extraction"
+    },
+    {
+      "test_id": "newsletter_006",
+      "query": "What open-source tools and frameworks were most frequently mentioned?",
+      "expected_topics": ["open source", "frameworks", "tools", "LangChain", "LangGraph", "CrewAI"],
+      "difficulty": "medium",
+      "reasoning": "Frequency analysis across newsletter content"
+    },
+    {
+      "test_id": "newsletter_007",
+      "query": "What were the community's concerns about AI safety and responsible AI use?",
+      "expected_topics": ["AI safety", "responsible AI", "ethical considerations", "guardrails"],
+      "difficulty": "medium",
+      "reasoning": "Theme extraction across multiple newsletters"
+    },
+    {
+      "test_id": "newsletter_008",
+      "query": "What deployment strategies for AI applications were discussed?",
+      "expected_topics": ["deployment", "Docker", "cloud", "production", "scaling", "infrastructure"],
+      "difficulty": "medium",
+      "reasoning": "Practical advice extraction from discussions"
+    },
+    {
+      "test_id": "newsletter_009",
+      "query": "Compare the topics covered in per-chat newsletters vs consolidated newsletters.",
+      "expected_topics": ["per-chat", "consolidated", "cross-chat", "topic overlap", "unique discussions"],
+      "difficulty": "hard",
+      "reasoning": "Requires understanding of newsletter types and comparing their content"
+    },
+    {
+      "test_id": "newsletter_010",
+      "query": "What were the most active discussions based on participant count and message volume?",
+      "expected_topics": ["engagement", "participant count", "message volume", "most active"],
+      "difficulty": "medium",
+      "reasoning": "Metadata-aware retrieval from newsletter discussion summaries"
+    },
+    {
+      "test_id": "newsletter_011",
+      "query": "What new AI models or providers were discussed in the community?",
+      "expected_topics": ["AI models", "OpenAI", "Anthropic", "Google", "model releases", "benchmarks"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval from technology discussions"
+    },
+    {
+      "test_id": "newsletter_012",
+      "query": "What automation and workflow topics came up in the newsletters?",
+      "expected_topics": ["automation", "n8n", "workflows", "scheduling", "integration"],
+      "difficulty": "medium",
+      "reasoning": "Cross-section topic aggregation"
+    },
+    {
+      "test_id": "newsletter_013",
+      "query": "What challenges did community members face when building AI applications?",
+      "expected_topics": ["challenges", "debugging", "latency", "cost", "reliability", "production issues"],
+      "difficulty": "medium",
+      "reasoning": "Problem-focused extraction from discussion content"
+    },
+    {
+      "test_id": "newsletter_014",
+      "query": "What prompt engineering techniques were shared in the community?",
+      "expected_topics": ["prompt engineering", "system prompts", "few-shot", "chain of thought"],
+      "difficulty": "medium",
+      "reasoning": "Technique-specific retrieval from discussions"
+    },
+    {
+      "test_id": "newsletter_015",
+      "query": "Summarize the key themes across all available newsletters in 3 sentences.",
+      "expected_topics": ["key themes", "AI engineering", "community trends", "technology adoption"],
+      "difficulty": "hard",
+      "reasoning": "High-level synthesis requiring cross-newsletter understanding"
+    }
+  ]
+}
