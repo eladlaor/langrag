@@ -55,9 +55,6 @@ logger = logging.getLogger(__name__)
 # CONSTANTS (defaults can be overridden via config)
 # ============================================================================
 
-# Get default from config - this is a module-level constant for backward compatibility
-_settings = get_settings()
-DEFAULT_TOP_K_DISCUSSIONS = _settings.ranking.default_top_k_discussions
 
 
 # Build LangChain ChatPromptTemplate from the prompt string
@@ -500,7 +497,7 @@ class DiscussionRanker:
     def __init__(
         self,
         summary_format: str,
-        top_k: int = DEFAULT_TOP_K_DISCUSSIONS,
+        top_k: int | None = None,
         previous_newsletter_context: PreviousNewslettersContext | None = None,
         trace_id: str | None = None,
         session_id: str | None = None,
@@ -513,7 +510,7 @@ class DiscussionRanker:
 
         Args:
             summary_format: Newsletter format (e.g., "langtalks_format")
-            top_k: Number of discussions to feature
+            top_k: Number of discussions to feature (defaults to config value)
             previous_newsletter_context: Context from previous newsletters for anti-repetition
             trace_id: Langfuse trace ID for hierarchical tracing
             session_id: Langfuse session ID for grouping traces
@@ -523,7 +520,7 @@ class DiscussionRanker:
         """
         try:
             self.summary_format = summary_format
-            self.top_k = top_k
+            self.top_k = top_k if top_k is not None else get_settings().ranking.default_top_k_discussions
             self.previous_newsletter_context = previous_newsletter_context
             self.trace_id = trace_id
             self.session_id = session_id
@@ -597,7 +594,7 @@ def rank_discussions(
     discussions_file: str,
     output_file: str,
     summary_format: str,
-    top_k: int = DEFAULT_TOP_K_DISCUSSIONS,
+    top_k: int | None = None,
     force_refresh: bool = False,
     previous_newsletter_context: PreviousNewslettersContext | None = None,
     trace_id: str | None = None,

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 
@@ -30,7 +29,7 @@ def _make_web_search_tool(search_engine: BaseWebSearcher, max_results: int):
         """Search the web for relevant articles, documentation, GitHub repos, or blog posts about a topic."""
         try:
             logger.info(f"WebSearchAgent tool invoked with query: {query}")
-            results = await asyncio.to_thread(search_engine.search, query, num_results=max_results)
+            results = await search_engine.search(query, num_results=max_results)
 
             if not results:
                 return "No results found."

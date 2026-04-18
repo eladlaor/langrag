@@ -1,7 +1,7 @@
 from datetime import datetime, UTC
 import logging
 import os
-import time
+
 from typing import Any
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +9,7 @@ import sqlite3
 import asyncio
 
 import json
-import requests
+import httpx
 from core.ingestion.extractors.base import RawDataExtractorInterface
 from nio import AsyncClient, AsyncClientConfig
 
@@ -1162,7 +1162,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
             # Step 3: Cache miss - searching all rooms (3-6 minutes)
             logger.warning(f"Room ID cache miss for {room_name}. " f"Searching 1903 rooms (this may take 3-6 minutes)...")
-            room_id = self._find_room_id_by_name(room_name)
+            room_id = await self._find_room_id_by_name(room_name)
 
             if not room_id:
                 raise ValueError(f"Room ID for {room_name} not found")
@@ -1180,10 +1180,10 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             logger.error(error_message)
             raise RuntimeError(error_message) from e
 
-    def _find_room_id_by_name(self, target_name):
+    async def _find_room_id_by_name(self, target_name):
         """Finding a room ID by its name"""
         logger.info(f"Looking for room with name: {target_name}")
-        rooms = self._get_rooms()
+        rooms = await self._get_rooms()
         if not rooms:
             logger.warning("No rooms found or error occurred")
             return None
@@ -1191,7 +1191,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         # Getting room names for each room ID
         for room_id in rooms:
             try:
-                room_info = self._get_room_info(room_id)
+                room_info = await self._get_room_info(room_id)
                 room_name = room_info.get("name")
 
                 # Checking if the room name matches our target
@@ -1296,11 +1296,12 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         except Exception as e:
             logger.warning(f"Failed to save to file cache: {e}")
 
-    def _get_room_info(self, room_id):
+    async def _get_room_info(self, room_id):
         """Getting room information including the room name"""
         url = f"{_get_base_url()}/_matrix/client/r0/rooms/{room_id}/state"
         try:
-            response = requests.get(url, headers=_get_headers(), timeout=TIMEOUT_HTTP_REQUEST)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=_get_headers(), timeout=TIMEOUT_HTTP_REQUEST)
             response.raise_for_status()
 
             # Looking for the room name event in the state events
@@ -1313,153 +1314,24 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             logger.error(f"Error getting room info for {room_id}: {e}")
             return {}
 
-    def _get_rooms(self):
+    async def _get_rooms(self):
         """Getting all rooms the user has joined"""
         logger.info("Fetching joined rooms...")
         url = f"{_get_base_url()}/_matrix/client/r0/joined_rooms"
         try:
             logger.debug(f"Making GET request to {url}")
-            response = requests.get(url, headers=_get_headers(), timeout=TIMEOUT_HTTP_REQUEST)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=_get_headers(), timeout=TIMEOUT_HTTP_REQUEST)
             response.raise_for_status()
             rooms = response.json().get("joined_rooms", [])
             logger.info(f"Found {len(rooms)} joined rooms")
             return rooms
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
             logger.error("Request to get_joined_rooms timed out after 30 seconds")
             return []
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Error fetching joined rooms: {e}")
             return []
-
-    def _get_all_messages(self, room_id, batch_size=None, max_messages=None, debug=False, include_all_events=False, include_whatsapp=True, include_encrypted=True):
-        """Fetching messages from a room, filtering for message events
-
-        Args:
-            room_id: The room ID to fetch messages from
-            batch_size: Number of messages to fetch per request
-            max_messages: Maximum number of messages to fetch (None for all)
-            debug: Whether to print debug information
-            include_all_events: Including all event types, not just messages
-            include_whatsapp: Including WhatsApp-specific event types
-            include_encrypted: Including encrypted message events
-        """
-        try:
-            beeper_settings = get_settings().beeper
-            batch_size = batch_size or beeper_settings.message_batch_size
-
-            if max_messages:
-                logger.info(f"Will fetch up to {max_messages} latest {'events' if include_all_events else 'messages'}")
-            else:
-                logger.info(f"Fetching all {'events' if include_all_events else 'messages'} (this might take a while)...")
-
-            messages = []
-            next_token = None
-            total_batches = 0
-
-            # Message types to include
-            message_types = [MatrixEventType.ROOM_MESSAGE]
-            if include_whatsapp:
-                # Adding WhatsApp-specific event types
-                message_types.extend(BRIDGE_MESSAGE_TYPES)
-            if include_encrypted:
-                message_types.append(MatrixEventType.ROOM_ENCRYPTED)
-            message_types.append(MatrixEventType.POLL_RESPONSE)
-
-            if debug:
-                logger.debug(f"Looking for event types: {message_types}")
-
-            while True:
-                # Fetching a batch of messages
-                data = self._fetch_messages(room_id, direction="b", start_token=next_token, limit=batch_size)
-
-                # Debug: Logging raw data before filtering
-                if debug:
-                    logger.debug("--- Raw API Response Data ---")
-                    logger.debug(f"Keys in response: {list(data.keys())}")
-                    chunk = data.get("chunk", [])
-                    logger.debug(f"Total events in chunk: {len(chunk)}")
-                    if chunk:
-                        event_types = set(event.get("type") for event in chunk)
-                        logger.debug(f"Event types in this batch: {event_types}")
-
-                        # Checking for message events using our expanded list
-                        message_events_found = False
-                        for msg_type in message_types:
-                            if any(event.get("type") == msg_type for event in chunk):
-                                message_events_found = True
-                                break
-
-                        if not message_events_found:
-                            logger.debug("No message events found in this batch!")
-
-                chunk = data.get("chunk", [])
-
-                # Filtering events based on flags
-                if include_all_events:
-                    filtered_events = chunk
-                else:
-                    # Filtering for messages including WhatsApp-specific types
-                    filtered_events = [event for event in chunk if event.get("type") in message_types]
-
-                    # Extra debugging for WhatsApp events
-                    if debug and include_whatsapp:
-                        whatsapp_events = [event for event in chunk if any(whatsapp_type in event.get("type", "") for whatsapp_type in WHATSAPP_EVENT_TYPE_FILTERS)]
-                        if whatsapp_events:
-                            logger.debug(f"Found {len(whatsapp_events)} potential WhatsApp-related events")
-
-                if filtered_events:
-                    messages.extend(filtered_events)
-                    total_batches += 1
-                    logger.info(f"Batch {total_batches}: Found {len(filtered_events)} {'events' if include_all_events else 'messages'}. Total: {len(messages)}")
-                else:
-                    logger.info(f"Batch {total_batches + 1}: No {'events' if include_all_events else 'message events'} found in this batch")
-                    if chunk and debug:
-                        logger.debug(f"(But there were {len(chunk)} other events in this batch)")
-
-                # Checking if we've reached our message limit
-                if max_messages and len(messages) >= max_messages:
-                    logger.info(f"Reached limit of {max_messages} {'events' if include_all_events else 'messages'}")
-                    # Trimming to exactly max_messages if we went over
-                    messages = messages[:max_messages]
-                    break
-
-                # Getting the next token
-                next_token = data.get("end")
-                if not next_token:
-                    logger.info("Reached the end of the message history")
-                    break
-
-                # Waiting to be nice to the server
-                time.sleep(beeper_settings.async_sleep_delay_seconds)
-
-            return messages
-        except Exception as e:
-            error_message = f"Error fetching messages from room {room_id}: {e}"
-            logger.error(error_message)
-            raise RuntimeError(error_message)
-
-    def _fetch_messages(self, room_id, direction="b", start_token=None, limit=None):
-        """Fetching messages from a room
-
-        Args:
-            room_id: The room ID
-            direction: 'b' for backwards (most recent first) or 'f' for forwards (oldest first)
-            start_token: Token to start fetching from
-            limit: Maximum number of messages to fetch
-
-        Returns:
-            JSON response data from the API
-        """
-        beeper_settings = get_settings().beeper
-        limit = limit or beeper_settings.message_batch_size
-
-        params = {"dir": direction, "limit": limit}
-        if start_token:
-            params["from"] = start_token
-
-        resp = requests.get(f"{_get_base_url()}/_matrix/client/r0/rooms/{room_id}/messages", headers=_get_headers(), params=params)
-        resp.raise_for_status()
-        return resp.json()
 
     def _parse_timestamp(self, ts_str, day_boundary="start"):
         """Parsing timestamp string to milliseconds epoch time.

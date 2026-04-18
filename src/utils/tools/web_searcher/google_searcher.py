@@ -2,7 +2,7 @@ import logging
 import os
 from ssl import SSLError
 
-import requests
+import httpx
 from dotenv import load_dotenv
 
 from utils.tools.web_searcher.base_web_searcher import BaseWebSearcher
@@ -23,7 +23,7 @@ class GoogleSearcher(BaseWebSearcher):
 
         self.url = "https://www.googleapis.com/customsearch/v1"
 
-    def search(self, query, start=1, num_results=10):
+    async def search(self, query, start=1, num_results=10):
         """
         Perform a Google Custom Search Engine (CSE) search using a query and return search results.
 
@@ -46,7 +46,8 @@ class GoogleSearcher(BaseWebSearcher):
 
         try:
             logger.info(f"Sending request to Google API for query: {query}")
-            response = requests.get(self.url, params=params)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(self.url, params=params)
             response.raise_for_status()
             return response.json().get("items", [])
 
@@ -54,6 +55,6 @@ class GoogleSearcher(BaseWebSearcher):
             logger.error(f"SSL error occurred for query '{query}': {ssl_err}")
             raise ssl_err
 
-        except requests.exceptions.RequestException as req_err:
+        except httpx.HTTPError as req_err:
             logger.error(f"Request error occurred for query '{query}': {req_err}")
             raise req_err

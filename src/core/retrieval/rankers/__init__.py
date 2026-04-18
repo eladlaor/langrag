@@ -17,7 +17,6 @@ from core.retrieval.rankers.discussion_ranker import (
     apply_mmr_reranking,
     apply_top_k_categorization,
     save_ranking_result,
-    DEFAULT_TOP_K_DISCUSSIONS,
 )
 
 __all__ = [
@@ -31,5 +30,4 @@ __all__ = [
     "apply_mmr_reranking",
     "apply_top_k_categorization",
     "save_ranking_result",
-    "DEFAULT_TOP_K_DISCUSSIONS",
 ]
