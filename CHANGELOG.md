@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.3
+- Update default Anthropic model from Claude Sonnet 4.5 to Sonnet 4.6.
+
+## v1.7.2
+- Fix checkpointer bug: improved error handling and connection management in async SQLite checkpointer.
+
 ## v1.7.0
 - LangGraph graph state checkpointing with AsyncSqliteSaver. Lazy async graph compilation, Docker volume mount for checkpoint persistence, integrated across orchestrator, scheduler, and batch worker.
 
