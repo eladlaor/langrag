@@ -19,6 +19,7 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 _checkpointer: AsyncSqliteSaver | None = None
+_checkpointer_cm = None
 _init_lock: asyncio.Lock | None = None
 
 
@@ -38,11 +39,15 @@ async def get_checkpointer() -> AsyncSqliteSaver:
     Protected by asyncio.Lock to prevent duplicate initialization
     during concurrent access from parallel graph workers.
 
+    Note: AsyncSqliteSaver.from_conn_string() is an async context manager
+    in langgraph-checkpoint-sqlite >= 3.x. We enter the context manager
+    and hold it open for the application lifetime, closing it in close_checkpointer().
+
     Fail-Fast Conditions:
         - SQLite database directory cannot be created
         - Checkpointer setup (table creation) fails
     """
-    global _checkpointer
+    global _checkpointer, _checkpointer_cm
 
     # Fast path: already initialized
     if _checkpointer is not None:
@@ -60,7 +65,8 @@ async def get_checkpointer() -> AsyncSqliteSaver:
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-        _checkpointer = AsyncSqliteSaver.from_conn_string(db_path)
+        _checkpointer_cm = AsyncSqliteSaver.from_conn_string(db_path)
+        _checkpointer = await _checkpointer_cm.__aenter__()
         await _checkpointer.setup()
         logger.info(f"Checkpointer initialized: {db_path}")
 
@@ -69,9 +75,10 @@ async def get_checkpointer() -> AsyncSqliteSaver:
 
 async def close_checkpointer() -> None:
     """Close the checkpointer connection. Called during application shutdown."""
-    global _checkpointer
+    global _checkpointer, _checkpointer_cm
 
-    if _checkpointer is not None:
-        await _checkpointer.conn.close()
+    if _checkpointer_cm is not None:
+        await _checkpointer_cm.__aexit__(None, None, None)
         _checkpointer = None
+        _checkpointer_cm = None
         logger.info("Checkpointer closed")
