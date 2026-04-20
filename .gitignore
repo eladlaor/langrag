@@ -287,3 +287,5 @@ data/podcasts/*.ogg
 data/podcasts/*.flac
 data/podcasts/*.webm
 
+# LangGraph checkpoints (local persistence)
+data/checkpoints/
