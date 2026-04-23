@@ -57,7 +57,7 @@
 
 If you're an AI engineer you're in FOMO.<br>
 **The good news:** There are some great communities (support groups:) you can join.<br>Real people, real challenges, daily discussions on Whatsapp.<br>
-Separating noise from nuance, tacky from techy, and.. whatever third wordplay I can fit in here you got the idea.
+Separating noise from nuance, tacky from techy, and whatever 3rd wordplay I can fit in here you got the idea.<br>
 **The bad news:** the messages are too valuable to miss, but waaaaaaaaaaay too many to keep up with.
 
 ### What
@@ -182,9 +182,7 @@ Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melam
 
 #### Why reply correlation matters
 
-Standard WhatsApp export tools lose reply metadata. Without it, a reply posted hours later lands in the wrong discussion.
-
-[Beeper](https://www.beeper.com/) bridges WhatsApp to Matrix, exposing `m.in_reply_to` on every reply. LangRAG uses these explicit chains as its primary signal for discussion separation.
+Standard WhatsApp export tools lose reply metadata. Without it, a reply referring to discussion X can easily be classified into discussion Y, if discussion Y was ongoing between the last message of discussion X, and until someone had the time to read and reply to discussion X (which can even be a whole day after). [Beeper](https://www.beeper.com/) bridges WhatsApp to Matrix, exposing `m.in_reply_to` on every reply. LangRAG uses this for accurate discussion separations.
 
 ---
 
