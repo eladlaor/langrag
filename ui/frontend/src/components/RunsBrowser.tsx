@@ -121,27 +121,28 @@ export const RunsBrowser: React.FC<RunsBrowserProps> = ({ onClose }) => {
   const copyToClipboard = useCallback(async () => {
     if (!newsletterContent?.content_html) return;
 
-    try {
-      // Extracting just the body content (between <body> and </body>)
-      const bodyMatch = newsletterContent.content_html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      const bodyContent = bodyMatch ? bodyMatch[1] : newsletterContent.content_html;
+    // Parse the full HTML document so we can cleanly extract body and plain text
+    // without regex pitfalls (HTML entities, <style>/<script> content, nested tags).
+    const doc = new DOMParser().parseFromString(newsletterContent.content_html, "text/html");
+    // Drop non-visible content so plain-text fallback doesn't leak CSS/JS
+    doc.querySelectorAll("style, script, head").forEach((el) => el.remove());
 
-      // Creating a ClipboardItem with HTML content
-      const blob = new Blob([bodyContent], { type: "text/html" });
+    const bodyHtml = doc.body ? doc.body.innerHTML : newsletterContent.content_html;
+    const plainText = (doc.body ? doc.body.innerText || doc.body.textContent || "" : "").trim();
+
+    try {
       const clipboardItem = new ClipboardItem({
-        "text/html": blob,
-        "text/plain": new Blob([bodyContent.replace(/<[^>]+>/g, "")], { type: "text/plain" }),
+        "text/html": new Blob([bodyHtml], { type: "text/html" }),
+        "text/plain": new Blob([plainText], { type: "text/plain" }),
       });
 
       await navigator.clipboard.write([clipboardItem]);
       setCopySuccess(true);
       setTimeout(() => setCopySuccess(false), 2000);
     } catch (err) {
-      // Fallback to text copy if HTML copy fails
+      // Fallback to plain text if rich HTML clipboard write is unsupported
       try {
-        const tempDiv = document.createElement("div");
-        tempDiv.innerHTML = newsletterContent.content_html;
-        await navigator.clipboard.writeText(tempDiv.innerText);
+        await navigator.clipboard.writeText(plainText);
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
       } catch (fallbackErr) {

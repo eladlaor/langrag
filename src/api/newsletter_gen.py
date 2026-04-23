@@ -24,7 +24,7 @@ import json
 import asyncio
 import uuid
 from datetime import datetime, UTC
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 
 from observability.llm import (
@@ -48,7 +48,7 @@ from custom_types.api_schemas import (
     BatchJobStatusResponse,
     BatchJobListResponse,
 )
-from custom_types.field_keys import RankingResultKeys, DiscussionKeys
+from custom_types.field_keys import RankingResultKeys, DiscussionKeys, WorkerResultKeys
 from db.batch_jobs import BatchJobManager, BatchJobStatus
 from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.state_keys import (
@@ -59,6 +59,7 @@ from graphs.state_keys import (
 from graphs.subgraphs.link_enricher import link_enricher_graph
 from graphs.subgraphs.state import LinkEnricherState
 from api.sse import get_progress_queue, remove_progress_queue, ProgressQueue
+from api.rate_limiting import limiter, RATE_NEWSLETTER_GENERATION, RATE_BATCH_JOB_QUERY
 from config import get_settings
 from constants import (
     KNOWN_WHATSAPP_CHAT_NAMES,
@@ -238,6 +239,79 @@ def _get_email_recipients(explicit_recipients: list | None) -> list | None:
     return None
 
 
+def build_orchestrator_state(
+    request: PeriodicNewsletterRequest,
+    run_output_dir: str,
+    *,
+    progress_thread_id: str | None = None,
+    hitl_timeout: int | None = None,
+) -> dict:
+    """
+    Build the ParallelOrchestratorState dict from a request.
+
+    Single source of truth for state construction — eliminates duplication
+    between the sync and streaming endpoints.
+
+    Args:
+        request: Validated newsletter generation request
+        run_output_dir: Output directory path for this run
+        progress_thread_id: Thread ID for SSE progress tracking (streaming only)
+        hitl_timeout: HITL selection timeout in minutes (streaming only)
+
+    Returns:
+        State dict ready for graph.ainvoke()
+    """
+    state = {
+        OrchestratorKeys.WORKFLOW_NAME: WorkflowNames.PERIODIC_NEWSLETTER,
+        OrchestratorKeys.DATA_SOURCE_NAME: request.data_source_name,
+        OrchestratorKeys.CHAT_NAMES: request.whatsapp_chat_names_to_include,
+        OrchestratorKeys.START_DATE: request.start_date,
+        OrchestratorKeys.END_DATE: request.end_date,
+        OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY: request.desired_language_for_summary,
+        OrchestratorKeys.SUMMARY_FORMAT: request.summary_format,
+        OrchestratorKeys.BASE_OUTPUT_DIR: run_output_dir,
+        # Force refresh flags
+        OrchestratorKeys.FORCE_REFRESH_EXTRACTION: request.force_refresh_extraction,
+        OrchestratorKeys.FORCE_REFRESH_PREPROCESSING: request.force_refresh_preprocessing,
+        OrchestratorKeys.FORCE_REFRESH_TRANSLATION: request.force_refresh_translation,
+        OrchestratorKeys.FORCE_REFRESH_SEPARATE_DISCUSSIONS: request.force_refresh_separate_discussions,
+        OrchestratorKeys.FORCE_REFRESH_CONTENT: request.force_refresh_content,
+        OrchestratorKeys.FORCE_REFRESH_FINAL_TRANSLATION: request.force_refresh_final_translation,
+        # Cross-chat consolidation flags
+        OrchestratorKeys.CONSOLIDATE_CHATS: request.consolidate_chats,
+        OrchestratorKeys.FORCE_REFRESH_CROSS_CHAT_AGGREGATION: request.force_refresh_cross_chat_aggregation,
+        OrchestratorKeys.FORCE_REFRESH_CROSS_CHAT_RANKING: request.force_refresh_cross_chat_ranking,
+        OrchestratorKeys.FORCE_REFRESH_CONSOLIDATED_CONTENT: request.force_refresh_consolidated_content,
+        OrchestratorKeys.FORCE_REFRESH_CONSOLIDATED_LINK_ENRICHMENT: request.force_refresh_consolidated_link_enrichment,
+        OrchestratorKeys.FORCE_REFRESH_CONSOLIDATED_TRANSLATION: request.force_refresh_consolidated_translation,
+        # Top-K discussions configuration
+        OrchestratorKeys.TOP_K_DISCUSSIONS: request.top_k_discussions,
+        # Anti-repetition configuration
+        OrchestratorKeys.PREVIOUS_NEWSLETTERS_TO_CONSIDER: request.previous_newsletters_to_consider,
+        # Discussion merging configuration
+        OrchestratorKeys.ENABLE_DISCUSSION_MERGING: request.enable_discussion_merging,
+        OrchestratorKeys.SIMILARITY_THRESHOLD: request.similarity_threshold,
+        # Image extraction configuration
+        OrchestratorKeys.ENABLE_IMAGE_EXTRACTION: request.enable_image_extraction,
+        # Output actions
+        OrchestratorKeys.OUTPUT_ACTIONS: resolve_output_actions(request) or [OutputAction.SAVE_LOCAL],
+        OrchestratorKeys.WEBHOOK_URL: request.webhook_url,
+        OrchestratorKeys.EMAIL_RECIPIENTS: _get_email_recipients(request.email_recipients),
+        OrchestratorKeys.SUBSTACK_BLOG_ID: request.substack_blog_id,
+        # Aggregation fields (required by state schema reducers)
+        OrchestratorKeys.CHAT_RESULTS: [],
+        OrchestratorKeys.CHAT_ERRORS: [],
+    }
+
+    if hitl_timeout is not None:
+        state[OrchestratorKeys.HITL_SELECTION_TIMEOUT_MINUTES] = hitl_timeout
+
+    if progress_thread_id is not None:
+        state[OrchestratorKeys.PROGRESS_THREAD_ID] = progress_thread_id
+
+    return state
+
+
 def setup_output_directory(request: PeriodicNewsletterRequest) -> str:
     """
     Setting up and validating the output directory for a newsletter generation run.
@@ -273,7 +347,8 @@ def setup_output_directory(request: PeriodicNewsletterRequest) -> str:
 
 
 @router.post(ROUTE_GENERATE_PERIODIC_NEWSLETTER, response_model=PeriodicNewsletterResponse)
-async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
+@limiter.limit(RATE_NEWSLETTER_GENERATION)
+async def generate_periodic_newsletter(request: Request, payload: PeriodicNewsletterRequest):
     """
     Generating periodic newsletter from WhatsApp group chats.
 
@@ -286,7 +361,7 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
     the number of chats and date range.
 
     Args:
-        request: PeriodicNewsletterRequest with dates, chats, and config
+        payload: PeriodicNewsletterRequest with dates, chats, and config
 
     Returns:
         PeriodicNewsletterResponse with results and statistics
@@ -294,6 +369,8 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
     Raises:
         HTTPException: 400 for validation errors, 500 for execution errors
     """
+    # Alias: 'request' is reserved for slowapi's Request param; 'payload' is the Pydantic body
+    request = payload  # noqa: F841
     try:
         logger.info(f"Received periodic newsletter request: {request.data_source_name} " f"({request.start_date} to {request.end_date})")
 
@@ -346,47 +423,7 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
                 logger.warning(f"Failed to create Langfuse trace: {trace_err}")
 
         # Preparing state for parallel orchestrator
-        state = {
-            "workflow_name": WorkflowNames.PERIODIC_NEWSLETTER,
-            "data_source_name": request.data_source_name,
-            "chat_names": request.whatsapp_chat_names_to_include,
-            "start_date": request.start_date,
-            "end_date": request.end_date,
-            "desired_language_for_summary": request.desired_language_for_summary,
-            "summary_format": request.summary_format,
-            "base_output_dir": run_output_dir,
-            # Force refresh flags
-            "force_refresh_extraction": request.force_refresh_extraction,
-            "force_refresh_preprocessing": request.force_refresh_preprocessing,
-            "force_refresh_translation": request.force_refresh_translation,
-            "force_refresh_separate_discussions": request.force_refresh_separate_discussions,
-            "force_refresh_content": request.force_refresh_content,
-            "force_refresh_final_translation": request.force_refresh_final_translation,
-            # Cross-chat consolidation flags (NEW)
-            "consolidate_chats": request.consolidate_chats,
-            "force_refresh_cross_chat_aggregation": request.force_refresh_cross_chat_aggregation,
-            "force_refresh_cross_chat_ranking": request.force_refresh_cross_chat_ranking,
-            "force_refresh_consolidated_content": request.force_refresh_consolidated_content,
-            "force_refresh_consolidated_link_enrichment": request.force_refresh_consolidated_link_enrichment,
-            "force_refresh_consolidated_translation": request.force_refresh_consolidated_translation,
-            # Top-K discussions configuration
-            "top_k_discussions": request.top_k_discussions,
-            # Anti-repetition configuration
-            "previous_newsletters_to_consider": request.previous_newsletters_to_consider,
-            # Discussion merging configuration
-            "enable_discussion_merging": request.enable_discussion_merging,
-            "similarity_threshold": request.similarity_threshold,
-            # Image extraction configuration
-            "enable_image_extraction": request.enable_image_extraction,
-            # Output actions (resolved with backward compat for create_linkedin_draft)
-            "output_actions": resolve_output_actions(request) or [OutputAction.SAVE_LOCAL],
-            "webhook_url": request.webhook_url,
-            "email_recipients": _get_email_recipients(request.email_recipients),
-            "substack_blog_id": request.substack_blog_id,
-            # Initializing aggregation fields (required by state schema)
-            OrchestratorKeys.CHAT_RESULTS: [],
-            OrchestratorKeys.CHAT_ERRORS: [],
-        }
+        state = build_orchestrator_state(request, run_output_dir)
 
         # Invoking parallel orchestrator graph
         config = {
@@ -403,7 +440,7 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
         graph = await get_parallel_orchestrator_graph()
         result = await graph.ainvoke(state, config)
 
-        logger.info(f"Workflow completed: {result.get('successful_chats', 0)}/{result.get('total_chats', 0)} successful")
+        logger.info(f"Workflow completed: {result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0)}/{result.get(OrchestratorKeys.TOTAL_CHATS, 0)} successful")
 
         # Transforming results to response format
         results = []
@@ -427,7 +464,7 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
 
         # Adding failed results
         for chat_error in result.get(OrchestratorKeys.CHAT_ERRORS, []):
-            results.append(NewsletterResult(date=f"{request.start_date} to {request.end_date}", chat_name=chat_error.get(SingleChatKeys.CHAT_NAME), success=False, extracted_file=None, preprocessed_file=None, translated_file=None, newsletter_json=None, newsletter_md=None, newsletter_html=None, error=chat_error.get("error")))
+            results.append(NewsletterResult(date=f"{request.start_date} to {request.end_date}", chat_name=chat_error.get(SingleChatKeys.CHAT_NAME), success=False, extracted_file=None, preprocessed_file=None, translated_file=None, newsletter_json=None, newsletter_md=None, newsletter_html=None, error=chat_error.get(WorkerResultKeys.ERROR)))
 
         # Building consolidated newsletter result if available (NEW)
         consolidated_newsletter = None
@@ -482,7 +519,7 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
         # Flushing Langfuse traces
         safe_flush_langfuse(context="end_of_newsletter_generation")
 
-        return PeriodicNewsletterResponse(message=message, results=results, total_chats=result.get("total_chats", 0), successful_chats=result.get("successful_chats", 0), failed_chats=result.get("failed_chats", 0), consolidated_newsletter=consolidated_newsletter)
+        return PeriodicNewsletterResponse(message=message, results=results, total_chats=result.get(OrchestratorKeys.TOTAL_CHATS, 0), successful_chats=result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0), failed_chats=result.get(OrchestratorKeys.FAILED_CHATS, 0), consolidated_newsletter=consolidated_newsletter)
 
     except HTTPException:
         # Re-raise validation errors (already have proper status codes)
@@ -503,7 +540,8 @@ async def generate_periodic_newsletter(request: PeriodicNewsletterRequest):
 
 
 @router.post(ROUTE_GENERATE_PERIODIC_NEWSLETTER_STREAM)
-async def generate_periodic_newsletter_stream(request: PeriodicNewsletterRequest):
+@limiter.limit(RATE_NEWSLETTER_GENERATION)
+async def generate_periodic_newsletter_stream(request: Request, payload: PeriodicNewsletterRequest):
     """
     Generating periodic newsletter with real-time progress streaming (SSE).
 
@@ -523,7 +561,7 @@ async def generate_periodic_newsletter_stream(request: PeriodicNewsletterRequest
     - error: Fatal error occurred
 
     Args:
-        request: PeriodicNewsletterRequest with dates, chats, and config
+        payload: PeriodicNewsletterRequest with dates, chats, and config
 
     Returns:
         StreamingResponse with text/event-stream content type
@@ -537,6 +575,8 @@ async def generate_periodic_newsletter_stream(request: PeriodicNewsletterRequest
                        "status": "completed", "message": "Extracted 1,234 messages",
                        "output_file": "/app/output/.../raw_messages.jsonl"}}
     """
+    # Alias: 'request' is reserved for slowapi's Request param; 'payload' is the Pydantic body
+    request = payload  # noqa: F841
     # Comprehensive validation (single source of truth)
     validate_newsletter_request(request)
 
@@ -693,51 +733,12 @@ async def run_workflow_with_progress(request: PeriodicNewsletterRequest, run_out
         dict: LangGraph workflow result state
     """
     # Preparing state for parallel orchestrator
-    state = {
-        "workflow_name": WorkflowNames.PERIODIC_NEWSLETTER,
-        "data_source_name": request.data_source_name,
-        "chat_names": request.whatsapp_chat_names_to_include,
-        "start_date": request.start_date,
-        "end_date": request.end_date,
-        "desired_language_for_summary": request.desired_language_for_summary,
-        "summary_format": request.summary_format,
-        "base_output_dir": run_output_dir,
-        # Force refresh flags
-        "force_refresh_extraction": request.force_refresh_extraction,
-        "force_refresh_preprocessing": request.force_refresh_preprocessing,
-        "force_refresh_translation": request.force_refresh_translation,
-        "force_refresh_separate_discussions": request.force_refresh_separate_discussions,
-        "force_refresh_content": request.force_refresh_content,
-        "force_refresh_final_translation": request.force_refresh_final_translation,
-        # Cross-chat consolidation flags
-        "consolidate_chats": request.consolidate_chats,
-        "force_refresh_cross_chat_aggregation": request.force_refresh_cross_chat_aggregation,
-        "force_refresh_cross_chat_ranking": request.force_refresh_cross_chat_ranking,
-        "force_refresh_consolidated_content": request.force_refresh_consolidated_content,
-        "force_refresh_consolidated_link_enrichment": request.force_refresh_consolidated_link_enrichment,
-        "force_refresh_consolidated_translation": request.force_refresh_consolidated_translation,
-        # HITL selection timeout
-        "hitl_selection_timeout_minutes": request.hitl_selection_timeout_minutes,
-        # Top-K discussions configuration
-        "top_k_discussions": request.top_k_discussions,
-        # Anti-repetition configuration
-        "previous_newsletters_to_consider": request.previous_newsletters_to_consider,
-        # Discussion merging configuration
-        "enable_discussion_merging": request.enable_discussion_merging,
-        "similarity_threshold": request.similarity_threshold,
-        # Image extraction configuration
-        "enable_image_extraction": request.enable_image_extraction,
-        # Output actions (resolved with backward compat for create_linkedin_draft)
-        "output_actions": resolve_output_actions(request) or [OutputAction.SAVE_LOCAL],
-        "webhook_url": request.webhook_url,
-        "email_recipients": _get_email_recipients(request.email_recipients),
-        "substack_blog_id": request.substack_blog_id,
-        # Initializing aggregation fields
-        OrchestratorKeys.CHAT_RESULTS: [],
-        OrchestratorKeys.CHAT_ERRORS: [],
-        # Injecting progress thread ID for nodes to look up queue
-        "progress_thread_id": thread_id,
-    }
+    state = build_orchestrator_state(
+        request,
+        run_output_dir,
+        progress_thread_id=thread_id,
+        hitl_timeout=request.hitl_selection_timeout_minutes,
+    )
 
     # Creating Langfuse trace for streaming workflow
     langfuse = get_langfuse_client()
@@ -1316,7 +1317,8 @@ def _job_to_response(job: dict) -> BatchJobStatusResponse:
 
 
 @router.get(ROUTE_BATCH_JOBS_BY_ID, response_model=BatchJobStatusResponse)
-async def get_batch_job_status(job_id: str):
+@limiter.limit(RATE_BATCH_JOB_QUERY)
+async def get_batch_job_status(request: Request, job_id: str):
     """
     Getting the status of a batch job.
 
@@ -1351,7 +1353,8 @@ async def get_batch_job_status(job_id: str):
 
 
 @router.get(ROUTE_BATCH_JOBS, response_model=BatchJobListResponse)
-async def list_batch_jobs(status: str = None, limit: int = 50, offset: int = 0):
+@limiter.limit(RATE_BATCH_JOB_QUERY)
+async def list_batch_jobs(request: Request, status: str = None, limit: int = 50, offset: int = 0):
     """
     Listing batch jobs with optional status filter.
 

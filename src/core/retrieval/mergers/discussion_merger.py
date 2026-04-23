@@ -187,9 +187,8 @@ async def identify_merge_groups(
         return merge_groups, standalone_ids
 
     except Exception as e:
-        logger.error(f"Failed to identify merge groups: {e}")
-        # Fail gracefully - return all as standalone
-        return [], [d.get(DiscussionKeys.ID) for d in discussions]
+        logger.error(f"Failed to identify merge groups: {e}", exc_info=True)
+        raise
 
 
 def _format_candidates_for_validation(candidates: list[dict[str, Any]], discussions: list[dict[str, Any]]) -> str:
@@ -342,9 +341,8 @@ async def identify_merge_groups_hybrid(discussions: list[dict[str, Any]], simila
         return merge_groups, standalone_ids
 
     except Exception as e:
-        logger.error(f"Hybrid merging failed: {e}, falling back to LLM-only", exc_info=True)
-        # Graceful fallback to LLM-only approach
-        return await identify_merge_groups(discussions, similarity_threshold)
+        logger.error(f"Hybrid merging failed: {e}", exc_info=True)
+        raise
 
 
 async def _generate_merged_title(

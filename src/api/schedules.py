@@ -323,8 +323,8 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest):
     try:
         manager = _get_schedule_manager()
 
-        # Filter out None values
-        updates = {k: v for k, v in request.model_dump().items() if v is not None}
+        # Only include fields that were explicitly provided in the request
+        updates = request.model_dump(exclude_unset=True)
 
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")

@@ -26,7 +26,7 @@ import os
 import logging
 import re
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Literal
 
@@ -82,7 +82,7 @@ from graphs.multi_chat_consolidator.linkedin_draft_creator import deliver_to_lin
 from db.run_tracker import get_tracker
 from observability.metrics import with_metrics, get_metrics_client
 from api.sse import with_logging
-from custom_types.field_keys import DiscussionKeys, RankingResultKeys, MergeGroupKeys
+from custom_types.field_keys import DeliveryResultKeys, DiscussionKeys, MergeGroupKeys, OutputPathKeys, RankingResultKeys, WorkerResultKeys
 
 
 # Configure logging
@@ -157,8 +157,8 @@ async def chat_worker_wrapper(state: SingleChatState, config: RunnableConfig | N
             SingleChatKeys.CHAT_NAME: chat_name,
             SingleChatKeys.START_DATE: start_date,
             SingleChatKeys.END_DATE: end_date,
-            "error": str(e),
-            "error_type": type(e).__name__,
+            WorkerResultKeys.ERROR: str(e),
+            WorkerResultKeys.ERROR_TYPE: type(e).__name__,
         }
 
         # Return error to be added to chat_errors list (via reducer)
@@ -456,20 +456,20 @@ async def aggregate_results(state: ParallelOrchestratorState, config: RunnableCo
                 status=RunStatus.COMPLETED,
                 metadata={
                     "message_count": result.get(SingleChatKeys.MESSAGE_COUNT),
-                    "discussion_count": result.get("discussion_count", 0),
+                    WorkerResultKeys.DISCUSSION_COUNT: result.get(WorkerResultKeys.DISCUSSION_COUNT, 0),
                 },
             )
 
             # Store output paths
             output_paths = {}
             if result.get(SingleChatKeys.NEWSLETTER_JSON_PATH):
-                output_paths["newsletter_json"] = result[SingleChatKeys.NEWSLETTER_JSON_PATH]
+                output_paths[OutputPathKeys.NEWSLETTER_JSON] = result[SingleChatKeys.NEWSLETTER_JSON_PATH]
             if result.get(SingleChatKeys.NEWSLETTER_MD_PATH):
-                output_paths["newsletter_md"] = result[SingleChatKeys.NEWSLETTER_MD_PATH]
+                output_paths[OutputPathKeys.NEWSLETTER_MD] = result[SingleChatKeys.NEWSLETTER_MD_PATH]
             if result.get(SingleChatKeys.NEWSLETTER_HTML_PATH):
-                output_paths["newsletter_html"] = result[SingleChatKeys.NEWSLETTER_HTML_PATH]
+                output_paths[OutputPathKeys.NEWSLETTER_HTML] = result[SingleChatKeys.NEWSLETTER_HTML_PATH]
             if result.get(SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH):
-                output_paths["enriched_md"] = result[SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH]
+                output_paths[OutputPathKeys.ENRICHED_MD] = result[SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH]
 
             if output_paths:
                 await tracker.update_chat_outputs(run_id=mongodb_run_id, chat_name=chat_name, output_paths=output_paths)
@@ -477,7 +477,7 @@ async def aggregate_results(state: ParallelOrchestratorState, config: RunnableCo
         # Track failed chats
         for error in chat_errors:
             chat_name = error.get(SingleChatKeys.CHAT_NAME, "unknown")
-            await tracker.update_chat_status(run_id=mongodb_run_id, chat_name=chat_name, status=RunStatus.FAILED, metadata={"error": error.get("error", "unknown error")})
+            await tracker.update_chat_status(run_id=mongodb_run_id, chat_name=chat_name, status=RunStatus.FAILED, metadata={WorkerResultKeys.ERROR: error.get(WorkerResultKeys.ERROR, "unknown error")})
 
     # Update worker metrics (all workers completed)
     metrics_client = get_metrics_client()
@@ -658,16 +658,16 @@ async def output_handler(state: ParallelOrchestratorState, config: RunnableConfi
 
             if not newsletter_html_path:
                 logger.warning("No HTML newsletter available for email, skipping send_email action")
-                delivery_results[OutputAction.SEND_EMAIL] = {"success": False, "error": "No HTML newsletter available"}
+                delivery_results[OutputAction.SEND_EMAIL] = {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "No HTML newsletter available"}
                 continue
 
             try:
                 await asyncio.to_thread(_send_newsletter_email, recipients=email_recipients, html_path=newsletter_html_path, data_source=state.get(OrchestratorKeys.DATA_SOURCE_NAME, TAG_NEWSLETTER), start_date=state.get(OrchestratorKeys.START_DATE, ""), end_date=state.get(OrchestratorKeys.END_DATE, ""), base_url=os.getenv("APP_BASE_URL", "http://localhost"))
                 logger.info(f"Newsletter email sent to {len(email_recipients)} recipients")
-                delivery_results[OutputAction.SEND_EMAIL] = {"success": True, "recipients": email_recipients}
+                delivery_results[OutputAction.SEND_EMAIL] = {DeliveryResultKeys.SUCCESS: True, DeliveryResultKeys.RECIPIENTS: email_recipients}
             except Exception as e:
                 logger.error(f"Failed to send newsletter email: {e}")
-                delivery_results[OutputAction.SEND_EMAIL] = {"success": False, "error": str(e)}
+                delivery_results[OutputAction.SEND_EMAIL] = {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: str(e)}
 
         elif action == OutputAction.SEND_SUBSTACK:
             substack_blog_id = state.get(OrchestratorKeys.SUBSTACK_BLOG_ID)
@@ -677,16 +677,16 @@ async def output_handler(state: ParallelOrchestratorState, config: RunnableConfi
                 raise ValueError(error_msg)
 
             logger.warning(f"Action '{OutputAction.SEND_SUBSTACK}': Substack delivery not yet implemented. Blog ID: {substack_blog_id}")
-            delivery_results[OutputAction.SEND_SUBSTACK] = {"success": False, "error": "Substack delivery not yet implemented"}
+            delivery_results[OutputAction.SEND_SUBSTACK] = {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "Substack delivery not yet implemented"}
 
         elif action == OutputAction.SEND_LINKEDIN:
             logger.info(f"Action '{OutputAction.SEND_LINKEDIN}': Creating LinkedIn draft via n8n webhook")
             linkedin_result = await deliver_to_linkedin(state)
             delivery_results[OutputAction.SEND_LINKEDIN] = linkedin_result
-            if linkedin_result.get("success"):
+            if linkedin_result.get(DeliveryResultKeys.SUCCESS):
                 logger.info("LinkedIn draft created successfully")
             else:
-                logger.warning(f"LinkedIn delivery failed (fail-soft): {linkedin_result.get('error')}")
+                logger.warning(f"LinkedIn delivery failed (fail-soft): {linkedin_result.get(DeliveryResultKeys.ERROR)}")
 
         else:
             error_msg = f"Unknown output action: '{action}'. Valid actions: {', '.join(OutputAction)}"
@@ -695,7 +695,7 @@ async def output_handler(state: ParallelOrchestratorState, config: RunnableConfi
 
     # Log delivery results summary
     if delivery_results:
-        successes = sum(1 for r in delivery_results.values() if r.get("success"))
+        successes = sum(1 for r in delivery_results.values() if r.get(DeliveryResultKeys.SUCCESS))
         failures = len(delivery_results) - successes
         logger.info(f"Delivery results: {successes} succeeded, {failures} failed. Details: {delivery_results}")
 
@@ -735,7 +735,7 @@ def format_timestamp(timestamp_ms: int, format_str: str) -> str:
     Returns:
         Formatted timestamp string
     """
-    dt = datetime.fromtimestamp(timestamp_ms / 1000)
+    dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC)
     return dt.strftime(format_str)
 
 
@@ -830,7 +830,7 @@ def prepare_discussion_selection(state: ParallelOrchestratorState, config: Runna
 
     # Calculate timeout deadline (configurable, default 0 = automatic selection)
     timeout_minutes = state.get(OrchestratorKeys.HITL_SELECTION_TIMEOUT_MINUTES, 0)  # Default: 0 (automatic selection)
-    timeout_deadline = datetime.now() + timedelta(minutes=timeout_minutes)
+    timeout_deadline = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
 
     logger.info(f"HITL selection timeout: {timeout_minutes} minutes ({timeout_minutes/60:.1f} hours)")
     logger.info(f"Selection expires at: {timeout_deadline.isoformat()}")
@@ -1071,7 +1071,7 @@ def build_parallel_orchestrator_graph(checkpointer=None) -> StateGraph:
 
 # Lazy async singleton — replaces module-level compilation to support async checkpointer init
 _compiled_graph = None
-_graph_lock: asyncio.Lock | None = None
+_graph_lock: asyncio.Lock = asyncio.Lock()
 
 
 async def get_parallel_orchestrator_graph():
@@ -1088,9 +1088,6 @@ async def get_parallel_orchestrator_graph():
         return _compiled_graph
 
     # Slow path: acquire lock for compilation
-    if _graph_lock is None:
-        _graph_lock = asyncio.Lock()
-
     async with _graph_lock:
         if _compiled_graph is not None:
             return _compiled_graph

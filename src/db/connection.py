@@ -21,16 +21,13 @@ logger = logging.getLogger(__name__)
 # Global client instances (connection pool)
 _client: AsyncIOMotorClient | None = None
 _database: AsyncIOMotorDatabase | None = None
-_db_init_lock: asyncio.Lock | None = None
+_db_init_lock: asyncio.Lock = asyncio.Lock()
 _sync_client = None
 _sync_database = None
 
 
 def _get_db_lock() -> asyncio.Lock:
-    """Get or create the database initialization lock (bound to current event loop)."""
-    global _db_init_lock
-    if _db_init_lock is None:
-        _db_init_lock = asyncio.Lock()
+    """Get the database initialization lock."""
     return _db_init_lock
 
 

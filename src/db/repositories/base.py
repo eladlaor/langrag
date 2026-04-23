@@ -237,10 +237,17 @@ class BaseRepository(Generic[T]):
         """
         Check if any document matches the query.
 
+        Uses find_one with _id-only projection for efficiency
+        instead of count_documents which scans the entire matching set.
+
         Args:
             query: MongoDB query filter
 
         Returns:
             True if at least one document exists
         """
-        return await self.count(query) > 0
+        try:
+            return (await self.collection.find_one(query, {"_id": 1})) is not None
+        except Exception as e:
+            logger.error(f"Failed to check existence in {self.collection_name}: {e}")
+            raise

@@ -3,6 +3,9 @@ import uuid
 import time
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from constants import DISPLAY_TIMEZONE
 from enum import StrEnum
 from typing import Any
 
@@ -28,7 +31,7 @@ class ChatTimeframe(BaseModel):
     end: int
 
     def to_datetime(self):
-        return {"start_date": datetime.fromtimestamp(self.start), "end_date": datetime.fromtimestamp(self.end)}
+        return {"start_date": datetime.fromtimestamp(self.start, tz=ZoneInfo(DISPLAY_TIMEZONE)), "end_date": datetime.fromtimestamp(self.end, tz=ZoneInfo(DISPLAY_TIMEZONE))}
 
 
 class Message(BaseModel):

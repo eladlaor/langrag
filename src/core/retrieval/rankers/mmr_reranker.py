@@ -148,9 +148,8 @@ def rank_with_mmr(discussions: list[dict[str, Any]], quality_scores: list[float]
         return result
 
     except Exception as e:
-        logger.error(f"MMR reranking failed: {e}, falling back to quality-only ranking", exc_info=True)
-        # Graceful fallback to quality ranking
-        return _quality_only_ranking(discussions, quality_scores, top_k)
+        logger.error(f"MMR reranking failed: {e}", exc_info=True)
+        raise
 
 
 def _get_or_generate_embeddings(discussions: list[dict[str, Any]]) -> list[list[float] | None]:

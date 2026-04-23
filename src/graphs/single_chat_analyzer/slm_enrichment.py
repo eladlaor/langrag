@@ -18,6 +18,7 @@ Configuration:
 - SLM_ENRICHMENT_MODEL: HuggingFace model name (default: eladlaor/chat-message-tagger-deberta-v3)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -257,8 +258,11 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
         input_data={"chat_name": chat_name, "model": model_name},
     ) as span:
         try:
-            # Load model (cached after first call)
-            model, tokenizer, thresholds = _load_enrichment_model(model_name)
+            # Load model (cached after first call) — offloaded to thread
+            # because HuggingFace/PyTorch model loading is CPU-bound and blocking
+            model, tokenizer, thresholds = await asyncio.to_thread(
+                _load_enrichment_model, model_name,
+            )
 
             # Load discussions
             with open(discussions_file, encoding="utf-8") as f:
@@ -269,22 +273,24 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
                 logger.warning("Discussions data not a list, skipping enrichment")
                 return {}
 
-            # Enrich all messages across all discussions
+            # Enrich all messages across all discussions — offloaded to thread
+            # because PyTorch tensor inference is CPU-bound and blocking
             total_messages = 0
             total_enriched = 0
 
             for discussion in discussions:
                 messages = discussion.get(DiscussionKeys.MESSAGES, [])
                 if messages:
-                    _enrich_messages_batch(
+                    await asyncio.to_thread(
+                        _enrich_messages_batch,
                         messages, model, tokenizer, thresholds,
-                        batch_size=settings.slm_enrichment.batch_size,
+                        settings.slm_enrichment.batch_size,
                     )
                     total_messages += len(messages)
                     total_enriched += sum(1 for m in messages if m.get("slm_active_labels"))
 
             # Write enriched discussions back atomically
-            _atomic_json_write(discussions_file, data)
+            await asyncio.to_thread(_atomic_json_write, discussions_file, data)
 
             logger.info(
                 "SLM enrichment for chat_name=%s: %d messages enriched (%d with active labels)",

@@ -105,9 +105,9 @@ class LLMSettings(BaseSettings):
     # =========================================================================
     # Anthropic models
     # =========================================================================
-    anthropic_default_model: str = Field(default="claude-sonnet-4-6-20250514", description="Anthropic default model for structured output and complex tasks")
+    anthropic_default_model: str = Field(default="claude-sonnet-4-6", description="Anthropic default model for structured output and complex tasks")
     anthropic_mini_model: str = Field(default="claude-haiku-4-5-20251001", description="Anthropic lightweight model for simple text generation")
-    anthropic_ranking_model: str = Field(default="claude-sonnet-4-6-20250514", description="Anthropic model used for discussion ranking")
+    anthropic_ranking_model: str = Field(default="claude-sonnet-4-6", description="Anthropic model used for discussion ranking")
     anthropic_max_tokens: int = Field(default=16384, description="Max tokens for Anthropic responses")
 
     # =========================================================================

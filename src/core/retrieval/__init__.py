@@ -12,11 +12,9 @@ This module contains the pure business logic that those graphs invoke.
 """
 
 from core.retrieval.rankers import (
-    DiscussionRanker,
-    rank_discussions,
+    rank_with_llm,
 )
 
 __all__ = [
-    "DiscussionRanker",
-    "rank_discussions",
+    "rank_with_llm",
 ]

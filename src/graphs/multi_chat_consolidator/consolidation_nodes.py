@@ -20,6 +20,7 @@ Architecture:
 - Native async nodes for LangGraph 1.0+ compatibility
 """
 
+import asyncio
 import dataclasses
 import os
 import json
@@ -212,6 +213,23 @@ def setup_consolidated_directories(state: ParallelOrchestratorState, config: Run
 
 
 # ============================================================================
+# FILE I/O HELPERS (for asyncio.to_thread offloading)
+# ============================================================================
+
+
+def _load_json_file(file_path: str) -> Any:
+    """Load and parse a JSON file (sync, for use with asyncio.to_thread)."""
+    with open(file_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_json_file(file_path: str, data: Any) -> None:
+    """Save data as JSON to a file (sync, for use with asyncio.to_thread)."""
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# ============================================================================
 # NODE 2: CONSOLIDATE DISCUSSIONS
 # ============================================================================
 
@@ -219,7 +237,7 @@ def setup_consolidated_directories(state: ParallelOrchestratorState, config: Run
 @with_logging
 @with_progress(stage=STAGE_CONSOLIDATE_DISCUSSIONS, start_message="Aggregating discussions from all chats...", success_message="Discussions aggregated successfully")
 @with_metrics(node_name=NodeNames.MultiChatConsolidator.CONSOLIDATE_DISCUSSIONS, workflow_name="cross_chat_consolidation")
-def consolidate_discussions(state: ParallelOrchestratorState, config: RunnableConfig | None = None) -> dict:
+async def consolidate_discussions(state: ParallelOrchestratorState, config: RunnableConfig | None = None) -> dict:
     """
     Aggregate discussions from all successful chats into a single collection.
 
@@ -292,8 +310,7 @@ def consolidate_discussions(state: ParallelOrchestratorState, config: RunnableCo
                 failed_chats.append(chat_name)
                 continue
 
-            with open(discussions_file, encoding="utf-8") as f:
-                chat_discussions_data = json.load(f)
+            chat_discussions_data = await asyncio.to_thread(_load_json_file, discussions_file)
 
             # Extract discussions (handle both list and dict formats)
             if isinstance(chat_discussions_data, dict):
@@ -353,11 +370,10 @@ def consolidate_discussions(state: ParallelOrchestratorState, config: RunnableCo
         DiscussionKeys.DISCUSSIONS: all_discussions,
     }
 
-    # Save aggregated discussions
+    # Save aggregated discussions (offloaded to thread to avoid blocking event loop)
     output_file = expected_file
     try:
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(_save_json_file, output_file, aggregated_data)
         logger.info(f"Saved aggregated discussions to: {output_file}")
     except Exception as e:
         error_msg = f"Failed to save aggregated discussions: {e}"

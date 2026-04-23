@@ -880,7 +880,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             start_ts = self._parse_timestamp(start_date_str, day_boundary="start")
             end_ts = self._parse_timestamp(end_date_str, day_boundary=DayBoundary.END)
 
-            logging.info(f"Date range: {datetime.fromtimestamp(start_ts/1000).strftime('%Y-%m-%d %H:%M:%S')} to {datetime.fromtimestamp(end_ts/1000).strftime('%Y-%m-%d %H:%M:%S')}")
+            logging.info(f"Date range: {datetime.fromtimestamp(start_ts/1000, tz=UTC).strftime('%Y-%m-%d %H:%M:%S')} to {datetime.fromtimestamp(end_ts/1000, tz=UTC).strftime('%Y-%m-%d %H:%M:%S')}")
 
             # Filtering messages by room_id and timestamp
             filtered_messages = [msg for msg in encrypted_messages if msg.get(DecryptionResultKeys.ROOM_ID) == room_id and start_ts <= msg.get(DecryptionResultKeys.ORIGIN_SERVER_TS, 0) <= end_ts]

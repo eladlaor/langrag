@@ -376,7 +376,7 @@ def convert_newsletter_json_to_markdown(newsletter_data: dict[str, Any]) -> str:
         Markdown-formatted newsletter content
     """
     try:
-        from datetime import datetime
+        from datetime import UTC, datetime
 
         # Check if this is MCP Israel format (has markdown_content field)
         if NewsletterStructureKeys.MARKDOWN_CONTENT in newsletter_data:
@@ -398,7 +398,7 @@ def convert_newsletter_json_to_markdown(newsletter_data: dict[str, Any]) -> str:
             if NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in primary and primary[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
                 timestamp = primary[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
                 if isinstance(timestamp, (int, float)):
-                    dt = datetime.fromtimestamp(timestamp / 1000)  # Convert from milliseconds
+                    dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)  # Convert from milliseconds
                     time_str = dt.strftime("%H:%M")
                     date_str = dt.strftime("%d.%m.%y")
                     chat_name = primary.get(NewsletterStructureKeys.CHAT_NAME, "LangTalks Community")
@@ -418,7 +418,7 @@ def convert_newsletter_json_to_markdown(newsletter_data: dict[str, Any]) -> str:
                 if NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in discussion and discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
                     timestamp = discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
                     if isinstance(timestamp, (int, float)):
-                        dt = datetime.fromtimestamp(timestamp / 1000)
+                        dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
                         time_str = dt.strftime("%H:%M")
                         date_str = dt.strftime("%d.%m.%y")
                         chat_name = discussion.get(NewsletterStructureKeys.CHAT_NAME, "LangTalks Community")

@@ -14,6 +14,7 @@ import httpx
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 from graphs.state_keys import OrchestratorKeys
 from constants import N8N_LINKEDIN_WEBHOOK_URL, TIMEOUT_HTTP_REQUEST
+from custom_types.field_keys import DeliveryResultKeys
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ async def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
         state: ParallelOrchestratorState with consolidated newsletter path and metadata
 
     Returns:
-        dict: {"success": True/False, "draft_response": ..., "error": ...}
+        dict: {DeliveryResultKeys.SUCCESS: True/False, ...}
 
     Design:
         - 30-second timeout (fail-fast if n8n hangs)
@@ -45,12 +46,12 @@ async def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
     if not newsletter_path:
         msg = "No consolidated newsletter available for LinkedIn delivery (consolidation may be disabled or only 1 chat processed)"
         logger.info(f"LinkedIn delivery skipped: {msg}")
-        return {"success": False, "error": msg}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: msg}
 
     if not os.path.exists(newsletter_path):
         msg = f"Newsletter file not found at {newsletter_path}"
         logger.warning(f"LinkedIn delivery skipped: {msg}")
-        return {"success": False, "error": msg}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: msg}
 
     # Read newsletter content
     try:
@@ -58,11 +59,11 @@ async def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
             content = f.read()
     except Exception as e:
         logger.error(f"Failed to read newsletter for LinkedIn delivery: {e}")
-        return {"success": False, "error": f"read_error: {e}"}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: f"read_error: {e}"}
 
     if not content or content.strip() == "":
         logger.warning("Newsletter content is empty, skipping LinkedIn delivery")
-        return {"success": False, "error": "empty_content"}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "empty_content"}
 
     # Enforce LinkedIn character limit
     if len(content) > LINKEDIN_CHAR_LIMIT:
@@ -80,20 +81,20 @@ async def deliver_to_linkedin(state: ParallelOrchestratorState) -> dict:
         logger.info("LinkedIn draft created successfully via n8n webhook")
         draft_response = response.json() if response.text else {}
         return {
-            "success": True,
-            "draft_response": draft_response,
+            DeliveryResultKeys.SUCCESS: True,
+            DeliveryResultKeys.DRAFT_RESPONSE: draft_response,
         }
 
     except httpx.TimeoutException:
         logger.error("n8n webhook timeout (30s) - LinkedIn draft NOT created")
-        return {"success": False, "error": "timeout"}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "timeout"}
 
     except httpx.HTTPError as e:
         logger.error(f"n8n webhook error for LinkedIn delivery: {e}")
-        return {"success": False, "error": str(e)}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: str(e)}
 
     except Exception as e:
         logger.error(f"Unexpected error in LinkedIn delivery: {e}")
-        return {"success": False, "error": f"unexpected: {e}"}
+        return {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: f"unexpected: {e}"}
 
 

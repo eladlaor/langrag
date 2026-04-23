@@ -4,6 +4,7 @@ Discussions Repository
 Manages discussion records extracted from WhatsApp chats.
 """
 
+import asyncio
 import logging
 from datetime import datetime, UTC
 from typing import Any
@@ -76,13 +77,14 @@ class DiscussionsRepository(BaseRepository):
         }
 
         # Generate embedding for semantic search (fail-soft)
+        # embed_text() is synchronous (OpenAI API call), offload to thread
         if generate_embedding:
             try:
                 from utils.embedding import EmbeddingProviderFactory
 
                 embedder = EmbeddingProviderFactory.create()
                 discussion_text = f"{title}. {nutshell}"
-                embedding = embedder.embed_text(discussion_text)
+                embedding = await asyncio.to_thread(embedder.embed_text, discussion_text)
 
                 if embedding:
                     document[DbFieldKeys.EMBEDDING] = embedding
@@ -105,10 +107,19 @@ class DiscussionsRepository(BaseRepository):
         self,
         run_id: str,
         sort_by_ranking: bool = True,
+        limit: int = 0,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Get all discussions for a run."""
+        """Get all discussions for a run.
+
+        Args:
+            run_id: Pipeline run ID
+            sort_by_ranking: Sort by ranking score descending (default) or by creation date
+            limit: Maximum discussions to return (0 = no limit)
+            offset: Number of discussions to skip for pagination
+        """
         sort = [(DbFieldKeys.RANKING_SCORE, -1)] if sort_by_ranking else [(DbFieldKeys.CREATED_AT, 1)]
-        return await self.find_many({DbFieldKeys.RUN_ID: run_id}, sort=sort)
+        return await self.find_many({DbFieldKeys.RUN_ID: run_id}, sort=sort, limit=limit, skip=offset)
 
     async def get_top_discussions(
         self,

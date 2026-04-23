@@ -2,13 +2,7 @@
 
   <img src="docs/figures/images/langrag_banner.png" alt="LangRAG: Recapping All Groups" width="300">
 
-  <h3>
-    Everyone summarizes WhatsApp.<br>
-    LangRAG goes deeper.<br>
-    <sub>(With Beeper! <img src="docs/figures/images/beeper.png" alt="Beeper" width="14" style="vertical-align: middle;">)</sub>
-  </h3>
-
-  <h3>⭐ The newsletter solution chosen by AI community leaders since 2024 ⭐</h3>
+  <h2>⭐ Chosen by AI community leaders since 2024 ⭐</h2>
 
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
   <a href="https://docs.docker.com/compose/"><img src="https://img.shields.io/badge/docker-compose-2496ED.svg" alt="Docker Compose"></a>
@@ -21,6 +15,12 @@
   <a href="https://www.anthropic.com/"><img src="https://img.shields.io/badge/Anthropic-Claude-D97757.svg" alt="Anthropic"></a>
   <a href="https://creativecommons.org/licenses/by-nc/4.0/"><img src="https://img.shields.io/badge/license-CC%20BY--NC%204.0-lightgrey.svg" alt="CC BY-NC 4.0"></a>
 
+</div>
+
+<br>
+
+<div align="center">
+  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG pipeline overview - animated" width="800">
 </div>
 
 <br>
@@ -40,9 +40,7 @@
 - [How It Works](#how-it-works)
   - [Pipeline Overview](#pipeline-overview)
   - [What Gives This Solution an Edge](#what-gives-this-solution-an-edge)
-  - [Reply Correlation via Beeper](#reply-correlation-via-beeper)
-  - [Single Chat Analysis](#single-chat-analysis)
-  - [Multi-Chat Consolidation](#multi-chat-consolidation)
+  - [Why Reply Correlation Matters](#why-reply-correlation-matters)
 - [Setup](#setup)
   - [Getting Started](#getting-started)
   - [User Interfaces](#user-interfaces)
@@ -57,17 +55,18 @@
 
 ### Why
 
-If you're in AI engineering, you're probably in FOMO.<br>
-**The good news:** There are some great Whatsapp communities, facilitating daily discussions with experts and peers, which are the best place to solve this constantly-buzzing problem. The perfect places for you to always remain up to speed, learn what's worth actually your attention, and sharpen your knowledge by discussing real-world challenges with real people, sharing nuanced, battle-tested insights and perspectives.<br>
-**The bad news:** the messages are too valuable to miss, but waaaaaaay too many to keep up with.
+If you're an AI engineer you're in FOMO.<br>
+**The good news:** There are some great communities (support groups:) you can join.<br>Real people, real challenges, daily discussions on Whatsapp.<br>
+Separating noise from nuance, tacky from techy, and.. whatever third wordplay I can fit in here you got the idea.
+**The bad news:** the messages are too valuable to miss, but waaaaaaaaaaay too many to keep up with.
 
 ### What
 
-Generating newsletters since November 2024 across lively communities containing 17+ active WhatsApp groups with more than 8,000 distinct members, in order to separate the noise from the valuable actionable insights.
+Generating worth-your-time newsletters for AI engineers, carefully distilled from thousands of WhatsApp messages.
 
 ### How
 
-LangRAG uses **Beeper** for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process group-chats in parallel, and generates structured newsletters. The analysis settings and output destinations are **deeply configurable**.<br> Currently works with OpenAI or Anthropic as the LLM provider.<br> **Cost-optimized** with Batch API (50% savings) and local SLM pre-filtering (15-30% additional savings). Optional SLM semantic enrichment for improved discussion ranking.<br> Full observability via Langfuse, DeepEval, Prometheus, and Grafana.
+LangRAG uses Beeper for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process and analyze multiple group-chats in parallel, applying MMR and reranking to produce structured and relevant content.<br>The analysis is **deep, highly-configurable, and cost-optimized**.<br>Full observability across tracing, evals, metrics and logs.
 
 ---
 
@@ -158,17 +157,8 @@ Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melam
 ### Pipeline Overview
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG pipeline overview - animated" width="800">
-</div>
-
-<details>
-<summary><strong>View static diagram</strong></summary>
-
-<div align="center">
   <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG pipeline overview - full diagram" width="800">
 </div>
-
-</details>
 
 ---
 
@@ -187,111 +177,14 @@ Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melam
 | Smart Discussion Merging | Configurable similarity thresholds + LLM validation | Better handling of cross-group similar discussions |
 | Full Observability | Langfuse + Prometheus + Loki/Grafana, all fail-soft | Production monitoring |
 | Link Enrichment | Auto-fetch URLs, non-destructive markdown insertion | References for further learning |
-| LinkedIn Automation | n8n webhook integration | One-click LinkedIn draft publishing |
+| Configurable Output Formats | Format plugins with custom structure, sections, and editorial style | JSON, Markdown, and HTML per community |
+| Multi-Channel Delivery | Email (SendGrid, Gmail, SMTP2GO), LinkedIn draft (n8n), webhooks | One pipeline, multiple destinations |
 
----
+#### Why reply correlation matters
 
-### Reply Correlation via Beeper
+Standard WhatsApp export tools lose reply metadata. Without it, a reply posted hours later lands in the wrong discussion.
 
-<img src="docs/figures/images/beeper.png" alt="Beeper" width="40" align="left" style="margin-right: 12px;">
-
-Most WhatsApp export tools lose reply metadata - the link between a reply and the specific message it responds to. Without it, discussion-separation algorithms must fall back on timestamp proximity and content similarity, which is inherently error-prone. A group member might continue a discussion hours or even a full day later, replying to a message from yesterday - but with dozens of unrelated messages in between, there's no reliable way to reconstruct that thread from timestamps alone.
-
-**[Beeper](https://github.com/beeper)** solves this by bridging WhatsApp to the Matrix protocol. Matrix exposes the `m.in_reply_to` field on every reply event, giving LangRAG explicit reply chains rather than guesses. The `separate_discussions` node uses these chains as its primary signal for grouping messages into topical discussions, with LLM-based content analysis as a secondary signal for standalone messages.
-
-Better data, better results.
-
-### Single Chat Analysis
-
-Each chat runs through the **SingleChatAnalyzer** - a LangGraph pipeline which would be used as a subgraph in multi-chat. These are its stages:
-
-#### 1. Extract Messages
-Pulls messages from the selected groups via a Beeper/Matrix bridge. Preserves reply-chain metadata (`m.in_reply_to`) for accurate discussion separation. Includes automatic E2E decryption with three configurable strategies: persistent session store, server-side key backup, and manual key export.
-
-#### 2. SLM Filter *(optional)*
-
-A configurable local SLM (via Ollama) classifies each message as **KEEP**, **FILTER**, or **UNCERTAIN**. Reduces downstream LLM API calls by 15-30%. Fail-soft: if the SLM is unavailable, the pipeline continues without filtering.
-
-#### 3. Extract Images *(optional)*
-
-Downloads and decrypts images shared in the chat (AES-CTR encrypted media from Matrix). Describes each image using a configurable vision model. Descriptions are cached in MongoDB to avoid redundant API calls. This visual context is carried forward through the pipeline and injected into newsletter generation.
-
-#### 4. Preprocess Data
-
-Parse timestamps, sender names, media attachments, and URLs. Pure transformation | no LLM calls. Structures raw Matrix events into a normalized message format.
-
-#### 5. Normalize to English
-
-Normalize all messages to English using gpt-4o-mini in batch mode. Messages already in English are skipped. This ensures consistent language for downstream analysis regardless of the source language.
-
-#### 6. Separate Discussions
-
-Group messages into topical discussions. Uses reply-to chains as the primary signal, with LLM-based content analysis as a secondary signal for standalone messages. Outputs a structured list of discussions, each with its constituent messages.
-
-#### 7. SLM Enrichment *(optional)*
-
-Enriches messages with 15 semantic labels (professional, question, resource, experience_sharing, how_to, humor, etc.) using a fine-tuned DeBERTa-v3 model from HuggingFace. These labels feed into the discussion ranker as pre-computed signals, improving ranking quality. Runs locally with no API calls. Fail-soft: if the model is unavailable, ranking proceeds without enrichment signals.
-
-#### 8. Rank Discussions
-
-Score discussions by importance and diversity. Uses a **discussion ranker subgraph** that combines multi-factor scoring with Maximal Marginal Relevance (MMR) re-ranking. Includes anti-repetition checks against previous newsletters (embedding cosine similarity + LLM validation) | reducing repeated content by up to 80%.
-
-#### 9. Associate Images
-
-Maps extracted image descriptions to their parent discussions. The generation stage receives both the text content and the visual context of each discussion, producing richer and more accurate summaries.
-
-#### 10. Generate Summary
-
-Create the newsletter content from the top-ranked discussions. Uses format plugins (`langtalks_format`, `mcp_israel_format`) to produce output as JSON, Markdown, and HTML. Each format defines its own structure, section ordering, and editorial style. Image context is included where relevant.
-
-#### 11. Link Enrichment
-
-Extract URLs from the original messages and optionally perform web searches to find additional relevant links. Inserts markdown hyperlinks into the newsletter content non-destructively | existing text is preserved, links are woven in contextually.
-
-### Multi-Chat Consolidation
-
-When processing multiple WhatsApp groups, the **ParallelOrchestrator** coordinates the full pipeline. The orchestrator dispatches N chats concurrently using LangGraph's **Send API**, each running the full SingleChatAnalyzer independently. After all chats complete, the consolidation stages begin:
-
-#### 1. Aggregate Cross-Chat
-
-Collect all discussions from all chats into a unified pool. Partial success is allowed | individual chat failures don't block others.
-
-#### 2. Merge Similar Discussions
-
-Identify and merge discussions about the same topic across different groups (embedding cosine similarity with configurable thresholds: `strict`, `moderate`, `aggressive`).
-
-#### 3. ReRank
-
-Score and rank the merged discussion pool using the same multi-factor scoring system, now operating cross-chat.
-
-#### 4. Apply MMR
-
-Apply Maximal Marginal Relevance re-ranking to balance quality with diversity across the consolidated discussion pool.
-
-#### 5. Generate Consolidated
-
-Create a single unified newsletter from the top-ranked discussions.
-
-#### 6. Human in the Loop *(optional)*
-
-For supported formats, the pipeline supports a **two-phase execution**. Phase 1 runs through consolidation and ranking, then **pauses** | presenting the ranked discussions to a human editor via the Web UI. The editor reviews, reorders, or deselects discussions. Phase 2 generates the newsletter using only the human-approved discussions.
-
-#### 7. Translate
-
-Final translation to the target language (if it's different than the normalized English which was used for analysis).
-
-#### 8. Structure Formats
-
-Format the newsletter output into multiple structures: JSON, Markdown, and HTML. Each format plugin defines its own structure, section ordering, and editorial style.
-
-#### 9. Send to Email / Hook
-
-The output handler dispatches to multiple destinations:
-
-- **Local files** | JSON, Markdown, HTML saved to `output/` directory
-- **Email** | Via SendGrid, Gmail, or SMTP2GO
-- **LinkedIn** | Draft post via n8n webhook
-- **Webhook** | Custom HTTP endpoint
+[Beeper](https://www.beeper.com/) bridges WhatsApp to Matrix, exposing `m.in_reply_to` on every reply. LangRAG uses these explicit chains as its primary signal for discussion separation.
 
 ---
 
@@ -418,6 +311,11 @@ See `.env.example` for the full list. Key variables:
 | `SLM_ENABLED` | Enable Ollama SLM pre-filtering (`true`/`false`) |
 | `SLM_ENRICHMENT_ENABLED` | Enable DeBERTa semantic enrichment for ranking (`true`/`false`) |
 | `MONGODB_URI` | MongoDB connection string |
+| `EMAIL_PROVIDER` | Email delivery provider (`gmail` / `sendgrid`) |
+| `DEFAULT_EMAIL_RECIPIENT` | Default recipient when `send_email` is triggered without explicit recipients |
+| `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | Gmail SMTP credentials (use app password, not account password) |
+| `SENDGRID_API_KEY` | SendGrid API key (for production/high-volume delivery) |
+| `EMAIL_SENDER_ADDRESS` | Verified sender address used in outgoing newsletter emails |
 
 ---
 

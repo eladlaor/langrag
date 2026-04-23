@@ -62,6 +62,16 @@ async def lifespan(app: FastAPI):
     - Closing MongoDB connection gracefully
     """
     # Startup
+    # Fail-fast on missing required API keys. Previously a missing OPENAI_API_KEY
+    # only surfaced deep in the pipeline (MMR reranker, hybrid merger) as silent
+    # fallbacks, producing degraded newsletters with no clear signal.
+    import os as _os
+
+    _required_api_keys = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    _missing_keys = [k for k in _required_api_keys if not _os.getenv(k)]
+    if _missing_keys:
+        raise RuntimeError(f"Required API keys missing from environment: {_missing_keys}. Set them in .env and ensure docker-compose passes them through before starting the service.")
+
     try:
         from db.connection import get_database, close_connection
         from db.indexes import ensure_indexes

@@ -7,8 +7,6 @@ Note: Prompts are now centralized in utils/llm/prompts/ranking/.
 """
 
 from core.retrieval.rankers.discussion_ranker import (
-    DiscussionRanker,
-    rank_discussions,
     load_discussions,
     count_unique_participants,
     prepare_discussions_for_llm,
@@ -20,8 +18,6 @@ from core.retrieval.rankers.discussion_ranker import (
 )
 
 __all__ = [
-    "DiscussionRanker",
-    "rank_discussions",
     "load_discussions",
     "count_unique_participants",
     "prepare_discussions_for_llm",

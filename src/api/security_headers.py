@@ -149,9 +149,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             logger.error(f"Error in SecurityHeadersMiddleware: {e}")
-            # Return response without security headers rather than failing
-            # This ensures application remains functional even if middleware fails
-            return await call_next(request)
+            # Re-raise — calling call_next(request) again would double-dispatch
+            raise
 
 
 def add_security_headers(app: ASGIApp, **kwargs) -> None:

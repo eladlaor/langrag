@@ -63,6 +63,47 @@ from utils.llm.prompts.newsletter_generation.langtalks_newsletter import (
 logger = logging.getLogger(__name__)
 
 
+def _extract_json_object(raw_text: str, purpose: str) -> dict:
+    """
+    Extract a JSON object from a model response.
+
+    Handles common LLM output shapes: bare JSON, JSON wrapped in ```json ... ```
+    fences, or prose surrounding a JSON object. Raises LLMResponseError with the
+    original text on failure. No silent fallback — callers must handle the raise.
+    """
+    if raw_text is None:
+        raise LLMResponseError(f"No text in Anthropic response for {purpose}")
+
+    text = raw_text.strip()
+
+    # Strip markdown code fences if present.
+    if text.startswith("```"):
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+    # First attempt: direct parse.
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Second attempt: slice from first '{' to last '}'.
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = text[start : end + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as e:
+            raise LLMResponseError(f"Failed to parse Anthropic response as JSON ({purpose}): {e}. Raw text (first 500 chars): {raw_text[:500]!r}") from e
+
+    raise LLMResponseError(f"No JSON object found in Anthropic response ({purpose}). Raw text (first 500 chars): {raw_text[:500]!r}")
+
+
 def _pydantic_to_tool(response_schema: Any, tool_name: str = "structured_response") -> dict:
     """Convert a Pydantic model to an Anthropic tool definition.
 
@@ -328,28 +369,28 @@ class AnthropicProvider(LLMProviderInterface):
             client = self._get_anthropic_client()
             logger.info(f"[{purpose}] Making Anthropic JSON output call with model={model}")
 
-            messages = [{"role": MessageRole.USER, "content": prompt}]
+            # NOTE: Claude 4.6+ rejects assistant-prefill ("conversation must end
+            # with a user message"). We instead rely on a strong instruction and a
+            # tolerant extractor that strips code fences and slices to the outermost
+            # JSON object. No fallbacks: if parsing fails, we raise loudly.
+            user_content = f"{prompt}\n\nRespond with a single valid JSON object and nothing else. Do not wrap it in markdown code fences."
+            messages = [{"role": MessageRole.USER, "content": user_content}]
             self._update_langfuse_input(model, messages, purpose, temperature)
 
-            # Use prefill technique: start assistant response with '{'
             response = await client.messages.create(
                 model=model,
                 max_tokens=settings.llm.anthropic_max_tokens,
-                messages=[
-                    {"role": MessageRole.USER, "content": f"{prompt}\n\nRespond with valid JSON only."},
-                    {"role": MessageRole.ASSISTANT, "content": "{"},
-                ],
+                messages=messages,
                 temperature=temperature,
             )
 
-            # Reconstruct the JSON (we prefilled with '{')
             text_parts = [block.text for block in response.content if hasattr(block, "text")]
-            response_text = text_parts[0] if text_parts else "}"
-            # Strip leading '{' if the model repeated the prefill character
-            raw_text = "{" + response_text.lstrip("{")
+            if not text_parts:
+                raise LLMResponseError(f"Empty Anthropic text response in call_with_json_output ({purpose})")
+            raw_text = text_parts[0]
             self._update_langfuse_output(raw_text, response.usage)
 
-            parsed = json.loads(raw_text)
+            parsed = _extract_json_object(raw_text, purpose=purpose)
             return parsed
 
         except json.JSONDecodeError as e:

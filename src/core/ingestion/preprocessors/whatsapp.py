@@ -149,9 +149,8 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             should_use_utc = kwargs.get("should_use_utc", False)  # Option to use UTC time zone
             should_clean_message_ids = kwargs.get("should_clean_message_ids", True)  # Default to cleaning message IDs
 
-            now = datetime.now()
             now_utc = datetime.now(UTC)
-            logging.info(f"Current local time: {now.strftime('%Y-%m-%d %H:%M:%S')} {now.astimezone().tzinfo}")
+            logging.info(f"Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
             logging.info(f"Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
             try:
@@ -716,11 +715,24 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 discussions = result.discussions
                 logging.info(f"Received {len(discussions)} discussions as Pydantic model")
             else:
-                raise ValueError(f"Expected '{DiscussionKeys.DISCUSSIONS}' field in response, but got: {result}")
+                raise ValueError(
+                    f"LLM separate_discussions response for chat '{self.chat_name}' missing '{DiscussionKeys.DISCUSSIONS}' field. "
+                    f"Response type={type(result).__name__}, value (first 500 chars): {str(result)[:500]!r}"
+                )
 
             # Process discussions to ensure consistent format
             processed_discussions = []
             for i, discussion in enumerate(discussions):
+                # Fail fast on unexpected item shapes (e.g. LLM returned a bare string
+                # title instead of a full discussion object). Silent coercion would
+                # produce garbage newsletters downstream.
+                if not isinstance(discussion, dict) and not hasattr(discussion, "id"):
+                    raise DiscussionSeparationError(
+                        f"LLM returned invalid discussion item at index {i} for chat '{self.chat_name}': "
+                        f"expected dict or Pydantic Discussion model, got {type(discussion).__name__}. "
+                        f"Value (first 200 chars): {str(discussion)[:200]!r}"
+                    )
+
                 # Convert dict to a standard format if needed
                 if isinstance(discussion, dict):
                     # Ensure each discussion has the required fields
@@ -1073,7 +1085,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 timestamp = msg["timestamp"]
 
                 # Convert timestamp to date string
-                date_obj = datetime.fromtimestamp(timestamp / 1000)  # Convert ms to seconds
+                date_obj = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
                 date_str = date_obj.strftime("%Y-%m-%d")
 
                 # Update counts
@@ -1089,11 +1101,11 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             # Calculate date range
             start_date = None
             if start_timestamp != float("inf"):
-                start_date = datetime.fromtimestamp(start_timestamp / 1000).strftime("%Y-%m-%d")
+                start_date = datetime.fromtimestamp(start_timestamp / 1000, tz=UTC).strftime("%Y-%m-%d")
 
             end_date = None
             if end_timestamp != 0:
-                end_date = datetime.fromtimestamp(end_timestamp / 1000).strftime("%Y-%m-%d")
+                end_date = datetime.fromtimestamp(end_timestamp / 1000, tz=UTC).strftime("%Y-%m-%d")
 
             # Create stats object
             stats = {"total_message_count": len(messages), "messages_by_day": dict(sorted(messages_by_day.items())), "messages_by_sender": messages_by_sender, "date_range": {"start_date": start_date, "end_date": end_date}}

@@ -312,7 +312,7 @@ def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
 
     # Get creation time from directory
     try:
-        created_at = datetime.fromtimestamp(os.path.getctime(run_dir)).isoformat()
+        created_at = datetime.fromtimestamp(os.path.getctime(run_dir), tz=UTC).isoformat()
     except OSError:
         created_at = None
 

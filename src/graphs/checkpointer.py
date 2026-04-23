@@ -20,14 +20,11 @@ logger = logging.getLogger(__name__)
 
 _checkpointer: AsyncSqliteSaver | None = None
 _checkpointer_cm = None
-_init_lock: asyncio.Lock | None = None
+_init_lock: asyncio.Lock = asyncio.Lock()
 
 
 def _get_lock() -> asyncio.Lock:
-    """Get or create the checkpointer initialization lock (bound to current event loop)."""
-    global _init_lock
-    if _init_lock is None:
-        _init_lock = asyncio.Lock()
+    """Get the checkpointer initialization lock."""
     return _init_lock
 
 

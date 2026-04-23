@@ -383,3 +383,29 @@ class DbFieldKeys:
     LAST_RUN_ERROR = "last_run_error"
     NEXT_RUN = "next_run"
     RUN_COUNT = "run_count"
+
+
+class DeliveryResultKeys:
+    """Keys for delivery result dicts (email, LinkedIn, Substack, webhook)."""
+
+    SUCCESS = "success"
+    ERROR = "error"
+    RECIPIENTS = "recipients"
+    DRAFT_RESPONSE = "draft_response"
+
+
+class OutputPathKeys:
+    """Keys for output path dicts stored in MongoDB run tracking."""
+
+    NEWSLETTER_JSON = "newsletter_json"
+    NEWSLETTER_MD = "newsletter_md"
+    NEWSLETTER_HTML = "newsletter_html"
+    ENRICHED_MD = "enriched_md"
+
+
+class WorkerResultKeys:
+    """Keys for worker result/error dicts exchanged between graph nodes."""
+
+    ERROR = "error"
+    ERROR_TYPE = "error_type"
+    DISCUSSION_COUNT = "discussion_count"
