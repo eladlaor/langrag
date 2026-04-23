@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.0
+
+- Concurrency: fixed non-atomic `asyncio.Lock` initialization across `connection.py`, `graph.py`, `checkpointer.py` (module-level init)
+- Rate limiting applied to newsletter-generation and batch endpoints
+- New constants: `DeliveryResultKeys`, `OutputPathKeys`, `WorkerResultKeys` — replaced 20+ hardcoded string literals
+- Architecture: extracted `build_orchestrator_state()` factory; replaced `count_documents` with `find_one` for existence checks
+- Removed unused `DiscussionRanker` class
+- New deterministic newsletter-assembler module for metadata assembly
+
 ## v1.7.3
 - Update default Anthropic model from Claude Sonnet 4.5 to Sonnet 4.6.
 
