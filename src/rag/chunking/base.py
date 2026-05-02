@@ -6,6 +6,7 @@ Each content type (transcript, markdown, messages) implements its own chunker.
 """
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from rag.sources.base import ContentChunk
 
@@ -25,6 +26,8 @@ class ChunkingStrategyInterface(ABC):
         content: str,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict | None = None,
     ) -> list[ContentChunk]:
         """
@@ -34,6 +37,9 @@ class ChunkingStrategyInterface(ABC):
             content: Raw text content to chunk
             source_id: Parent source identifier
             source_title: Human-readable source title
+            source_date_start: Earliest date the source covers (UTC)
+            source_date_end: Latest date the source covers (UTC); equals start
+                for point-in-time sources like a single podcast episode
             metadata: Additional metadata to attach to each chunk
 
         Returns:

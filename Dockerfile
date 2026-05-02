@@ -54,8 +54,13 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/examples /app/logs /app/output /app/secrets /app/data/podcasts
 
-# Copy nginx configuration
+# Copy nginx configuration (main + shared proxy snippet).
+# The HTTPS server blocks ship to /app for the operator to copy into
+# /etc/nginx/conf.d/ during the first-time TLS issuance (see deploy runbook),
+# so local dev with no certs never tries to load missing keys.
 COPY nginx.conf /etc/nginx/nginx.conf
+COPY proxy_rag.conf /etc/nginx/proxy_rag.conf
+COPY nginx-https.conf /app/nginx-https.conf
 
 # Set PYTHONPATH for imports from src/ and project root (for matrix_decryption)
 ENV PYTHONPATH=/app/src:/app:$PYTHONPATH

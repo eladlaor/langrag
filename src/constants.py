@@ -293,7 +293,10 @@ APP_DESCRIPTION = "Newsletter generation from WhatsApp group chats using LangGra
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_BAD_REQUEST = 400
+HTTP_STATUS_UNAUTHORIZED = 401
+HTTP_STATUS_FORBIDDEN = 403
 HTTP_STATUS_NOT_FOUND = 404
+HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
 
 
@@ -317,6 +320,7 @@ COLLECTION_POLLS = "polls"
 COLLECTION_RAG_CHUNKS = "rag_chunks"
 COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
 COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
+COLLECTION_RAG_API_KEYS = "rag_api_keys"
 
 # RAG Vector Search Index Name (must be created manually in MongoDB Atlas / mongot)
 RAG_VECTOR_INDEX_NAME = "rag_chunk_embeddings"
@@ -431,6 +435,16 @@ DIR_NAME_PODCASTS = "podcasts"
 
 # RAG citation snippet max length
 RAG_CITATION_SNIPPET_MAX_LENGTH = 200
+
+# API key prefix for langrag.ai issued keys (helps log triage and key rotation)
+RAG_API_KEY_PREFIX = "lrag_"
+RAG_API_KEY_HEADER = "X-API-Key"
+RAG_API_KEY_BEARER_SCHEME = "Bearer"
+
+# Rate limits for the public RAG API (per API key)
+RAG_RATE_LIMIT_CHAT = "60/minute"
+RAG_RATE_LIMIT_INGEST = "10/minute"
+RAG_RATE_LIMIT_DEFAULT = "120/minute"
 
 # RAG vector search score field (added by $vectorSearch $meta)
 RAG_SEARCH_SCORE_FIELD = "search_score"

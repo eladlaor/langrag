@@ -106,6 +106,8 @@ class IngestionPipeline:
                 Keys.EMBEDDING: embedding,
                 Keys.EMBEDDING_MODEL: self._embedding_model,
                 Keys.CHUNK_INDEX: chunk.chunk_index,
+                Keys.SOURCE_DATE_START: chunk.source_date_start,
+                Keys.SOURCE_DATE_END: chunk.source_date_end,
                 Keys.METADATA: chunk.metadata,
             })
 

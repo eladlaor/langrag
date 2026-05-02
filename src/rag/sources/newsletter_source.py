@@ -7,6 +7,7 @@ via MarkdownChunker, and returns ContentChunk list for the ingestion pipeline.
 """
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from config import get_settings
@@ -84,6 +85,8 @@ class NewsletterSource(ContentSourceInterface):
         chat_name = newsletter.get(DbFieldKeys.CHAT_NAME)
         desired_language = newsletter.get(DbFieldKeys.DESIRED_LANGUAGE, "")
 
+        source_date_start, source_date_end = self._coerce_date_range(start_date, end_date, source_id)
+
         source_title = self._build_source_title(data_source_name, start_date, end_date, chat_name)
 
         chunk_metadata = {
@@ -99,6 +102,8 @@ class NewsletterSource(ContentSourceInterface):
             content=markdown_content,
             source_id=source_id,
             source_title=source_title,
+            source_date_start=source_date_start,
+            source_date_end=source_date_end,
             metadata=chunk_metadata,
         )
 
@@ -227,6 +232,38 @@ class NewsletterSource(ContentSourceInterface):
             })
 
         return filtered
+
+    @staticmethod
+    def _coerce_date_range(start_date: Any, end_date: Any, source_id: str) -> tuple[datetime, datetime]:
+        """Coerce newsletter start/end dates from strings or datetimes to UTC datetimes.
+
+        Fail-fast: a newsletter with no derivable date range is unusable for date-aware RAG.
+        """
+        def _coerce_one(value: Any, label: str) -> datetime:
+            if isinstance(value, datetime):
+                return value if value.tzinfo else value.replace(tzinfo=UTC)
+            if isinstance(value, str) and value:
+                # Accept YYYY-MM-DD or full ISO 8601
+                try:
+                    parsed = datetime.fromisoformat(value)
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                except ValueError as e:
+                    raise ValueError(
+                        f"Newsletter {source_id}: {label} '{value}' is not a valid ISO date"
+                    ) from e
+            raise ValueError(
+                f"Newsletter {source_id}: {label} is missing or empty (got {value!r}). "
+                f"Date-aware RAG requires every chunk to be tagged with its source date range."
+            )
+
+        start = _coerce_one(start_date, "start_date")
+        end = _coerce_one(end_date, "end_date")
+        if end < start:
+            raise ValueError(
+                f"Newsletter {source_id}: end_date ({end.isoformat()}) precedes "
+                f"start_date ({start.isoformat()})"
+            )
+        return start, end
 
     @staticmethod
     def _get_best_markdown(newsletter: dict) -> tuple[str | None, str]:

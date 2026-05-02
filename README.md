@@ -66,7 +66,7 @@ Generating worth-your-time newsletters for AI engineers, carefully distilled fro
 
 ### How
 
-LangRAG uses Beeper for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process and analyze multiple group-chats in parallel, applying MMR and reranking to produce structured and relevant content.<br>The analysis is **deep, highly-configurable, and cost-optimized**.<br>Full observability across tracing, evals, metrics and logs.
+LangRAG uses Beeper for the crucial first phase: extracting WhatsApp messages along with rich metadata.<br> Then, LangRAG runs through async LangGraph pipelines that process and analyze multiple group-chats in parallel, applying MMR and reranking to produce structured and relevant content.<br>The analysis is **deep, highly-configurable, and cost-optimized**.<br>Full observability across tracing, evals, metrics and logs.<br>The system exposes both a **REST API** and an **MCP server** that can be plugged into any agent (Claude Code, Cursor, custom MCP clients), so the indexed corpus of past newsletters and podcast transcripts is queryable directly from the agent's tool surface, with date-aware retrieval and date-tagged citations.
 
 ---
 

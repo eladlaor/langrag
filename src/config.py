@@ -449,7 +449,7 @@ class RAGSettings(BaseSettings):
     # Retrieval
     vector_search_top_k: int = Field(default=20, description="Top-K candidates from vector search before reranking")
     rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
-    min_similarity_score: float = Field(default=0.7, description="Minimum cosine similarity score for vector search results")
+    min_similarity_score: float = Field(default=0.5, description="Minimum cosine similarity score for vector search results. With text-embedding-3-small, question->passage cosine scores cluster in the 0.5-0.75 range; values >=0.7 starve retrieval. Override per deployment.")
     max_conversation_history: int = Field(default=10, description="Maximum number of previous messages to include as conversation context")
 
     # Podcast chunking
@@ -468,6 +468,16 @@ class RAGSettings(BaseSettings):
     # Generation
     rag_llm_provider: str = Field(default="openai", description="LLM provider for RAG answer generation")
     rag_llm_model: str = Field(default="gpt-4.1", description="LLM model for RAG answer generation")
+
+    # Freshness ("AI info melts like ice cream") — flag answers when retrieved
+    # content is older than this threshold so the model can warn the reader.
+    freshness_warning_days: int = Field(default=60, description="If the newest retrieved chunk is older than this many days, warn the user that the answer may be stale. Set to 0 to disable.")
+
+    # Public API authentication and rate limiting (langrag.ai bring-up)
+    auth_enabled: bool = Field(default=False, description="Require an API key on /api/v1/rag/* endpoints. Disabled by default for local dev; MUST be true in production.")
+    api_key_pepper: str = Field(default="", description="Server-side pepper appended before hashing API keys. Required when auth_enabled is true.")
+    mcp_api_key: str = Field(default="", description="Bearer token validated by the MCP server. Required when running the MCP server publicly.")
+    rate_limit_enabled: bool = Field(default=True, description="Apply slowapi rate limits on RAG endpoints.")
 
     model_config = SettingsConfigDict(env_prefix="RAG_")
 

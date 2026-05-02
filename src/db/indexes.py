@@ -197,12 +197,23 @@ INDEXES = {
         {"keys": [("content_source", ASCENDING), ("created_at", DESCENDING)]},
         # Query by source ID + chunk order (reconstruct full document)
         {"keys": [("source_id", ASCENDING), ("chunk_index", ASCENDING)]},
+        # Date-range filtering ("AI info melts like ice cream" — caller scopes by source date)
+        {"keys": [("content_source", ASCENDING), ("source_date_start", ASCENDING), ("source_date_end", ASCENDING)]},
+        {"keys": [("source_date_end", DESCENDING)]},
     ],
     "rag_conversations": [
         # Primary lookup by session_id
         {"keys": [("session_id", ASCENDING)], "unique": True},
         # List sessions by recency
         {"keys": [("created_at", DESCENDING)]},
+    ],
+    "rag_api_keys": [
+        # Primary lookup by hashed key (used on every authenticated request)
+        {"keys": [("key_hash", ASCENDING)], "unique": True},
+        # Per-key admin lookups (rotation, revocation)
+        {"keys": [("key_id", ASCENDING)], "unique": True},
+        # Filter enabled keys quickly
+        {"keys": [("enabled", ASCENDING), ("created_at", DESCENDING)]},
     ],
     "rag_evaluations": [
         # Primary lookup by evaluation_id
@@ -278,19 +289,22 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
             logger.debug(f"Vector search index '{RAG_VECTOR_INDEX_NAME}' already exists")
             return
 
-        # Create the vector search index
+        # Create the vector search index using the modern $vectorSearch schema:
+        # a `fields` array with one `vector` entry plus `filter` entries for any
+        # field we want to pre-filter on inside the $vectorSearch stage.
         search_index = SearchIndexModel(
             definition={
-                "mappings": {
-                    "dynamic": True,
-                    "fields": {
-                        "embedding": {
-                            "dimensions": DEFAULT_EMBEDDING_DIMENSION,
-                            "similarity": "cosine",
-                            "type": "knnVector",
-                        }
+                "fields": [
+                    {
+                        "type": "vector",
+                        "path": "embedding",
+                        "numDimensions": DEFAULT_EMBEDDING_DIMENSION,
+                        "similarity": "cosine",
                     },
-                }
+                    {"type": "filter", "path": "content_source"},
+                    {"type": "filter", "path": "source_date_start"},
+                    {"type": "filter", "path": "source_date_end"},
+                ]
             },
             name=RAG_VECTOR_INDEX_NAME,
             type="vectorSearch",

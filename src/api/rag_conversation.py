@@ -2,56 +2,98 @@
 RAG Conversation API Router
 
 FastAPI endpoints for RAG chat, session management, podcast ingestion, and evaluations.
+All chat / search / sources endpoints accept optional date_start / date_end so callers
+can scope retrieval to a window. Public endpoints are gated by the API key dependency
+and rate-limited via slowapi when enabled in config.
 """
 
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from constants import (
     CONTENT_TYPE_EVENT_STREAM,
     HTTP_STATUS_BAD_REQUEST,
-    HTTP_STATUS_NOT_FOUND,
     HTTP_STATUS_INTERNAL_SERVER_ERROR,
-    ROUTE_RAG_CHAT_STREAM,
+    HTTP_STATUS_NOT_FOUND,
+    RAGEventType,
+    RAG_RATE_LIMIT_CHAT,
+    RAG_RATE_LIMIT_DEFAULT,
+    RAG_RATE_LIMIT_INGEST,
     ROUTE_RAG_CHAT,
-    ROUTE_RAG_SESSIONS,
-    ROUTE_RAG_SESSION_BY_ID,
+    ROUTE_RAG_CHAT_STREAM,
+    ROUTE_RAG_EVALUATIONS,
+    ROUTE_RAG_INGEST_NEWSLETTERS,
     ROUTE_RAG_INGEST_PODCASTS,
     ROUTE_RAG_INGEST_PODCASTS_SCAN,
-    ROUTE_RAG_INGEST_NEWSLETTERS,
+    ROUTE_RAG_SESSIONS,
+    ROUTE_RAG_SESSION_BY_ID,
     ROUTE_RAG_SOURCES_NEWSLETTERS,
     ROUTE_RAG_SOURCES_STATS,
-    ROUTE_RAG_EVALUATIONS,
-    RAGEventType,
     ContentSourceType,
 )
 from custom_types.api_schemas import (
     RAGChatRequest,
     RAGChatResponse,
     RAGCitationResponse,
+    RAGEvaluationResponse,
     RAGNewsletterIngestRequest,
+    RAGPodcastIngestRequest,
     RAGSessionCreateRequest,
     RAGSessionResponse,
-    RAGPodcastIngestRequest,
     RAGSourceStats,
-    RAGEvaluationResponse,
 )
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
 from db.repositories.rag_evaluations import EvaluationsRepository
+from rag.auth.dependencies import require_api_key
+from rag.auth.rate_limit import limiter
 from rag.conversation.manager import ConversationManager
 from rag.generation.rag_chain import generate_answer, generate_answer_stream
 from rag.retrieval.pipeline import RetrievalPipeline
-from rag.sources.podcast_source import PodcastSource, PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS
+from rag.sources.podcast_source import PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS, PodcastSource
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _parse_date(value: str | None, label: str) -> datetime | None:
+    """Parse YYYY-MM-DD or ISO 8601 into a UTC-aware datetime; raise 400 on invalid."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=HTTP_STATUS_BAD_REQUEST,
+            detail=f"Invalid {label}: '{value}'. Expected YYYY-MM-DD or ISO 8601.",
+        ) from e
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _citation_to_response(c: dict) -> RAGCitationResponse:
+    """Map a citation dict from the retrieval pipeline into the API response model."""
+    return RAGCitationResponse(
+        index=c.get("index", 0),
+        chunk_id=c.get("chunk_id", ""),
+        source_type=c.get("source_type", ""),
+        source_title=c.get("source_title", ""),
+        source_date_start=c.get("source_date_start") or "",
+        source_date_end=c.get("source_date_end") or "",
+        snippet=c.get("snippet", ""),
+        search_score=c.get("search_score", 0.0),
+        metadata=c.get("metadata", {}),
+    )
+
+
+def _iso_date_or_none(value: datetime | None) -> str | None:
+    return value.date().isoformat() if value else None
 
 
 # ============================================================================
@@ -59,67 +101,69 @@ router = APIRouter()
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_CHAT_STREAM)
-async def rag_chat_stream(request: RAGChatRequest):
-    """
-    SSE streaming chat endpoint.
-
-    Creates or reuses a session, retrieves relevant context,
-    and streams the answer token-by-token via SSE.
-    """
+@router.post(ROUTE_RAG_CHAT_STREAM, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_CHAT)
+async def rag_chat_stream(request: Request, body: RAGChatRequest):
+    """SSE streaming chat endpoint with optional date-range scoping."""
     manager = ConversationManager()
 
-    # Create or reuse session
-    session_id = request.session_id
+    session_id = body.session_id
     if not session_id:
-        session_id = await manager.create_session(request.content_sources)
+        session_id = await manager.create_session(body.content_sources)
 
-    # Verify session exists
     session = await manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
 
-    # Record user message
-    await manager.add_user_message(session_id, request.query)
-
-    # Get conversation history
+    await manager.add_user_message(session_id, body.query)
     history = await manager.get_conversation_history(session_id)
+
+    date_start = _parse_date(body.date_start, "date_start")
+    date_end = _parse_date(body.date_end, "date_end")
 
     async def event_stream():
         try:
-            # Retrieve context
             pipeline = RetrievalPipeline()
             retrieval_result = await pipeline.retrieve(
-                query=request.query,
-                content_sources=request.content_sources or None,
+                query=body.query,
+                content_sources=body.content_sources or None,
+                date_start=date_start,
+                date_end=date_end,
             )
 
             context = retrieval_result["context"]
             citations = retrieval_result["citations"]
 
-            # Stream answer tokens
             full_answer = ""
             async for token in generate_answer_stream(
-                query=request.query,
+                query=body.query,
                 context=context,
                 conversation_history=history,
+                date_start=date_start,
+                date_end=date_end,
+                freshness_warning=retrieval_result["freshness_warning"],
+                newest_source_date=retrieval_result["newest_source_date"],
             ):
                 full_answer += token
                 yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': token})}\n\n"
 
-            # Send citations
             for citation in citations:
-                yield f"event: {RAGEventType.CITATION}\ndata: {json.dumps(citation)}\n\n"
+                yield f"event: {RAGEventType.CITATION}\ndata: {json.dumps(citation, default=str)}\n\n"
 
-            # Record assistant message
             message_id = await manager.add_assistant_message(
                 session_id=session_id,
                 content=full_answer,
                 citations=citations,
             )
 
-            # Done event
-            yield f"event: {RAGEventType.DONE}\ndata: {json.dumps({'session_id': session_id, 'message_id': message_id})}\n\n"
+            done_payload = {
+                "session_id": session_id,
+                "message_id": message_id,
+                "freshness_warning": retrieval_result["freshness_warning"],
+                "oldest_source_date": _iso_date_or_none(retrieval_result["oldest_source_date"]),
+                "newest_source_date": _iso_date_or_none(retrieval_result["newest_source_date"]),
+            }
+            yield f"event: {RAGEventType.DONE}\ndata: {json.dumps(done_payload, default=str)}\n\n"
 
         except Exception as e:
             logger.error(f"RAG chat stream error: {e}", extra={"session_id": session_id})
@@ -141,23 +185,25 @@ async def rag_chat_stream(request: RAGChatRequest):
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_SESSIONS)
-async def create_session(request: RAGSessionCreateRequest) -> RAGSessionResponse:
+@router.post(ROUTE_RAG_SESSIONS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def create_session(request: Request, body: RAGSessionCreateRequest) -> RAGSessionResponse:
     """Create a new conversation session."""
     manager = ConversationManager()
     session_id = await manager.create_session(
-        content_sources=request.content_sources,
-        title=request.title,
+        content_sources=body.content_sources,
+        title=body.title,
     )
     return RAGSessionResponse(
         session_id=session_id,
-        content_sources=request.content_sources,
-        title=request.title,
+        content_sources=body.content_sources,
+        title=body.title,
     )
 
 
-@router.get(ROUTE_RAG_SESSIONS)
-async def list_sessions(limit: int = 20, skip: int = 0) -> list[RAGSessionResponse]:
+@router.get(ROUTE_RAG_SESSIONS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def list_sessions(request: Request, limit: int = 20, skip: int = 0) -> list[RAGSessionResponse]:
     """List conversation sessions (most recent first)."""
     manager = ConversationManager()
     sessions = await manager.list_sessions(limit=limit, skip=skip)
@@ -174,8 +220,9 @@ async def list_sessions(limit: int = 20, skip: int = 0) -> list[RAGSessionRespon
     ]
 
 
-@router.get(ROUTE_RAG_SESSION_BY_ID)
-async def get_session(session_id: str):
+@router.get(ROUTE_RAG_SESSION_BY_ID, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def get_session(request: Request, session_id: str):
     """Get a session with full message history."""
     manager = ConversationManager()
     session = await manager.get_session(session_id)
@@ -185,8 +232,9 @@ async def get_session(session_id: str):
     return session
 
 
-@router.delete(ROUTE_RAG_SESSION_BY_ID)
-async def delete_session(session_id: str):
+@router.delete(ROUTE_RAG_SESSION_BY_ID, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def delete_session(request: Request, session_id: str):
     """Delete a conversation session."""
     manager = ConversationManager()
     deleted = await manager.delete_session(session_id)
@@ -200,20 +248,23 @@ async def delete_session(session_id: str):
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_INGEST_PODCASTS)
+@router.post(ROUTE_RAG_INGEST_PODCASTS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_INGEST)
 async def ingest_podcast(
+    request: Request,
     file: UploadFile = File(...),
     title: str = Form(None),
+    episode_date: str = Form(None),
 ):
     """
     Upload and ingest a podcast audio file.
 
-    Saves to data/podcasts/, transcribes, chunks, embeds, and stores.
+    Filename should start with YYYY-MM-DD; otherwise pass episode_date explicitly
+    (or include the file in data/podcasts/manifest.json before scanning).
     """
     if not file.filename:
         raise HTTPException(status_code=HTTP_STATUS_BAD_REQUEST, detail="No filename provided")
 
-    # Sanitize filename to prevent path traversal
     safe_name = PurePosixPath(file.filename).name
     if not safe_name:
         raise HTTPException(status_code=HTTP_STATUS_BAD_REQUEST, detail="Invalid filename")
@@ -225,7 +276,6 @@ async def ingest_podcast(
             detail=f"Unsupported audio format: {ext}. Supported: {SUPPORTED_AUDIO_EXTENSIONS}",
         )
 
-    # Save uploaded file
     PODCAST_DATA_DIR.mkdir(parents=True, exist_ok=True)
     file_path = PODCAST_DATA_DIR / safe_name
     content = await file.read()
@@ -233,16 +283,18 @@ async def ingest_podcast(
 
     logger.info(f"Saved uploaded podcast: {file_path}")
 
-    # Ingest
     try:
         from rag.ingestion.pipeline import IngestionPipeline
 
         pipeline = IngestionPipeline()
         source = PodcastSource()
+        kwargs = {"title": title or file_path.stem}
+        if episode_date:
+            kwargs["episode_date"] = episode_date
         result = await pipeline.ingest(
             source=source,
             source_id=str(file_path),
-            title=title or file_path.stem,
+            **kwargs,
         )
         return result
     except Exception as e:
@@ -250,11 +302,10 @@ async def ingest_podcast(
         raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post(ROUTE_RAG_INGEST_PODCASTS_SCAN)
-async def scan_and_ingest_podcasts(request: RAGPodcastIngestRequest = RAGPodcastIngestRequest()):
-    """
-    Scan data/podcasts/ directory and ingest any new audio files.
-    """
+@router.post(ROUTE_RAG_INGEST_PODCASTS_SCAN, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_INGEST)
+async def scan_and_ingest_podcasts(request: Request, body: RAGPodcastIngestRequest = RAGPodcastIngestRequest()):
+    """Scan data/podcasts/ and ingest any new audio files."""
     source = PodcastSource()
     available = await source.list_sources()
 
@@ -267,7 +318,7 @@ async def scan_and_ingest_podcasts(request: RAGPodcastIngestRequest = RAGPodcast
     results = await pipeline.ingest_batch(
         source=source,
         source_ids=[s["source_id"] for s in available],
-        force_refresh=request.force_refresh,
+        force_refresh=body.force_refresh,
     )
     return {"message": f"Processed {len(results)} audio files", "results": results}
 
@@ -277,8 +328,9 @@ async def scan_and_ingest_podcasts(request: RAGPodcastIngestRequest = RAGPodcast
 # ============================================================================
 
 
-@router.get(ROUTE_RAG_SOURCES_STATS)
-async def get_source_stats() -> list[RAGSourceStats]:
+@router.get(ROUTE_RAG_SOURCES_STATS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def get_source_stats(request: Request) -> list[RAGSourceStats]:
     """Get chunk counts per content source type."""
     db = await get_database()
     repo = ChunksRepository(db)
@@ -290,59 +342,52 @@ async def get_source_stats() -> list[RAGSourceStats]:
 
 
 # ============================================================================
-# EVALUATIONS
-# ============================================================================
-
-
-# ============================================================================
 # NON-STREAMING CHAT (CLI / Agent-friendly)
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_CHAT)
-async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
-    """
-    Non-streaming chat endpoint for CLI and agent consumption.
-
-    Creates or reuses a session, retrieves relevant context,
-    and returns the full answer with citations as JSON.
-    """
+@router.post(ROUTE_RAG_CHAT, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_CHAT)
+async def rag_chat(request: Request, body: RAGChatRequest) -> RAGChatResponse:
+    """Non-streaming chat endpoint with optional date-range scoping."""
     manager = ConversationManager()
 
-    # Create or reuse session
-    session_id = request.session_id
+    session_id = body.session_id
     if not session_id:
-        session_id = await manager.create_session(request.content_sources)
+        session_id = await manager.create_session(body.content_sources)
 
     session = await manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
 
-    # Record user message
-    await manager.add_user_message(session_id, request.query)
-
-    # Get conversation history
+    await manager.add_user_message(session_id, body.query)
     history = await manager.get_conversation_history(session_id)
 
+    date_start = _parse_date(body.date_start, "date_start")
+    date_end = _parse_date(body.date_end, "date_end")
+
     try:
-        # Retrieve context
         pipeline = RetrievalPipeline()
         retrieval_result = await pipeline.retrieve(
-            query=request.query,
-            content_sources=request.content_sources or None,
+            query=body.query,
+            content_sources=body.content_sources or None,
+            date_start=date_start,
+            date_end=date_end,
         )
 
         context = retrieval_result["context"]
         citations = retrieval_result["citations"]
 
-        # Generate answer (non-streaming)
         answer = await generate_answer(
-            query=request.query,
+            query=body.query,
             context=context,
             conversation_history=history,
+            date_start=date_start,
+            date_end=date_end,
+            freshness_warning=retrieval_result["freshness_warning"],
+            newest_source_date=retrieval_result["newest_source_date"],
         )
 
-        # Record assistant message
         await manager.add_assistant_message(
             session_id=session_id,
             content=answer,
@@ -352,20 +397,14 @@ async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
         return RAGChatResponse(
             session_id=session_id,
             answer=answer,
-            citations=[
-                RAGCitationResponse(
-                    index=c.get("index", 0),
-                    chunk_id=c.get("chunk_id", ""),
-                    source_type=c.get("source_type", ""),
-                    source_title=c.get("source_title", ""),
-                    snippet=c.get("snippet", ""),
-                    search_score=c.get("search_score", 0.0),
-                    metadata=c.get("metadata", {}),
-                )
-                for c in citations
-            ],
+            citations=[_citation_to_response(c) for c in citations],
+            freshness_warning=retrieval_result["freshness_warning"],
+            oldest_source_date=_iso_date_or_none(retrieval_result["oldest_source_date"]),
+            newest_source_date=_iso_date_or_none(retrieval_result["newest_source_date"]),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"RAG chat error: {e}", extra={"session_id": session_id})
         raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -376,24 +415,20 @@ async def rag_chat(request: RAGChatRequest) -> RAGChatResponse:
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_INGEST_NEWSLETTERS)
-async def ingest_newsletters(request: RAGNewsletterIngestRequest):
-    """
-    Ingest newsletters from MongoDB into RAG chunks.
-
-    Reads newsletters from the newsletters collection, chunks markdown content,
-    embeds, and stores in rag_chunks.
-    """
+@router.post(ROUTE_RAG_INGEST_NEWSLETTERS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_INGEST)
+async def ingest_newsletters(request: Request, body: RAGNewsletterIngestRequest):
+    """Ingest newsletters from MongoDB into RAG chunks."""
     try:
         from rag.ingestion.pipeline import IngestionPipeline
         from rag.sources.newsletter_source import NewsletterSource
 
         source = NewsletterSource()
         newsletters = await source.list_sources_filtered(
-            data_source_name=request.data_source_name,
-            limit=request.limit,
-            start_date=request.start_date,
-            end_date=request.end_date,
+            data_source_name=body.data_source_name,
+            limit=body.limit,
+            start_date=body.start_date,
+            end_date=body.end_date,
         )
 
         if not newsletters:
@@ -408,7 +443,7 @@ async def ingest_newsletters(request: RAGNewsletterIngestRequest):
         results = await pipeline.ingest_batch(
             source=source,
             source_ids=[nl["source_id"] for nl in newsletters],
-            force_refresh=request.force_refresh,
+            force_refresh=body.force_refresh,
         )
 
         ingested_count = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
@@ -428,17 +463,15 @@ async def ingest_newsletters(request: RAGNewsletterIngestRequest):
         raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get(ROUTE_RAG_SOURCES_NEWSLETTERS)
-async def list_newsletter_sources():
+@router.get(ROUTE_RAG_SOURCES_NEWSLETTERS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def list_newsletter_sources(request: Request):
     """List ingested newsletters with metadata."""
     try:
         db = await get_database()
         repo = ChunksRepository(db)
-
-        # Get all ingested newsletter sources
         ingested = await repo.list_ingested_sources(str(ContentSourceType.NEWSLETTER))
         return ingested
-
     except Exception as e:
         logger.error(f"Failed to list newsletter sources: {e}")
         raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -449,8 +482,9 @@ async def list_newsletter_sources():
 # ============================================================================
 
 
-@router.get(ROUTE_RAG_EVALUATIONS)
-async def get_evaluations(session_id: str) -> list[RAGEvaluationResponse]:
+@router.get(ROUTE_RAG_EVALUATIONS, dependencies=[Depends(require_api_key)])
+@limiter.limit(RAG_RATE_LIMIT_DEFAULT)
+async def get_evaluations(request: Request, session_id: str) -> list[RAGEvaluationResponse]:
     """Get evaluation scores for a session."""
     db = await get_database()
     repo = EvaluationsRepository(db)

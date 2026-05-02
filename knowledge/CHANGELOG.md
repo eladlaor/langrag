@@ -1,6 +1,8 @@
 # Changelog
 
 ## Table of Contents
+- [2026-05-02: RAG Sources Production-Grade (Date-Aware Retrieval, MCP, Eval Gate, langrag.ai bring-up)](#2026-05-02-rag-sources-production-grade-date-aware-retrieval-mcp-eval-gate-langragai-bring-up)
+- [2026-04-20: Comprehensive Audit Improvements (B+ 81 → A 92)](#2026-04-20-comprehensive-audit-improvements-b-81--a-92)
 - [2026-04-18: DeepEval newsletter RAG test suite](#2026-04-18-deepeval-newsletter-rag-test-suite)
 - [2026-04-18: Codebase Audit (B+ 82/100) & force_refresh_extraction Bug Fix](#2026-04-18-codebase-audit-b-82100--force_refresh_extraction-bug-fix)
 - [2026-04-15: RAG Newsletter Conversation (Plan B)](#2026-04-15-rag-newsletter-conversation-plan-b)
@@ -23,6 +25,67 @@
 - [2025-12-12: Anti-Repetition System](#2025-12-12-anti-repetition-system)
 - [2025-12-06: Fail-Fast Error Handling Improvements](#2025-12-06-fail-fast-error-handling-improvements)
 - [2025-12-06: Worth Mentioning Enhancement](#2025-12-06-worth-mentioning-enhancement)
+
+---
+
+## 2026-05-02: RAG Sources Production-Grade (Date-Aware Retrieval, MCP, Eval Gate, langrag.ai bring-up)
+
+Brings the RAG sources feature to production. Every chunk is tagged with its source date(s) at the schema level; retrieval supports date-window scoping; answers must cite source dates and refuse on out-of-range queries. See the v1.9.0 GitHub Release for the full change list and migration notes.
+
+**Subsystems:**
+- Date-aware schema: `source_date_start` / `source_date_end` as required top-level fields on `rag_chunks`, with a `vectorSearch` filter mapping and a compound index for date-range pre-filtering.
+- Date-filtered retrieval pipeline + freshness ("ice cream") guardrail with configurable `RAG_FRESHNESS_WARNING_DAYS` (default 60).
+- System prompt mandates `[date: YYYY-MM-DD]` tags on every cited claim and refusal on out-of-range queries.
+- Public surface: API key auth (HMAC + pepper), `slowapi` rate limiting, MCP server exposing `rag_query` / `rag_search` / `list_rag_sources` over stdio + HTTP/SSE, three Claude Code subagents (podcast / newsletter / research), nginx HTTPS + certbot for langrag.ai and mcp.langrag.ai.
+- Eval gate: 50 golden cases (`newsletters_v2.json` + `podcasts_v1.json`) + three custom metrics (date citation compliance, date filter honoured, refusal compliance) + CI workflow (`.github/workflows/rag-eval.yml`).
+
+**Live verification (LangTalks corpus, 50 cases):**
+- Faithfulness 0.95 (>= 0.85), answer relevancy 0.86 (>= 0.80), date filter honoured 1.00, refusal compliance 1.00, date citation compliance 1.00 all PASS.
+- Retrieval recall@5 0.37 and contextual relevancy 0.20 do NOT meet thresholds; both are language-mismatch artefacts of an English-only golden set against a Hebrew-heavy corpus, not pipeline defects. Tracked for follow-up (golden dataset bilingualisation).
+
+**Bug fixes uncovered during live verification:**
+- Vector index definition was on the legacy `mappings` / `knnVector` schema; rewritten to the modern `vectorSearch` `fields`-array schema with filter mappings on `content_source`, `source_date_start`, `source_date_end`.
+- Default `min_similarity_score` lowered from 0.7 to 0.5 (`text-embedding-3-small` question to passage cosine scores cluster in 0.5 to 0.75; 0.7 starves retrieval).
+- nginx HTTPS server blocks moved to `/etc/nginx/conf.d/` so local dev boots cleanly without certs (the base `nginx.conf` is HTTP-only and the production deploy hook drops `nginx-https.conf` into `conf.d/` after certbot issues certs).
+
+**Skills delivered:**
+- `langrag-ingest-episode` (RSS path, manifest update, ingestion scan trigger; Whisper 25 MB cap workaround documented).
+- `pod2transcript` enriched with the LangTalks public RSS feed URL discovered via the iTunes Search API (`https://feeds.async.com/47/928fdaee-6711-4272-9695-e721488d8c33.rss`).
+
+**Migration steps** are listed in the v1.9.0 GitHub Release notes.
+
+---
+
+## 2026-04-20: Comprehensive Audit Improvements (B+ 81 → A 92)
+
+Four-iteration audit-and-improve cycle. See: `knowledge/audits/AUDIT_2026_04_20.md`
+
+**Iteration 1 — Bug Fixes (81 → 84):**
+- `db/repositories/discussions.py`: Added `limit`/`offset` params to `get_discussions_by_run()` — runtime `TypeError` fix.
+- `api/security_headers.py`: Removed double `call_next(request)` in exception handler.
+- `api/schedules.py`: Changed to `model_dump(exclude_unset=True)` — `False`/`0` values were silently dropped.
+- `slm_enrichment.py`: Wrapped `_load_enrichment_model()` and `_enrich_messages_batch()` in `asyncio.to_thread()`.
+- `db/repositories/discussions.py`: Wrapped `embedder.embed_text()` in `asyncio.to_thread()`.
+- Removed dead `DiscussionRanker` class and `rank_discussions()` function (latent unawaited-async defect).
+
+**Iteration 2 — Architecture & Async (84 → 86):**
+- `api/newsletter_gen.py`: Extracted `build_orchestrator_state()` factory — eliminated 80 lines of duplication, replaced raw string keys with `OrchestratorKeys.*` constants.
+- `db/repositories/base.py`: Replaced `count_documents()` with `find_one(query, {"_id": 1})` in `exists()`.
+- `consolidation_nodes.py`: Converted `consolidate_discussions` from sync to async with `asyncio.to_thread` for file I/O.
+- Fixed `format_timestamp()` in `graph.py` and `link_enricher.py` to use `tz=UTC`.
+
+**Iteration 3 — Datetime, Rate Limiting, Constants (86 → 88):**
+- Fixed all 6 remaining naive `datetime.fromtimestamp()` calls across `common.py`, `runs.py`, `whatsapp.py`, `beeper.py`.
+- Applied `@limiter.limit()` decorators to 4 API endpoints (newsletter gen 10/min, batch jobs 60/min).
+- Replaced hardcoded `result.get("total_chats")` etc. with `OrchestratorKeys.*` constants.
+
+**Iteration 4 — Constants & Correctness (88 → 92):**
+- Fixed `datetime.now()` without tz at `graph.py:833` (HITL timeout deadline) and `whatsapp.py:152`.
+- Created `DeliveryResultKeys`, `OutputPathKeys`, and `WorkerResultKeys` in `field_keys.py` — replaced 20+ hardcoded string literals across delivery results, output paths, and worker error dicts.
+- Fixed non-atomic `asyncio.Lock` initialization in `connection.py`, `graph.py`, and `checkpointer.py` — all initialized at module level.
+- Fixed log message using raw string keys at `newsletter_gen.py:441`.
+- Applied `DeliveryResultKeys` to all 9 return dicts in `linkedin_draft_creator.py`.
+- Applied `WorkerResultKeys` to error dicts in `graph.py` and error access in `newsletter_gen.py`.
 
 ---
 

@@ -8,6 +8,7 @@ Never splits mid-discussion if under the chunk size limit.
 
 import re
 import uuid
+from datetime import datetime
 
 from constants import ContentSourceType
 from rag.chunking.base import ChunkingStrategyInterface
@@ -45,6 +46,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
         content: str,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict | None = None,
     ) -> list[ContentChunk]:
         """
@@ -54,7 +57,9 @@ class MarkdownChunker(ChunkingStrategyInterface):
             content: Raw markdown text
             source_id: Parent newsletter identifier
             source_title: Human-readable newsletter title
-            metadata: Additional metadata (newsletter_date_range, data_source_name, etc.)
+            source_date_start: Earliest date the newsletter covers
+            source_date_end: Latest date the newsletter covers
+            metadata: Additional metadata (data_source_name, etc.)
 
         Returns:
             List of ContentChunk instances
@@ -86,6 +91,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
                         chunk_index=chunk_index,
                         source_id=source_id,
                         source_title=source_title,
+                        source_date_start=source_date_start,
+                        source_date_end=source_date_end,
                         metadata=section_metadata,
                     ))
                     chunk_index += 1
@@ -96,6 +103,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
                     chunk_index=chunk_index,
                     source_id=source_id,
                     source_title=source_title,
+                    source_date_start=source_date_start,
+                    source_date_end=source_date_end,
                     metadata=section_metadata,
                 )
                 chunks.extend(sub_chunks)
@@ -140,6 +149,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
         chunk_index: int,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict,
     ) -> list[ContentChunk]:
         """Split a large section at paragraph boundaries with overlap."""
@@ -153,17 +164,17 @@ class MarkdownChunker(ChunkingStrategyInterface):
             para_len = len(paragraph)
 
             if current_len + para_len > self._chunk_size and current_parts:
-                # Emit current chunk
                 chunk_text = "\n\n".join(current_parts)
                 chunks.append(self._build_chunk(
                     text=chunk_text,
                     chunk_index=chunk_index + len(chunks),
                     source_id=source_id,
                     source_title=source_title,
+                    source_date_start=source_date_start,
+                    source_date_end=source_date_end,
                     metadata=metadata,
                 ))
 
-                # Overlap: keep trailing paragraphs that fit within overlap budget
                 overlap_parts: list[str] = []
                 overlap_len = 0
                 for prev_part in reversed(current_parts):
@@ -178,7 +189,6 @@ class MarkdownChunker(ChunkingStrategyInterface):
             current_parts.append(paragraph)
             current_len += para_len
 
-        # Emit final chunk
         if current_parts:
             chunk_text = "\n\n".join(current_parts)
             chunks.append(self._build_chunk(
@@ -186,6 +196,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
                 chunk_index=chunk_index + len(chunks),
                 source_id=source_id,
                 source_title=source_title,
+                source_date_start=source_date_start,
+                source_date_end=source_date_end,
                 metadata=metadata,
             ))
 
@@ -210,6 +222,8 @@ class MarkdownChunker(ChunkingStrategyInterface):
         chunk_index: int,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict,
     ) -> ContentChunk:
         """Build a ContentChunk from text."""
@@ -220,5 +234,7 @@ class MarkdownChunker(ChunkingStrategyInterface):
             source_id=source_id,
             source_title=source_title,
             chunk_index=chunk_index,
+            source_date_start=source_date_start,
+            source_date_end=source_date_end,
             metadata=metadata,
         )

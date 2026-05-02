@@ -307,6 +307,8 @@ class RAGChatRequest(BaseModel):
     session_id: str | None = Field(None, description="Existing session ID (creates new if None)")
     query: str = Field(..., min_length=1, description="User question")
     content_sources: list[str] = Field(default=["podcast"], description="Content source types to search")
+    date_start: str | None = Field(None, description="Optional inclusive lower bound on source date (YYYY-MM-DD or ISO 8601). Constrains retrieval to chunks whose source date range overlaps the window.")
+    date_end: str | None = Field(None, description="Optional inclusive upper bound on source date (YYYY-MM-DD or ISO 8601).")
 
 
 class RAGSessionCreateRequest(BaseModel):
@@ -364,12 +366,19 @@ class RAGNewsletterIngestRequest(BaseModel):
 
 
 class RAGCitationResponse(BaseModel):
-    """Citation metadata in a non-streaming chat response."""
+    """Citation metadata in a non-streaming chat response.
+
+    source_date_start and source_date_end are required: every RAG citation must
+    declare the date(s) of the underlying source content so callers can render
+    freshness alongside facts.
+    """
 
     index: int
     chunk_id: str
     source_type: str
     source_title: str
+    source_date_start: str = Field(..., description="ISO 8601 date(time) of the earliest source content")
+    source_date_end: str = Field(..., description="ISO 8601 date(time) of the latest source content")
     snippet: str
     search_score: float
     metadata: dict = {}
@@ -382,3 +391,6 @@ class RAGChatResponse(BaseModel):
     answer: str
     citations: list[RAGCitationResponse] = []
     evaluation_id: str | None = None
+    freshness_warning: bool = Field(default=False, description="True if the most recent retrieved chunk is older than the configured freshness threshold")
+    oldest_source_date: str | None = Field(default=None, description="ISO date of the oldest retrieved source")
+    newest_source_date: str | None = Field(default=None, description="ISO date of the newest retrieved source")

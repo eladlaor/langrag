@@ -14,10 +14,31 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from constants import RAG_API_KEY_BEARER_SCHEME, RAG_API_KEY_HEADER
+
 logger = logging.getLogger(__name__)
 
-# Create limiter instance using client IP as key
-limiter = Limiter(key_func=get_remote_address)
+
+def _rate_limit_key(request: Request) -> str:
+    """Per-caller rate-limit key: prefer the RAG API key, fall back to client IP.
+
+    Quotas become per-caller for authenticated RAG traffic while preserving
+    IP-based limits for everything else (existing behaviour unchanged).
+    """
+    api_key = request.headers.get(RAG_API_KEY_HEADER)
+    if api_key:
+        return f"key:{api_key}"
+
+    auth = request.headers.get("Authorization", "")
+    parts = auth.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == RAG_API_KEY_BEARER_SCHEME.lower():
+        return f"key:{parts[1].strip()}"
+
+    return f"ip:{get_remote_address(request)}"
+
+
+# Single application-wide limiter used by all decorators
+limiter = Limiter(key_func=_rate_limit_key)
 
 
 def setup_rate_limiting(app: FastAPI) -> None:

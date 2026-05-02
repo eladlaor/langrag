@@ -1,0 +1,154 @@
+{
+  "version": "1.0",
+  "description": "LangTalks podcast RAG golden dataset. Covers per-episode retrieval, guest-attributed claims, cross-episode synthesis, and date-window scoping (with must_refuse cases for out-of-range queries).",
+  "source_type": "podcast",
+  "test_cases": [
+    {
+      "test_id": "podcast_001",
+      "query": "What did the LangTalks podcast cover about MCP?",
+      "expected_topics": ["MCP", "Model Context Protocol"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval across podcast transcripts."
+    },
+    {
+      "test_id": "podcast_002",
+      "query": "What was discussed about AI coding agents on the podcast?",
+      "expected_topics": ["AI coding agents", "Claude Code", "Cursor", "agent loops"],
+      "difficulty": "easy",
+      "reasoning": "Topic aggregation across episodes."
+    },
+    {
+      "test_id": "podcast_003",
+      "query": "Which guest spoke about LangGraph and what did they emphasise?",
+      "expected_topics": ["LangGraph", "guest", "state management"],
+      "difficulty": "medium",
+      "reasoning": "Guest-attributed claim retrieval; relies on speaker metadata."
+    },
+    {
+      "test_id": "podcast_004",
+      "query": "Summarise what the podcast said about evaluating RAG systems.",
+      "expected_topics": ["RAG evaluation", "metrics", "DeepEval", "faithfulness"],
+      "difficulty": "medium",
+      "reasoning": "Multi-segment synthesis on a focused topic."
+    },
+    {
+      "test_id": "podcast_005",
+      "query": "What deployment lessons were shared on the podcast?",
+      "expected_topics": ["deployment", "production", "Docker", "scaling"],
+      "difficulty": "medium",
+      "reasoning": "Practitioner advice extraction."
+    },
+    {
+      "test_id": "podcast_006",
+      "query": "Did any podcast episode discuss cost trade-offs of LLM applications?",
+      "expected_topics": ["cost", "trade-off", "tokens", "budget"],
+      "difficulty": "medium",
+      "reasoning": "Cost-focused extraction across episodes."
+    },
+    {
+      "test_id": "podcast_007",
+      "query": "What did the podcast say about prompt engineering?",
+      "expected_topics": ["prompt engineering", "system prompts", "few-shot"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval."
+    },
+    {
+      "test_id": "podcast_008",
+      "query": "What community concerns were voiced on the podcast about AI safety?",
+      "expected_topics": ["AI safety", "guardrails", "responsible AI"],
+      "difficulty": "medium",
+      "reasoning": "Theme extraction across episodes."
+    },
+    {
+      "test_id": "podcast_009",
+      "query": "Compare the views expressed by different guests on multi-agent systems.",
+      "expected_topics": ["multi-agent", "guest opinions", "comparison"],
+      "difficulty": "hard",
+      "reasoning": "Cross-guest synthesis with attributed citations."
+    },
+    {
+      "test_id": "podcast_010",
+      "query": "What episode discussed n8n integrations and what were the takeaways?",
+      "expected_topics": ["n8n", "integration", "automation"],
+      "difficulty": "medium",
+      "reasoning": "Episode-level retrieval with detail extraction."
+    },
+    {
+      "test_id": "podcast_011",
+      "query": "What did the podcast cover specifically in March 2026?",
+      "expected_topics": ["March 2026"],
+      "difficulty": "medium",
+      "reasoning": "Date-window scoped retrieval over a single month.",
+      "date_filter": {"date_start": "2026-03-01", "date_end": "2026-03-31"}
+    },
+    {
+      "test_id": "podcast_012",
+      "query": "What episodes from Q1 2026 talked about LangGraph?",
+      "expected_topics": ["LangGraph", "Q1 2026"],
+      "difficulty": "medium",
+      "reasoning": "Quarter-bounded topic retrieval.",
+      "date_filter": {"date_start": "2026-01-01", "date_end": "2026-03-31"}
+    },
+    {
+      "test_id": "podcast_013",
+      "query": "Summarise model-release coverage on the podcast in early 2026.",
+      "expected_topics": ["model release", "early 2026"],
+      "difficulty": "hard",
+      "reasoning": "Date-bounded synthesis with multiple sources expected.",
+      "date_filter": {"date_start": "2026-01-01", "date_end": "2026-04-30"}
+    },
+    {
+      "test_id": "podcast_014",
+      "query": "What podcast episodes ran in 2030?",
+      "expected_topics": [],
+      "difficulty": "easy",
+      "reasoning": "Out-of-range date window — must refuse rather than hallucinate.",
+      "date_filter": {"date_start": "2030-01-01", "date_end": "2030-12-31"},
+      "must_refuse": true
+    },
+    {
+      "test_id": "podcast_015",
+      "query": "Tell me about the LangTalks podcast in 1995.",
+      "expected_topics": [],
+      "difficulty": "easy",
+      "reasoning": "Pre-dates any content; must refuse.",
+      "date_filter": {"date_start": "1995-01-01", "date_end": "1995-12-31"},
+      "must_refuse": true
+    },
+    {
+      "test_id": "podcast_016",
+      "query": "What's the latest take on agent observability from the podcast?",
+      "expected_topics": ["agent observability", "tracing", "Langfuse"],
+      "difficulty": "medium",
+      "reasoning": "Recency-sensitive practitioner question."
+    },
+    {
+      "test_id": "podcast_017",
+      "query": "What did the podcast say about open-source vs proprietary models?",
+      "expected_topics": ["open source", "proprietary", "models", "trade-off"],
+      "difficulty": "medium",
+      "reasoning": "Comparative analysis."
+    },
+    {
+      "test_id": "podcast_018",
+      "query": "Cite three distinct claims made on the podcast about MCP, each from a different episode.",
+      "expected_topics": ["MCP"],
+      "difficulty": "hard",
+      "reasoning": "Tests retrieval diversity across episodes (MMR)."
+    },
+    {
+      "test_id": "podcast_019",
+      "query": "What practical RAG lessons did guests share on the podcast?",
+      "expected_topics": ["RAG", "lessons", "practical"],
+      "difficulty": "medium",
+      "reasoning": "Practitioner-oriented extraction."
+    },
+    {
+      "test_id": "podcast_020",
+      "query": "What was discussed about evaluation methodology on the podcast?",
+      "expected_topics": ["evaluation methodology", "DeepEval", "golden datasets"],
+      "difficulty": "medium",
+      "reasoning": "Self-referential evaluation question; relevant to this very gate."
+    }
+  ]
+}

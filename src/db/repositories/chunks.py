@@ -27,8 +27,12 @@ class ChunksRepository(BaseRepository):
         """
         Store multiple chunks with embeddings.
 
+        Fail-fast validation: every chunk must carry source_date_start and source_date_end
+        so retrieval can be scoped by date range. This is non-negotiable.
+
         Args:
-            chunks: List of chunk documents (must include chunk_id, content, embedding, etc.)
+            chunks: List of chunk documents (must include chunk_id, content, embedding,
+                source_date_start, source_date_end, etc.)
 
         Returns:
             Number of chunks inserted
@@ -39,6 +43,12 @@ class ChunksRepository(BaseRepository):
         now = datetime.now(UTC)
         for chunk in chunks:
             chunk[Keys.CREATED_AT] = now
+            if Keys.SOURCE_DATE_START not in chunk or Keys.SOURCE_DATE_END not in chunk:
+                raise ValueError(
+                    f"Chunk {chunk.get(Keys.CHUNK_ID, '<unknown>')} missing required date fields "
+                    f"({Keys.SOURCE_DATE_START}, {Keys.SOURCE_DATE_END}). "
+                    f"Every RAG chunk MUST be tagged with its source date range."
+                )
 
         try:
             await self.create_many(chunks)

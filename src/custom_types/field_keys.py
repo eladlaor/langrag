@@ -274,6 +274,8 @@ class RAGChunkKeys:
     CHUNK_INDEX = "chunk_index"
     METADATA = "metadata"
     CREATED_AT = "created_at"
+    SOURCE_DATE_START = "source_date_start"
+    SOURCE_DATE_END = "source_date_end"
 
 
 class RAGConversationKeys:
@@ -297,6 +299,20 @@ class RAGConversationKeys:
     CITATION_SOURCE_TITLE = "source_title"
     CITATION_SNIPPET = "snippet"
     CITATION_METADATA = "metadata"
+
+
+class RAGApiKeyKeys:
+    """Keys for RAG API key documents in rag_api_keys collection."""
+
+    KEY_ID = "key_id"
+    KEY_HASH = "key_hash"
+    NAME = "name"
+    OWNER = "owner"
+    SCOPES = "scopes"
+    ENABLED = "enabled"
+    CREATED_AT = "created_at"
+    LAST_USED_AT = "last_used_at"
+    EXPIRES_AT = "expires_at"
 
 
 class RAGEvaluationKeys:

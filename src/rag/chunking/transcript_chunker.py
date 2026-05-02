@@ -6,6 +6,7 @@ Chunks by character count while respecting segment boundaries.
 """
 
 import uuid
+from datetime import datetime
 
 from constants import ContentSourceType
 from rag.chunking.base import ChunkingStrategyInterface
@@ -37,6 +38,8 @@ class TranscriptChunker(ChunkingStrategyInterface):
         content: str,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict | None = None,
     ) -> list[ContentChunk]:
         """
@@ -51,6 +54,8 @@ class TranscriptChunker(ChunkingStrategyInterface):
             segments=segments,
             source_id=source_id,
             source_title=source_title,
+            source_date_start=source_date_start,
+            source_date_end=source_date_end,
             metadata=metadata,
         )
 
@@ -59,6 +64,8 @@ class TranscriptChunker(ChunkingStrategyInterface):
         segments: list[TranscriptionSegment],
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         metadata: dict | None = None,
     ) -> list[ContentChunk]:
         """
@@ -93,12 +100,12 @@ class TranscriptChunker(ChunkingStrategyInterface):
             if current_char_count + seg_len > self._chunk_size and current_segments:
                 chunks.append(
                     self._build_chunk(
-                        current_segments, chunk_index, source_id, source_title, base_metadata
+                        current_segments, chunk_index, source_id, source_title,
+                        source_date_start, source_date_end, base_metadata
                     )
                 )
                 chunk_index += 1
 
-                # Overlap: keep trailing segments that fit within overlap budget
                 overlap_segments: list[TranscriptionSegment] = []
                 overlap_chars = 0
                 for prev_seg in reversed(current_segments):
@@ -113,11 +120,11 @@ class TranscriptChunker(ChunkingStrategyInterface):
             current_segments.append(segment)
             current_char_count += seg_len
 
-        # Emit final chunk
         if current_segments:
             chunks.append(
                 self._build_chunk(
-                    current_segments, chunk_index, source_id, source_title, base_metadata
+                    current_segments, chunk_index, source_id, source_title,
+                    source_date_start, source_date_end, base_metadata
                 )
             )
 
@@ -129,6 +136,8 @@ class TranscriptChunker(ChunkingStrategyInterface):
         chunk_index: int,
         source_id: str,
         source_title: str,
+        source_date_start: datetime,
+        source_date_end: datetime,
         base_metadata: dict,
     ) -> ContentChunk:
         """Build a ContentChunk from a group of segments."""
@@ -151,5 +160,7 @@ class TranscriptChunker(ChunkingStrategyInterface):
             source_id=source_id,
             source_title=source_title,
             chunk_index=chunk_index,
+            source_date_start=source_date_start,
+            source_date_end=source_date_end,
             metadata=chunk_metadata,
         )

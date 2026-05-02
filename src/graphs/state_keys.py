@@ -318,11 +318,16 @@ class RAGConversationStateKeys:
     QUERY = "query"
     CONTENT_SOURCES = "content_sources"
     CONVERSATION_HISTORY = "conversation_history"
+    DATE_START = "date_start"
+    DATE_END = "date_end"
 
     # === Retrieval Fields ===
     RETRIEVED_CHUNKS = "retrieved_chunks"
     RERANKED_CHUNKS = "reranked_chunks"
     CONTEXT = "context"
+    FRESHNESS_WARNING = "freshness_warning"
+    OLDEST_SOURCE_DATE = "oldest_source_date"
+    NEWEST_SOURCE_DATE = "newest_source_date"
 
     # === Generation Fields ===
     ANSWER = "answer"

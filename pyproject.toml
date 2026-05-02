@@ -78,6 +78,7 @@ dependencies = [
     "langgraph-api>=0.7.50",
     "python-multipart>=0.0.26",
     "deepeval>=1.0.0",
+    "mcp>=1.2.0", # Model Context Protocol SDK for langrag.ai MCP server
 ]
 
 [project.scripts]

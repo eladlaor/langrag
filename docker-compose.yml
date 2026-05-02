@@ -112,6 +112,10 @@ services:
 
       # Secrets (read-write for Matrix session store)
       - ./secrets:/app/secrets
+
+      # TLS certificates managed by certbot (mounted at runtime; empty in dev)
+      - ./secrets/letsencrypt:/etc/letsencrypt:ro
+      - ./secrets/certbot-www:/var/www/certbot:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -120,6 +124,60 @@ services:
       start_period: 40s
     networks:
       - langrag-network
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------
+  # MCP server — exposes rag_query / rag_search / list_rag_sources for
+  # Claude Code subagents. Runs alongside the app, behind nginx on
+  # mcp.langrag.ai (HTTP/SSE) in production.
+  # ----------------------------------------------------------------------
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1001}
+        GROUP_ID: ${GROUP_ID:-1001}
+    container_name: langrag-mcp
+    user: "${USER_ID:-1001}:${GROUP_ID:-1001}"
+    env_file:
+      - .env
+    environment:
+      MONGODB_URL: ${MONGODB_URL:-mongodb://mongodb:27017}
+      DATABASE_NAME: ${DATABASE_NAME:-langrag}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      RAG_MCP_API_KEY: ${RAG_MCP_API_KEY:-}
+      RAG_API_KEY_PEPPER: ${RAG_API_KEY_PEPPER:-}
+      RAG_AUTH_ENABLED: ${RAG_AUTH_ENABLED:-false}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: ["python", "-m", "rag.mcp.server", "--transport", "http", "--host", "0.0.0.0", "--port", "8765"]
+    ports:
+      - "${MCP_PORT:-8765}:8765"
+    networks:
+      - langrag-network
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------
+  # certbot — Let's Encrypt issuance & renewal for langrag.ai +
+  # mcp.langrag.ai. The container loops every 12h: it renews when needed
+  # then sleeps. nginx must reload after a successful renewal (handled by
+  # the `--deploy-hook` configured at first issuance).
+  # ----------------------------------------------------------------------
+  certbot:
+    image: certbot/certbot:latest
+    container_name: langrag-certbot
+    profiles: ["production"]
+    volumes:
+      - ./secrets/letsencrypt:/etc/letsencrypt
+      - ./secrets/certbot-www:/var/www/certbot
+    entrypoint: >-
+      sh -c "trap exit TERM;
+      while :; do
+        certbot renew --webroot -w /var/www/certbot --quiet --deploy-hook 'docker exec langrag-app nginx -s reload || true';
+        sleep 12h & wait $${!};
+      done"
     restart: unless-stopped
 
   # Batch Worker - Background job processor for batch API

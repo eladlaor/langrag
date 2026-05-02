@@ -1,0 +1,227 @@
+{
+  "version": "2.0",
+  "description": "Newsletter RAG golden dataset for the langrag.ai eval gate. Combines the v1 topic-coverage cases with new date-aware cases (date filters, freshness warnings, must_refuse on out-of-range queries).",
+  "source_type": "newsletter",
+  "test_cases": [
+    {
+      "test_id": "newsletter_001",
+      "query": "What were the main discussions about MCP in the recent newsletters?",
+      "expected_topics": ["MCP protocol", "tool use", "server implementations", "MCP Israel community"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval from newsletter sections"
+    },
+    {
+      "test_id": "newsletter_002",
+      "query": "What AI coding tools were discussed in the LangTalks community?",
+      "expected_topics": ["AI-driven coding", "code generation agents", "Cursor", "Copilot", "Claude Code"],
+      "difficulty": "easy",
+      "reasoning": "Topic aggregation across newsletter sections"
+    },
+    {
+      "test_id": "newsletter_003",
+      "query": "How has the community's opinion on AI agents evolved across newsletters?",
+      "expected_topics": ["AI agents", "agent frameworks", "LangGraph", "multi-agent systems", "evolution of opinion"],
+      "difficulty": "hard",
+      "reasoning": "Requires cross-newsletter temporal reasoning"
+    },
+    {
+      "test_id": "newsletter_004",
+      "query": "What practical LangGraph patterns were shared in the community?",
+      "expected_topics": ["LangGraph", "graph patterns", "state management", "workflow design"],
+      "difficulty": "medium",
+      "reasoning": "Technical detail extraction from discussion summaries"
+    },
+    {
+      "test_id": "newsletter_005",
+      "query": "Which newsletters discussed RAG implementations and what were the key takeaways?",
+      "expected_topics": ["RAG", "retrieval augmented generation", "vector search", "embeddings", "chunking strategies"],
+      "difficulty": "medium",
+      "reasoning": "Cross-newsletter topic search with detail extraction"
+    },
+    {
+      "test_id": "newsletter_006",
+      "query": "What open-source tools and frameworks were most frequently mentioned?",
+      "expected_topics": ["open source", "frameworks", "tools", "LangChain", "LangGraph", "CrewAI"],
+      "difficulty": "medium",
+      "reasoning": "Frequency analysis across newsletter content"
+    },
+    {
+      "test_id": "newsletter_007",
+      "query": "What were the community's concerns about AI safety and responsible AI use?",
+      "expected_topics": ["AI safety", "responsible AI", "ethical considerations", "guardrails"],
+      "difficulty": "medium",
+      "reasoning": "Theme extraction across multiple newsletters"
+    },
+    {
+      "test_id": "newsletter_008",
+      "query": "What deployment strategies for AI applications were discussed?",
+      "expected_topics": ["deployment", "Docker", "cloud", "production", "scaling", "infrastructure"],
+      "difficulty": "medium",
+      "reasoning": "Practical advice extraction from discussions"
+    },
+    {
+      "test_id": "newsletter_009",
+      "query": "Compare the topics covered in per-chat newsletters vs consolidated newsletters.",
+      "expected_topics": ["per-chat", "consolidated", "cross-chat", "topic overlap", "unique discussions"],
+      "difficulty": "hard",
+      "reasoning": "Requires understanding of newsletter types and comparing their content"
+    },
+    {
+      "test_id": "newsletter_010",
+      "query": "What were the most active discussions based on participant count and message volume?",
+      "expected_topics": ["engagement", "participant count", "message volume", "most active"],
+      "difficulty": "medium",
+      "reasoning": "Metadata-aware retrieval from newsletter discussion summaries"
+    },
+    {
+      "test_id": "newsletter_011",
+      "query": "What new AI models or providers were discussed in the community?",
+      "expected_topics": ["AI models", "OpenAI", "Anthropic", "Google", "model releases", "benchmarks"],
+      "difficulty": "easy",
+      "reasoning": "Direct topic retrieval from technology discussions"
+    },
+    {
+      "test_id": "newsletter_012",
+      "query": "What automation and workflow topics came up in the newsletters?",
+      "expected_topics": ["automation", "n8n", "workflows", "scheduling", "integration"],
+      "difficulty": "medium",
+      "reasoning": "Cross-section topic aggregation"
+    },
+    {
+      "test_id": "newsletter_013",
+      "query": "What challenges did community members face when building AI applications?",
+      "expected_topics": ["challenges", "debugging", "latency", "cost", "reliability", "production issues"],
+      "difficulty": "medium",
+      "reasoning": "Problem-focused extraction from discussion content"
+    },
+    {
+      "test_id": "newsletter_014",
+      "query": "What prompt engineering techniques were shared in the community?",
+      "expected_topics": ["prompt engineering", "system prompts", "few-shot", "chain of thought"],
+      "difficulty": "medium",
+      "reasoning": "Technique-specific retrieval from discussions"
+    },
+    {
+      "test_id": "newsletter_015",
+      "query": "Summarize the key themes across all available newsletters in 3 sentences.",
+      "expected_topics": ["key themes", "AI engineering", "community trends", "technology adoption"],
+      "difficulty": "hard",
+      "reasoning": "High-level synthesis requiring cross-newsletter understanding"
+    },
+
+    {
+      "test_id": "newsletter_016",
+      "query": "What was discussed about MCP in March 2026 only?",
+      "expected_topics": ["MCP", "March 2026"],
+      "difficulty": "medium",
+      "reasoning": "Date-window scoped retrieval; verifies date_start/date_end honoured.",
+      "date_filter": {"date_start": "2026-03-01", "date_end": "2026-03-31"}
+    },
+    {
+      "test_id": "newsletter_017",
+      "query": "What were the AI coding agent updates between Feb 1 and Feb 28, 2026?",
+      "expected_topics": ["coding agents", "February 2026", "Cursor", "Claude Code"],
+      "difficulty": "medium",
+      "reasoning": "Date-window scoped retrieval over a single calendar month.",
+      "date_filter": {"date_start": "2026-02-01", "date_end": "2026-02-28"}
+    },
+    {
+      "test_id": "newsletter_018",
+      "query": "Summarise the model releases discussed in Q1 2026.",
+      "expected_topics": ["model releases", "Q1 2026", "Anthropic", "OpenAI", "Google"],
+      "difficulty": "hard",
+      "reasoning": "Cross-month synthesis bounded by a date window.",
+      "date_filter": {"date_start": "2026-01-01", "date_end": "2026-03-31"}
+    },
+    {
+      "test_id": "newsletter_019",
+      "query": "What were the LangGraph patterns shared between Jan 15 and Feb 15, 2026?",
+      "expected_topics": ["LangGraph", "patterns", "state management"],
+      "difficulty": "medium",
+      "reasoning": "Date-window with cross-month bounds.",
+      "date_filter": {"date_start": "2026-01-15", "date_end": "2026-02-15"}
+    },
+    {
+      "test_id": "newsletter_020",
+      "query": "What was discussed in 2030?",
+      "expected_topics": [],
+      "difficulty": "easy",
+      "reasoning": "Out-of-range date window: no newsletters exist for 2030. The system MUST refuse to fabricate.",
+      "date_filter": {"date_start": "2030-01-01", "date_end": "2030-12-31"},
+      "must_refuse": true
+    },
+    {
+      "test_id": "newsletter_021",
+      "query": "Tell me about MCP in January 1990.",
+      "expected_topics": [],
+      "difficulty": "easy",
+      "reasoning": "Out-of-range date window pre-dating any content.",
+      "date_filter": {"date_start": "1990-01-01", "date_end": "1990-01-31"},
+      "must_refuse": true
+    },
+    {
+      "test_id": "newsletter_022",
+      "query": "What was the latest framework discussed?",
+      "expected_topics": ["latest", "framework"],
+      "difficulty": "medium",
+      "reasoning": "Open recency question — answer should flag freshness if newest source predates the freshness threshold."
+    },
+    {
+      "test_id": "newsletter_023",
+      "query": "What are the current best practices for vector search?",
+      "expected_topics": ["vector search", "best practices", "embeddings"],
+      "difficulty": "medium",
+      "reasoning": "Recency-sensitive practitioner question; flag staleness when applicable."
+    },
+    {
+      "test_id": "newsletter_024",
+      "query": "What did the community say about Claude Sonnet 4.6?",
+      "expected_topics": ["Claude Sonnet", "4.6"],
+      "difficulty": "easy",
+      "reasoning": "Specific model version retrieval."
+    },
+    {
+      "test_id": "newsletter_025",
+      "query": "Compare what the community said about MCP in early 2026 vs late 2026.",
+      "expected_topics": ["MCP", "early 2026", "late 2026", "evolution"],
+      "difficulty": "hard",
+      "reasoning": "Cross-window synthesis; both windows must produce dated citations."
+    },
+    {
+      "test_id": "newsletter_026",
+      "query": "What infrastructure costs were discussed in the newsletters?",
+      "expected_topics": ["infrastructure", "cost", "compute", "tokens"],
+      "difficulty": "medium",
+      "reasoning": "Cost-and-business angle."
+    },
+    {
+      "test_id": "newsletter_027",
+      "query": "Were there any community discussions about evaluation or benchmarks?",
+      "expected_topics": ["evaluation", "benchmarks", "DeepEval", "metrics"],
+      "difficulty": "medium",
+      "reasoning": "Self-referential evaluation topic."
+    },
+    {
+      "test_id": "newsletter_028",
+      "query": "What was reported about agent reliability and failure modes?",
+      "expected_topics": ["agent reliability", "failure modes", "debugging"],
+      "difficulty": "medium",
+      "reasoning": "Reliability-focused extraction."
+    },
+    {
+      "test_id": "newsletter_029",
+      "query": "Cite three distinct discussions about RAG from different newsletters.",
+      "expected_topics": ["RAG"],
+      "difficulty": "hard",
+      "reasoning": "Tests multi-source citation diversity (MMR reranker)."
+    },
+    {
+      "test_id": "newsletter_030",
+      "query": "What was discussed strictly within the first half of March 2026?",
+      "expected_topics": ["early March 2026"],
+      "difficulty": "hard",
+      "reasoning": "Tight date window forcing the system to refuse if no overlap exists.",
+      "date_filter": {"date_start": "2026-03-01", "date_end": "2026-03-15"}
+    }
+  ]
+}
