@@ -1,61 +1,148 @@
 # Changelog
 
-## v1.8.0
+All notable changes to this project are documented in this file.
 
-- Concurrency: fixed non-atomic `asyncio.Lock` initialization across `connection.py`, `graph.py`, `checkpointer.py` (module-level init)
-- Rate limiting applied to newsletter-generation and batch endpoints
-- New constants: `DeliveryResultKeys`, `OutputPathKeys`, `WorkerResultKeys` — replaced 20+ hardcoded string literals
-- Architecture: extracted `build_orchestrator_state()` factory; replaced `count_documents` with `find_one` for existence checks
-- Removed unused `DiscussionRanker` class
-- New deterministic newsletter-assembler module for metadata assembly
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## v1.7.3
-- Update default Anthropic model from Claude Sonnet 4.5 to Sonnet 4.6.
+## [Unreleased]
 
-## v1.7.2
-- Fix checkpointer bug: improved error handling and connection management in async SQLite checkpointer.
+## [1.10.0] - 2026-05-21
 
-## v1.7.0
-- LangGraph graph state checkpointing with AsyncSqliteSaver. Lazy async graph compilation, Docker volume mount for checkpoint persistence, integrated across orchestrator, scheduler, and batch worker.
+### Changed
+- LangTalks newsletter prompt: explicit attribution rules suppress internal `user_<N>` identifiers from rendered output while preserving them in the LLM input so multi-speaker context is retained. Hebrew and English neutral attribution phrases are spelled out in `LANGTALKS_NEWSLETTER_PROMPT` and across the three worth-mentioning templates; applies to both per-chat and consolidated flows.
+- Changelog consolidated to a single root-level `CHANGELOG.md` in Keep a Changelog format; the prior `knowledge/CHANGELOG.md` and `knowledge/changelog/` archive removed.
 
-## v1.6.5
-- Email notification HTML template extracted to standalone file with template rendering. Expanded docstrings for field_keys and state_keys modules. Emoji-free log messages across decryption strategies and Beeper extractor.
+### Added
+- `tests/unit/test_langtalks_prompt_attribution.py`: pins the attribution rule presence across languages and guards against regressions that would drop `sender_id` from the model payload.
 
-## v1.6.4
-- Async consistency: migrated requests to httpx, converted sync methods to async in Beeper extractor, discussion ranker, LinkedIn draft creator, and web searcher.
+## [1.9.0] - 2026-05-02
 
-## v1.6.3
-- Typo corrections (e.g., disussion to discussion), timezone.utc to UTC modernization, unused import cleanup across 53 files in src, tests, and CLI.
+### Added
+- Date-aware RAG retrieval: every chunk tagged with `source_date_start` / `source_date_end`; `$vectorSearch` accepts date filters; answers carry mandatory `[date: ...]` citations; out-of-range queries are refused.
+- MCP server exposing `rag_query`, `rag_search`, and `list_rag_sources` over stdio and HTTP/SSE.
+- Eval gate with 50 golden cases and three custom metrics, wired into CI for changes under `src/rag/**`.
+- nginx HTTPS configuration and certbot scaffolding for `langrag.ai` and `mcp.langrag.ai`.
 
-## v1.6.2
+### Changed
+- `/api/rag/*` endpoints gated behind API key auth with slowapi rate limits.
+
+## [1.8.0] - 2026-04-23
+
+### Added
+- `newsletter_assembler` module consolidating final newsletter composition.
+
+### Changed
+- Pipeline hardening across hot paths: constants enforcement, concurrency fixes, removal of the legacy `discussion_ranker` module in favor of MMR-based reranking.
+
+## [1.7.3] - 2026-04-20
+
+### Changed
+- Default Anthropic model upgraded from Sonnet 4.5 to Sonnet 4.6.
+
+## [1.7.2] - 2026-04-20
+
+### Fixed
+- Checkpointer bug surfaced after the v1.7.0 SQLite persistence rollout.
+
+## [1.7.1] - 2026-04-18
+
+### Changed
+- README refresh.
+
+## [1.7.0] - 2026-04-18
+
+### Added
+- LangGraph state checkpointing via `AsyncSqliteSaver`, with lazy async graph compilation and a Docker volume mount for checkpoint persistence; integrated across the orchestrator, scheduler, and batch worker.
+
+## [1.6.5] - 2026-04-18
+
+### Changed
+- Email notification HTML extracted to a standalone template with rendering layer.
+- Expanded docstrings for `field_keys` and `state_keys` modules.
+- Emoji-free log messages across decryption strategies and the Beeper extractor.
+
+## [1.6.4] - 2026-04-18
+
+### Changed
+- Async consistency pass: migrated `requests` to `httpx`, converted sync paths to async in the Beeper extractor, discussion ranker, LinkedIn draft creator, and web searcher.
+
+## [1.6.3] - 2026-04-18
+
+### Fixed
+- Typo corrections (e.g., `disussion` → `discussion`), `timezone.utc` modernized to `UTC`, and unused imports cleaned up across 53 files in `src`, `tests`, and CLI.
+
+## [1.6.2] - 2026-04-18
+
+### Added
 - DeepEval newsletter RAG test suite: 46 unit tests and 50 integration tests covering markdown chunking, newsletter source extraction, evaluation metrics, and golden dataset validation.
 
-## v1.6.1
-- Propagate force_refresh_extraction parameter to Beeper extractor for cache bypass support.
+## [1.6.1] - 2026-04-18
 
-## v1.6.0
-- RAG newsletter conversation: chat with past newsletters using retrieval-augmented generation.
+### Fixed
+- `force_refresh_extraction` parameter propagated to the Beeper extractor to enable cache bypass.
 
-## v1.5.0
-- English newsletter rendering support: generate and render newsletters in English with Substack-compatible HTML output.
+## [1.6.0] - 2026-04-15
 
-## v1.4.0
+### Added
+- RAG newsletter conversation: retrieval-augmented Q&A over past newsletters.
+
+## [1.5.0]
+
+### Added
+- English newsletter rendering with Substack-compatible HTML output.
+
+## [1.4.0]
+
+### Added
 - RAG podcast conversation: ingest podcast transcripts, chunk, embed, and enable conversational Q&A over podcast content.
 
-## v1.3.0
-- Custom SLM: enhanced Ollama-based message pre-filtering with custom classifier configuration.
+## [1.3.0]
 
-## v1.2.0
-- Translation cache for avoiding redundant translation API calls. Poll message extraction and rendering support.
+### Added
+- Custom SLM: Ollama-based message pre-filtering with configurable classifier.
 
-## v1.1.1
-- Updated README: image extraction pipeline documentation, reply correlation section, reduced hardcoded model references.
-- Updated pipeline animation and static diagram to include Extract Images and Associate Images stages.
+## [1.2.0]
 
-## v1.1.0
-  - Image analysis pipeline: extract, decrypt, and describe images from WhatsApp messages using vision models.
-  - Images are now associated with their discussions and included as context in the relevant llm calls.
-  - Expanded SLM classifier configuration options, as preparation for an upcoming fine-tuned SLM enhancement.  
+### Added
+- Translation cache to avoid redundant translation API calls.
+- Poll message extraction and rendering.
 
-## v1.0.0
-  - Squashed first public release.
+## [1.1.1]
+
+### Changed
+- README expanded with image extraction pipeline documentation and reply correlation section; reduced hardcoded model references.
+- Pipeline animation and static diagram updated to include Extract Images and Associate Images stages.
+
+## [1.1.0]
+
+### Added
+- Image analysis pipeline: extract, decrypt, and describe WhatsApp images using vision models; images associated with their parent discussion and included as context in downstream LLM calls.
+- Expanded SLM classifier configuration in preparation for a fine-tuned SLM.
+
+## [1.0.0]
+
+### Added
+- Initial public release.
+
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/eladlaor/langrag/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/eladlaor/langrag/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/eladlaor/langrag/compare/v1.7.3...v1.8.0
+[1.7.3]: https://github.com/eladlaor/langrag/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/eladlaor/langrag/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/eladlaor/langrag/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/eladlaor/langrag/compare/v1.6.5...v1.7.0
+[1.6.5]: https://github.com/eladlaor/langrag/compare/v1.6.4...v1.6.5
+[1.6.4]: https://github.com/eladlaor/langrag/compare/v1.6.3...v1.6.4
+[1.6.3]: https://github.com/eladlaor/langrag/compare/v1.6.2...v1.6.3
+[1.6.2]: https://github.com/eladlaor/langrag/compare/v1.6.1...v1.6.2
+[1.6.1]: https://github.com/eladlaor/langrag/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/eladlaor/langrag/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/eladlaor/langrag/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/eladlaor/langrag/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/eladlaor/langrag/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/eladlaor/langrag/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/eladlaor/langrag/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/eladlaor/langrag/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/eladlaor/langrag/releases/tag/v1.0.0

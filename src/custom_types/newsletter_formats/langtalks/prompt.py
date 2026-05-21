@@ -30,6 +30,15 @@ CONTENT GUIDELINES:
    - chat_name: The name of the chat/group where this discussion occurred
    These fields are used to generate attribution footers showing when and where discussions started.
 
+ATTRIBUTION RULES (read carefully):
+- Each message in the input JSON carries a `sender_id` field of the form `user_<number>` (for example, `user_7`, `user_12`, `user_27`). These identifiers are an internal anonymization artifact produced by the pipeline. They have no meaning to the reader.
+- You MAY use `sender_id` values internally to reason about WHO said WHAT — to distinguish a back-and-forth exchange from a monologue, to identify a question-and-answer pair, or to weight a multi-speaker discussion differently from a single-speaker one.
+- You MUST NEVER include any `user_<number>` identifier in the rendered newsletter. Not in bullet points, not in quotes, not in parenthetical attributions, not anywhere.
+- When you need to attribute a statement or describe who said something, use neutral community phrasing in {desired_language}:
+  - Hebrew examples: "אחד החברים בקהילה", "חברים בקהילה דנו ב...", "אחת החברות בקהילה שיתפה..."
+  - English examples: "a community member", "one of the community members", "members discussed...", "a community member shared..."
+- This rule applies to every section of the newsletter — primary discussion, secondary discussions, worth_mentioning, and any other text you generate.
+
 {worth_mentioning_guidance}
 
 Remember: Your target audience are GenAI engineers in Israel. The goal is to provide very specific and practical professional information in {desired_language}, that these engineers will be able to use in their work.
@@ -52,6 +61,7 @@ YOUR TASK for worth_mentioning:
 - Each item should be a standalone insight (1-2 sentences max)
 - Each item MUST name a specific tool, technique, concept, or library — no vague statements
 - Write each item in {desired_language}
+- ATTRIBUTION: never include `user_<number>` identifiers in the output. If attribution is needed, use neutral phrasing like "אחד החברים בקהילה" (Hebrew) or "a community member" (English).
 
 BAD worth_mentioning examples (DO NOT write like this):
 - "An interesting discussion about AI" — too vague, no specific tool or insight
@@ -85,6 +95,7 @@ YOUR TASK for worth_mentioning:
 - Each item should be a standalone insight (1-2 sentences max)
 - Each item MUST name a specific tool, technique, concept, or library — no vague statements
 - Write each item in {desired_language}
+- ATTRIBUTION: never include `user_<number>` identifiers in the output. If attribution is needed, use neutral phrasing like "אחד החברים בקהילה" (Hebrew) or "a community member" (English).
 
 BAD worth_mentioning examples (DO NOT write like this):
 - "An interesting discussion about AI" — too vague, no specific tool or insight
@@ -113,4 +124,6 @@ Focus on:
 - Practical tips and tool recommendations
 - Quick insights that AI engineers can apply immediately
 - Topics that didn't warrant a full discussion section but are still valuable
+
+ATTRIBUTION: never include `user_<number>` identifiers in the output. If attribution is needed, use neutral phrasing like "אחד החברים בקהילה" (Hebrew) or "a community member" (English).
 """

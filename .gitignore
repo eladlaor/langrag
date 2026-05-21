@@ -233,6 +233,9 @@ temp_decrypted_*.json
 !docs/figures/images/**/*.png
 !docs/figures/images/**/*.jpg
 
+# Local reference materials (not part of the project)
+references/
+
 # Claude Code
 .claude/
 
