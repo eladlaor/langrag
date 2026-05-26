@@ -14,6 +14,7 @@ from config import get_settings
 from custom_types.field_keys import RAGChunkKeys
 from graphs.rag_conversation.state import RAGConversationState
 from graphs.state_keys import RAGConversationStateKeys as Keys
+from rag.evaluation.runtime.scorer import score_response
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.generation.rag_chain import generate_answer
 
@@ -99,8 +100,13 @@ async def generate_node(state: RAGConversationState) -> dict[str, Any]:
 
 
 async def evaluate_node(state: RAGConversationState) -> dict[str, Any]:
-    """Conditionally fire background DeepEval evaluation."""
-    settings = get_settings().deepeval
+    """
+    Conditionally fire background runtime scoring.
+
+    The scorer dual-writes to MongoDB (rag_evaluations) and Langfuse (trace
+    scores). DeepEval is no longer used at runtime; the CI eval gate keeps it.
+    """
+    settings = get_settings().runtime_eval
 
     if not settings.enabled:
         return {Keys.EVALUATION_ID: None}
@@ -111,38 +117,39 @@ async def evaluate_node(state: RAGConversationState) -> dict[str, Any]:
     evaluation_id = str(uuid.uuid4())
 
     task = asyncio.create_task(
-        _run_background_evaluation(
+        _run_background_scoring(
             evaluation_id=evaluation_id,
             session_id=state[Keys.SESSION_ID],
             query=state[Keys.QUERY],
             answer=state.get(Keys.ANSWER, ""),
             contexts=[c.get(RAGChunkKeys.CONTENT, "") for c in state.get(Keys.RERANKED_CHUNKS, [])],
+            langfuse_trace_id=state.get(Keys.LANGFUSE_TRACE_ID),
         )
     )
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
-    logger.info(f"Background evaluation scheduled: evaluation_id={evaluation_id}")
+    logger.info(f"Background runtime scoring scheduled: evaluation_id={evaluation_id}")
     return {Keys.EVALUATION_ID: evaluation_id}
 
 
-async def _run_background_evaluation(
+async def _run_background_scoring(
     evaluation_id: str,
     session_id: str,
     query: str,
     answer: str,
     contexts: list[str],
+    langfuse_trace_id: str | None,
 ) -> None:
-    """Run DeepEval evaluation in the background. Fail-soft: never crashes the conversation."""
+    """Run runtime scoring in the background. Fail-soft: never crashes the conversation."""
     try:
-        from rag.evaluation.evaluator import run_evaluation
-
-        await run_evaluation(
+        await score_response(
             evaluation_id=evaluation_id,
             session_id=session_id,
             query=query,
             answer=answer,
             contexts=contexts,
+            langfuse_trace_id=langfuse_trace_id,
         )
     except Exception as e:
-        logger.warning(f"Background evaluation failed (non-blocking): evaluation_id={evaluation_id}, error={e}")
+        logger.warning(f"Background runtime scoring failed (non-blocking): evaluation_id={evaluation_id}, error={e}")

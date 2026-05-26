@@ -511,6 +511,35 @@ class RAGSettings(BaseSettings):
 
 
 # ============================================================================
+# RUNTIME EVAL CONFIGURATION
+# ============================================================================
+
+
+class RuntimeEvalSettings(BaseSettings):
+    """
+    Per-request RAG quality scoring configuration.
+
+    Runs a thin local langchain-openai LLM judge after each scored response and
+    dual-writes scores to MongoDB (rag_evaluations) and Langfuse (trace scores).
+    Replaces DeepEval at runtime. DeepEval is still used by the CI eval gate.
+    """
+
+    enabled: bool = Field(default=False, description="Enable per-request LLM-judge scoring after each RAG response")
+    metrics: list[str] = Field(
+        default=["faithfulness", "answer_relevancy", "hallucination"],
+        description="EvaluationMetric values to run at runtime",
+    )
+    sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Fraction of responses to score (1.0 = all)")
+    faithfulness_threshold: float = Field(default=0.7, description="Minimum faithfulness score to pass")
+    answer_relevancy_threshold: float = Field(default=0.7, description="Minimum answer relevancy score to pass")
+    hallucination_threshold: float = Field(default=0.5, description="Maximum hallucination score to pass (lower is better)")
+    eval_model: str = Field(default="gpt-4.1-mini", description="LLM model used by the judge")
+    judge_timeout_seconds: int = Field(default=30, description="Per-metric judge call timeout")
+
+    model_config = SettingsConfigDict(env_prefix="RUNTIME_EVAL_")
+
+
+# ============================================================================
 # DEEPEVAL CONFIGURATION
 # ============================================================================
 
@@ -563,6 +592,7 @@ class Settings(BaseSettings):
     slm_enrichment: SLMEnrichmentSettings = Field(default_factory=SLMEnrichmentSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)
+    runtime_eval: RuntimeEvalSettings = Field(default_factory=RuntimeEvalSettings)
     deepeval: DeepEvalSettings = Field(default_factory=DeepEvalSettings)
     checkpointer: CheckpointerSettings = Field(default_factory=CheckpointerSettings)
 

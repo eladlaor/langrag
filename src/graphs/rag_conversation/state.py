@@ -39,6 +39,7 @@ class RAGConversationState(TypedDict, total=False):
 
     # Evaluation
     evaluation_id: str | None
+    langfuse_trace_id: str | None
 
     # SSE streaming
     progress_queue: Any | None

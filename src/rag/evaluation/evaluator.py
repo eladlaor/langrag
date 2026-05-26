@@ -1,5 +1,14 @@
 """
-RAG Quality Evaluator
+RAG Quality Evaluator (CI-orphaned, kept for reference).
+
+DEPRECATED at runtime. The per-request RAG scoring path now lives in
+`src/rag/evaluation/runtime/scorer.py`, which uses a local langchain-openai
+LLM judge and dual-writes scores to MongoDB + Langfuse.
+
+This module is no longer reachable from the RAG conversation graph. It is
+retained on disk so the CI eval gate (`src/rag/evaluation/gate.py`) can
+continue to use DeepEval-based LLM judges against golden datasets without
+churn. Deletion is a follow-up once nothing imports `run_evaluation`.
 
 Runs DeepEval metrics asynchronously in the background.
 Fail-soft: evaluation failures never block or crash the conversation.

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-05-26
+
+### Added
+- Runtime LLM-judge scoring for RAG responses (`src/rag/evaluation/runtime/`): a thin `langchain-openai` wrapper around three prompt templates (faithfulness, answer relevancy, hallucination) that scores each response and dual-writes scores to MongoDB (`rag_evaluations`) and Langfuse (trace scores). Background-fire-and-forget, fail-soft (one judge or sink failure never blocks the conversation).
+- `RuntimeEvalSettings` config block (`RUNTIME_EVAL_*` env prefix) with `enabled`, `metrics`, `sampling_rate`, per-metric thresholds (`faithfulness_threshold`, `answer_relevancy_threshold`, `hallucination_threshold`), `eval_model` (default `gpt-4.1-mini`), and `judge_timeout_seconds`.
+- `LANGFUSE_TRACE_ID` field in `RAGConversationStateKeys` so judge scores attach to the originating Langfuse trace.
+
+### Changed
+- `RAGConversation.evaluate_node` rewired from `get_settings().deepeval` + DeepEval at runtime to `get_settings().runtime_eval` + the new in-process scorer. DeepEval is still used by the CI eval gate, but is intentionally NOT imported anywhere under `src/rag/evaluation/runtime/`; the boundary is guardrailed by `tests/unit/rag/runtime/test_no_deepeval_import.py`.
+
 ## [1.11.0] - 2026-05-26
 
 ### Added
@@ -145,7 +155,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/eladlaor/langrag/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/eladlaor/langrag/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/eladlaor/langrag/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/eladlaor/langrag/compare/v1.8.0...v1.9.0

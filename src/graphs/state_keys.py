@@ -335,6 +335,7 @@ class RAGConversationStateKeys:
 
     # === Evaluation Fields ===
     EVALUATION_ID = "evaluation_id"
+    LANGFUSE_TRACE_ID = "langfuse_trace_id"
 
     # === SSE Streaming ===
     PROGRESS_QUEUE = "progress_queue"
