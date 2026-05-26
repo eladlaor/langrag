@@ -51,12 +51,34 @@ manually through MongoDB Atlas UI or mongosh:
 Note: Vector search requires MongoDB Atlas or mongot sidecar service.
 """
 
+import asyncio
 import logging
+import time
+
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ASCENDING, DESCENDING, TEXT
+from pymongo import ASCENDING, DESCENDING
 from pymongo.operations import SearchIndexModel
 
-from constants import COLLECTION_RAG_CHUNKS, RAG_VECTOR_INDEX_NAME, DEFAULT_EMBEDDING_DIMENSION
+from constants import (
+    COLLECTION_DISCUSSIONS,
+    COLLECTION_RAG_CHUNKS,
+    DEFAULT_EMBEDDING_DIMENSION,
+    RAG_LEXICAL_INDEX_NAME,
+    RAG_VECTOR_INDEX_NAME,
+    RAG_VECTOR_INDEX_NAME_LEGACY,
+)
+from custom_types.field_keys import RAGChunkKeys
+
+# Legacy on-disk text index that no longer has a queryer in the codebase.
+# Kept here so ensure_indexes() can drop it idempotently from existing
+# deployments. New deployments will simply skip the drop.
+_LEGACY_DISCUSSIONS_TEXT_INDEX_NAME = "title_text_nutshell_text"
+
+# Atlas Search builds indexes asynchronously. Poll the index until mongot
+# reports it as queryable before serving traffic, with a bounded wait so a
+# stuck mongot does not block process startup forever.
+_SEARCH_INDEX_READY_TIMEOUT_SECONDS = 120
+_SEARCH_INDEX_READY_POLL_INTERVAL_SECONDS = 2
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +105,6 @@ INDEXES = {
         {"keys": [("run_id", ASCENDING), ("chat_name", ASCENDING)]},
         # Query by chat
         {"keys": [("chat_name", ASCENDING), ("created_at", DESCENDING)]},
-        # Text search on title/content
-        {"keys": [("title", TEXT), ("nutshell", TEXT)]},
         # Ranking queries (global)
         {"keys": [("ranking_score", DESCENDING)]},
     ],
@@ -245,6 +265,12 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
     Safe to run multiple times - MongoDB ignores duplicate index creation.
 
+    When the RAG hybrid retrieval path is enabled (rag.hybrid_enabled), the
+    lexical Atlas Search index is treated as a hard dependency: if it cannot
+    be created or doesn't become queryable, this function raises and the
+    process refuses to start. That avoids a half-broken state where startup
+    only logs a warning but every /api/rag/chat call 500s at query time.
+
     Args:
         db: AsyncIOMotorDatabase instance
     """
@@ -262,12 +288,116 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
         logger.info("All indexes created successfully")
 
+        # Drop the legacy discussions TEXT index if it lingers on existing
+        # deployments. No code path queries $text on discussions anymore;
+        # keeping the index just costs RAM on every write.
+        await _drop_legacy_discussions_text_index(db)
+
         # Create vector search index for RAG chunks (idempotent)
         await _ensure_vector_search_index(db)
+        # Create lexical Atlas Search index for hybrid retrieval via $rankFusion.
+        # Required when hybrid_enabled=True; otherwise best-effort.
+        from config import get_settings  # local import to avoid cycles at module load
+
+        lexical_required = get_settings().rag.hybrid_enabled
+        lexical_ready = await _ensure_lexical_search_index(db)
+        if lexical_required and not lexical_ready:
+            raise RuntimeError(
+                f"Lexical Atlas Search index '{RAG_LEXICAL_INDEX_NAME}' is not "
+                f"queryable, but rag.hybrid_enabled=True requires it. Refusing "
+                f"to start in a half-broken state. Verify mongot is running and "
+                f"capable of building search indexes, then restart."
+            )
 
     except Exception as e:
         logger.error(f"Failed to create indexes: {e}")
         raise RuntimeError(f"Index creation failed: {e}") from e
+
+
+def _resolve_target_index_dimensions() -> int:
+    """Pick the numDimensions to use when CREATING a fresh vector index.
+
+    Prefers the RAG-specific override, then the global embedding override,
+    then the model's native dimension from EMBEDDING_MODEL_DIMENSIONS.
+    """
+    from config import get_settings
+    from constants import DEFAULT_EMBEDDING_DIMENSION, EMBEDDING_MODEL_DIMENSIONS
+
+    settings = get_settings()
+    if settings.rag_embedding.dimensions is not None:
+        return settings.rag_embedding.dimensions
+    if settings.embedding.output_dimensions is not None:
+        return settings.embedding.output_dimensions
+    rag_model = settings.rag_embedding.model or settings.embedding.default_model
+    return EMBEDDING_MODEL_DIMENSIONS.get(rag_model, DEFAULT_EMBEDDING_DIMENSION)
+
+
+def _extract_vector_index_dimensions(idx_info: dict) -> int | None:
+    """Pull numDimensions out of a list_search_indexes() entry.
+
+    Atlas Search returns the definition under either 'latestDefinition' or
+    'definition' depending on the API version. We accept both.
+    """
+    definition = idx_info.get("latestDefinition") or idx_info.get("definition") or {}
+    for field in definition.get("fields", []) or []:
+        if field.get("type") == "vector":
+            return field.get("numDimensions")
+    return None
+
+
+def _validate_embedding_dims_against_index(index_dims: int | None) -> None:
+    """Fail-fast if the configured RAG embedding dimensions don't match the
+    vector index. Mismatched dims silently break HNSW queries; we refuse to
+    start in that state so the operator does a deliberate re-ingest.
+    """
+    if index_dims is None:
+        return
+    from config import get_settings  # avoid import cycle at module load
+
+    settings = get_settings()
+    configured_dims = (
+        settings.rag_embedding.dimensions
+        if settings.rag_embedding.dimensions is not None
+        else settings.embedding.output_dimensions
+    )
+    if configured_dims is None:
+        rag_model = settings.rag_embedding.model or settings.embedding.default_model
+        from constants import DEFAULT_EMBEDDING_DIMENSION, EMBEDDING_MODEL_DIMENSIONS
+
+        configured_dims = EMBEDDING_MODEL_DIMENSIONS.get(rag_model, DEFAULT_EMBEDDING_DIMENSION)
+
+    if configured_dims != index_dims:
+        raise RuntimeError(
+            f"Embedding dimension mismatch: vector index '{RAG_VECTOR_INDEX_NAME}' "
+            f"was built with numDimensions={index_dims}, but the configured RAG "
+            f"embedding produces {configured_dims}-dim vectors. HNSW requires dim "
+            f"equality; queries against this index would return zero recall. "
+            f"Either revert the embedding model/dimensions config or run a full "
+            f"re-ingest after dropping and rebuilding the vector index."
+        )
+
+
+async def _drop_legacy_discussions_text_index(db: AsyncIOMotorDatabase) -> None:
+    """Drop the legacy compound TEXT index on discussions.(title, nutshell).
+
+    The endpoint that used to call $text on this collection has been removed
+    in favor of $vectorSearch. The index now costs write amplification and
+    RAM for no readers. Safe to call repeatedly; a missing index is a no-op.
+    """
+    collection = db[COLLECTION_DISCUSSIONS]
+    try:
+        existing = await collection.index_information()
+        if _LEGACY_DISCUSSIONS_TEXT_INDEX_NAME not in existing:
+            return
+        await collection.drop_index(_LEGACY_DISCUSSIONS_TEXT_INDEX_NAME)
+        logger.info(
+            f"Dropped legacy text index '{_LEGACY_DISCUSSIONS_TEXT_INDEX_NAME}' on {COLLECTION_DISCUSSIONS}"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"Could not drop legacy text index '{_LEGACY_DISCUSSIONS_TEXT_INDEX_NAME}' on {COLLECTION_DISCUSSIONS}: {e}. "
+            f"Drop it manually with db.{COLLECTION_DISCUSSIONS}.dropIndex('{_LEGACY_DISCUSSIONS_TEXT_INDEX_NAME}')"
+        )
 
 
 async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
@@ -276,30 +406,46 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
 
     Uses MongoDB's create_search_index API (requires mongot sidecar or Atlas).
     Idempotent: checks existing search indexes first.
+
+    Also fail-fast validates that the configured RAG embedding dimensions match
+    the dimensions stored in the existing vector index. Mismatched dimensions
+    silently produce zero-recall queries because HNSW requires dim equality,
+    so we refuse to start in that state and require a re-ingest under the new
+    config.
     """
     collection = db[COLLECTION_RAG_CHUNKS]
 
     try:
         # Check if vector search index already exists
+        existing_index_dims: int | None = None
         existing_indexes = []
         async for idx in collection.list_search_indexes():
-            existing_indexes.append(idx.get("name", ""))
+            name = idx.get("name", "")
+            existing_indexes.append(name)
+            if name == RAG_VECTOR_INDEX_NAME:
+                existing_index_dims = _extract_vector_index_dimensions(idx)
 
         if RAG_VECTOR_INDEX_NAME in existing_indexes:
             logger.debug(f"Vector search index '{RAG_VECTOR_INDEX_NAME}' already exists")
+            _validate_embedding_dims_against_index(existing_index_dims)
             return
 
         # Create the vector search index using the modern $vectorSearch schema:
         # a `fields` array with one `vector` entry plus `filter` entries for any
         # field we want to pre-filter on inside the $vectorSearch stage.
+        # `quantization: "scalar"` (MongoDB 8.0.4+) reduces index RAM ~3.75x by
+        # quantizing float32 embeddings to int8 at index build time, with negligible
+        # recall loss for OpenAI text-embedding-3-* vectors.
+        target_dims = _resolve_target_index_dimensions()
         search_index = SearchIndexModel(
             definition={
                 "fields": [
                     {
                         "type": "vector",
                         "path": "embedding",
-                        "numDimensions": DEFAULT_EMBEDDING_DIMENSION,
+                        "numDimensions": target_dims,
                         "similarity": "cosine",
+                        "quantization": "scalar",
                     },
                     {"type": "filter", "path": "content_source"},
                     {"type": "filter", "path": "source_date_start"},
@@ -313,6 +459,15 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
         await collection.create_search_index(search_index)
         logger.info(f"Created vector search index: {RAG_VECTOR_INDEX_NAME}")
 
+        # Atlas Search builds asynchronously. Wait until mongot reports the
+        # index as queryable before returning so the first queries after
+        # process startup don't race the build.
+        ready = await _wait_for_search_index_ready(collection, RAG_VECTOR_INDEX_NAME)
+        if ready:
+            # Once _v2 is queryable, the legacy index is silent dead weight
+            # in mongot RAM. Drop it idempotently.
+            await _drop_legacy_vector_index(collection)
+
     except Exception as e:
         # Vector search index creation can fail if mongot is not available
         # (e.g., local dev without Atlas or mongot sidecar). Log and continue.
@@ -321,6 +476,112 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
             f"RAG vector search will not work until this index is created. "
             f"If using local MongoDB, ensure the mongot sidecar service is running."
         )
+
+
+async def _wait_for_search_index_ready(collection, index_name: str) -> bool:
+    """
+    Poll list_search_indexes() until the given index reports queryable=True.
+    Returns True if the index became queryable within the timeout, False otherwise.
+
+    Atlas Search exposes both `status` (one of PENDING/BUILDING/READY/FAILED)
+    and the more reliable `queryable` boolean. We trust `queryable` because
+    READY status can briefly precede true query readiness on cold mongot.
+    """
+    deadline = time.monotonic() + _SEARCH_INDEX_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            async for idx in collection.list_search_indexes():
+                if idx.get("name") != index_name:
+                    continue
+                if idx.get("queryable") is True:
+                    logger.info(f"Search index ready: {index_name}")
+                    return True
+                status = idx.get("status", "unknown")
+                logger.debug(f"Search index '{index_name}' not yet queryable (status={status})")
+                break
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Polling search index '{index_name}' failed: {e}")
+        await asyncio.sleep(_SEARCH_INDEX_READY_POLL_INTERVAL_SECONDS)
+
+    logger.warning(
+        f"Search index '{index_name}' did not become queryable within "
+        f"{_SEARCH_INDEX_READY_TIMEOUT_SECONDS}s. RAG queries may fail until it is."
+    )
+    return False
+
+
+async def _drop_legacy_vector_index(collection) -> None:
+    """
+    Drop the pre-quantization vector index (rag_chunk_embeddings) if present.
+    Safe to call repeatedly: a missing legacy index is a no-op.
+    """
+    try:
+        existing = {idx.get("name") async for idx in collection.list_search_indexes()}
+        if RAG_VECTOR_INDEX_NAME_LEGACY not in existing:
+            return
+        await collection.drop_search_index(RAG_VECTOR_INDEX_NAME_LEGACY)
+        logger.info(f"Dropped legacy vector search index: {RAG_VECTOR_INDEX_NAME_LEGACY}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            f"OPERATOR ACTION REQUIRED: failed to drop legacy vector search "
+            f"index '{RAG_VECTOR_INDEX_NAME_LEGACY}': {e}. The new index "
+            f"'{RAG_VECTOR_INDEX_NAME}' is queryable so retrieval is unaffected, "
+            f"but the legacy index will keep consuming mongot RAM until it is "
+            f"dropped manually with: "
+            f"db.{COLLECTION_RAG_CHUNKS}.dropSearchIndex('{RAG_VECTOR_INDEX_NAME_LEGACY}')"
+        )
+
+
+async def _ensure_lexical_search_index(db: AsyncIOMotorDatabase) -> bool:
+    """
+    Create an Atlas Search lexical index over rag_chunks.content for hybrid
+    retrieval. Paired with the vector index via $rankFusion (MongoDB 8.1+).
+
+    Returns:
+        True if the index exists and is queryable, False otherwise. Callers
+        decide whether a False here is fatal (see ensure_indexes()).
+    """
+    collection = db[COLLECTION_RAG_CHUNKS]
+
+    try:
+        existing_indexes = []
+        async for idx in collection.list_search_indexes():
+            existing_indexes.append(idx.get("name", ""))
+
+        if RAG_LEXICAL_INDEX_NAME in existing_indexes:
+            logger.debug(f"Lexical search index '{RAG_LEXICAL_INDEX_NAME}' already exists")
+            # Even if present, verify it's queryable before declaring success
+            return await _wait_for_search_index_ready(collection, RAG_LEXICAL_INDEX_NAME)
+
+        search_index = SearchIndexModel(
+            definition={
+                "mappings": {
+                    "dynamic": False,
+                    "fields": {
+                        RAGChunkKeys.CONTENT: {
+                            "type": "string",
+                            "analyzer": "lucene.standard",
+                        },
+                        RAGChunkKeys.CONTENT_SOURCE: {"type": "token"},
+                        RAGChunkKeys.SOURCE_DATE_START: {"type": "date"},
+                        RAGChunkKeys.SOURCE_DATE_END: {"type": "date"},
+                    },
+                }
+            },
+            name=RAG_LEXICAL_INDEX_NAME,
+            type="search",
+        )
+
+        await collection.create_search_index(search_index)
+        logger.info(f"Created lexical search index: {RAG_LEXICAL_INDEX_NAME}")
+        return await _wait_for_search_index_ready(collection, RAG_LEXICAL_INDEX_NAME)
+
+    except Exception as e:
+        logger.warning(
+            f"Could not create lexical search index '{RAG_LEXICAL_INDEX_NAME}': {e}. "
+            f"Hybrid retrieval via $rankFusion will be unavailable until this index exists."
+        )
+        return False
 
 
 async def drop_all_indexes(db: AsyncIOMotorDatabase) -> None:

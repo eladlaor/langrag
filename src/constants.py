@@ -322,8 +322,30 @@ COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
 COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
 COLLECTION_RAG_API_KEYS = "rag_api_keys"
 
-# RAG Vector Search Index Name (must be created manually in MongoDB Atlas / mongot)
-RAG_VECTOR_INDEX_NAME = "rag_chunk_embeddings"
+# Schema version stamps written on every persisted document. Per-collection so
+# each document type can evolve its schema independently without forcing
+# lockstep migrations. Read by future lazy-migration code; bump the matching
+# constant when a doc type's shape changes in a non-additive way.
+SCHEMA_VERSION_FIELD = "schema_version"
+CURRENT_SCHEMA_VERSION_RUN = 1
+CURRENT_SCHEMA_VERSION_DISCUSSION = 1
+CURRENT_SCHEMA_VERSION_MESSAGE = 1
+CURRENT_SCHEMA_VERSION_NEWSLETTER = 1
+CURRENT_SCHEMA_VERSION_RAG_CHUNK = 1
+
+# RAG Vector Search Index Name (created on startup against MongoDB Atlas / mongot)
+# v2 carries scalar quantization (MongoDB 8.0.4+) on BinData (subtype 9) embeddings.
+RAG_VECTOR_INDEX_NAME = "rag_chunk_embeddings_v2"
+# Legacy index name kept for migration / dual-name cutover.
+RAG_VECTOR_INDEX_NAME_LEGACY = "rag_chunk_embeddings"
+
+# RAG lexical (Atlas Search) index over rag_chunks.content for hybrid retrieval
+# via $rankFusion (MongoDB 8.1+).
+RAG_LEXICAL_INDEX_NAME = "rag_chunks_lexical"
+
+# Default weights for $rankFusion hybrid retrieval (vector + lexical).
+RAG_HYBRID_VECTOR_WEIGHT = 0.7
+RAG_HYBRID_LEXICAL_WEIGHT = 0.3
 
 # Default TTL for translation cache entries (days)
 DEFAULT_TRANSLATION_CACHE_TTL_DAYS = 30
@@ -1047,6 +1069,25 @@ RESULT_KEY_HTML_PATH = "html_path"
 SCHEDULE_FIELD_RUN_TIME = "run_time"
 SCHEDULE_FIELD_INTERVAL_DAYS = "interval_days"
 SCHEDULE_DEFAULT_RUN_TIME = "08:00"
+
+# APScheduler job identifier prefix for newsletter schedules. One in-memory
+# job per MongoDB schedule document, keyed by string-ified ObjectId, so the
+# change-stream watcher can add/remove/reschedule by ID without scanning.
+SCHEDULER_JOB_ID_PREFIX = "newsletter_schedule_"
+
+# Bounded delay tolerated between change-stream stream drop and reconcile.
+# Sleeping then doing a full reconcile is safer than tight reconnect loops
+# that thunder a flaky mongod.
+CHANGE_STREAM_RECONNECT_DELAY_SECONDS = 5
+
+
+class ChangeStreamOperation(StrEnum):
+    """MongoDB change stream operationType values we react to."""
+
+    INSERT = "insert"
+    UPDATE = "update"
+    REPLACE = "replace"
+    DELETE = "delete"
 
 
 # ============================================================================

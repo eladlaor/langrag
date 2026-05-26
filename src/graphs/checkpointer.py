@@ -1,25 +1,28 @@
 """
-LangGraph Checkpointer Management
+LangGraph Checkpointer (MongoDB-backed).
 
-Provides an async singleton AsyncSqliteSaver for production graph checkpointing.
-Uses double-checked locking pattern (same as src/db/connection.py) to ensure
-thread-safe initialization in concurrent async contexts.
+Uses MongoDBSaver from langgraph-checkpoint-mongodb (0.4.0+) to persist
+graph checkpoints in the same MongoDB cluster as the rest of the app's
+durable state. Eliminates SQLite as a second source of truth and unlocks
+horizontal scaling (checkpoints shared across replicas).
 
-Env override: CHECKPOINTER_SQLITE_PATH (default: data/checkpoints/langgraph.db)
+The MongoDBSaver accepts a sync MongoClient and exposes both sync and
+async methods. Async methods wrap the sync ops via thread executor —
+acceptable for our LLM-bound workload (per-run latency dominated by 30-90
+seconds of LLM calls, not checkpoint I/O).
 """
 
 import asyncio
 import logging
-import os
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.mongodb import MongoDBSaver
 
 from config import get_settings
+from db.connection import get_database_name, get_sync_database
 
 logger = logging.getLogger(__name__)
 
-_checkpointer: AsyncSqliteSaver | None = None
-_checkpointer_cm = None
+_checkpointer: MongoDBSaver | None = None
 _init_lock: asyncio.Lock = asyncio.Lock()
 
 
@@ -28,54 +31,62 @@ def _get_lock() -> asyncio.Lock:
     return _init_lock
 
 
-async def get_checkpointer() -> AsyncSqliteSaver:
+async def get_checkpointer() -> MongoDBSaver:
     """
-    Get the singleton AsyncSqliteSaver instance.
+    Get the singleton MongoDBSaver instance.
 
-    Creates the checkpointer on first call, reuses afterward.
-    Protected by asyncio.Lock to prevent duplicate initialization
-    during concurrent access from parallel graph workers.
-
-    Note: AsyncSqliteSaver.from_conn_string() is an async context manager
-    in langgraph-checkpoint-sqlite >= 3.x. We enter the context manager
-    and hold it open for the application lifetime, closing it in close_checkpointer().
+    Lazily constructs on first call, reuses afterward. Protected by an
+    asyncio.Lock to prevent duplicate init under concurrent access from
+    parallel graph workers.
 
     Fail-Fast Conditions:
-        - SQLite database directory cannot be created
-        - Checkpointer setup (table creation) fails
+        - MongoDB sync client unavailable (raised from get_sync_database)
+        - setup() (collection/index creation) fails
     """
-    global _checkpointer, _checkpointer_cm
+    global _checkpointer
 
-    # Fast path: already initialized
     if _checkpointer is not None:
         return _checkpointer
 
-    # Slow path: acquire lock for initialization
     async with _get_lock():
-        # Double-check after acquiring lock
         if _checkpointer is not None:
             return _checkpointer
 
         settings = get_settings()
-        db_path = settings.checkpointer.sqlite_path
+        db = get_sync_database()
+        client = db.client
+        db_name = settings.checkpointer.db_name or get_database_name()
 
-        # Ensure parent directory exists
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
-        _checkpointer_cm = AsyncSqliteSaver.from_conn_string(db_path)
-        _checkpointer = await _checkpointer_cm.__aenter__()
-        await _checkpointer.setup()
-        logger.info(f"Checkpointer initialized: {db_path}")
+        _checkpointer = MongoDBSaver(
+            client=client,
+            db_name=db_name,
+            checkpoint_collection_name=settings.checkpointer.checkpoint_collection,
+            writes_collection_name=settings.checkpointer.writes_collection,
+            ttl=settings.checkpointer.ttl_seconds,
+        )
+        _checkpointer.setup()
+        logger.info(
+            "Checkpointer initialized (MongoDB)",
+            extra={
+                "db_name": db_name,
+                "checkpoint_collection": settings.checkpointer.checkpoint_collection,
+                "writes_collection": settings.checkpointer.writes_collection,
+                "ttl_seconds": settings.checkpointer.ttl_seconds,
+            },
+        )
 
     return _checkpointer
 
 
 async def close_checkpointer() -> None:
-    """Close the checkpointer connection. Called during application shutdown."""
-    global _checkpointer, _checkpointer_cm
+    """
+    Release the checkpointer reference.
 
-    if _checkpointer_cm is not None:
-        await _checkpointer_cm.__aexit__(None, None, None)
+    The underlying sync MongoClient is owned by db.connection and closed
+    there during application shutdown. We drop our singleton reference so a
+    subsequent get_checkpointer() reconstructs cleanly if needed.
+    """
+    global _checkpointer
+    if _checkpointer is not None:
         _checkpointer = None
-        _checkpointer_cm = None
-        logger.info("Checkpointer closed")
+        logger.info("Checkpointer released")

@@ -22,6 +22,7 @@ from observability.metrics.rag_metrics import (
     record_results,
     track_retrieval,
 )
+from rag.retrieval.hybrid_search import hybrid_search_chunks
 from rag.retrieval.reranker import rerank_chunks_mmr
 from rag.retrieval.vector_search import vector_search_chunks
 from utils.embedding.factory import EmbeddingProviderFactory
@@ -41,8 +42,11 @@ class RetrievalPipeline:
     """
 
     def __init__(self) -> None:
-        self._embedder = EmbeddingProviderFactory.create()
-        self._settings = get_settings().rag
+        settings = get_settings()
+        rag_model = settings.rag_embedding.model or settings.embedding.default_model
+        rag_dims = settings.rag_embedding.dimensions if settings.rag_embedding.dimensions is not None else settings.embedding.output_dimensions
+        self._embedder = EmbeddingProviderFactory.create(model=rag_model, dimensions=rag_dims)
+        self._settings = settings.rag
 
     async def retrieve(
         self,
@@ -81,6 +85,7 @@ class RetrievalPipeline:
 
         source_label = ",".join(sorted(content_sources)) if content_sources else "any"
         date_filter_used = date_start is not None or date_end is not None
+        retrieval_mode = "hybrid" if self._settings.hybrid_enabled else "vector"
 
         span_input = {
             "query": query[:500],
@@ -89,6 +94,7 @@ class RetrievalPipeline:
             "date_end": date_end.isoformat() if date_end else None,
             "top_k": top_k,
             "rerank_top_k": rerank_top_k,
+            "retrieval_mode": retrieval_mode,
         }
 
         with langfuse_span("rag_retrieve", trace_id=trace_id, input_data=span_input) as span, \
@@ -101,18 +107,29 @@ class RetrievalPipeline:
             db = await get_database()
             collection = db[COLLECTION_RAG_CHUNKS]
 
-            retrieved = await vector_search_chunks(
-                collection=collection,
-                query_embedding=query_embedding,
-                content_sources=content_sources,
-                date_start=date_start,
-                date_end=date_end,
-                top_k=search_top_k,
-                min_score=self._settings.min_similarity_score,
-            )
+            if self._settings.hybrid_enabled:
+                retrieved = await hybrid_search_chunks(
+                    collection=collection,
+                    query_text=query,
+                    query_embedding=query_embedding,
+                    content_sources=content_sources,
+                    date_start=date_start,
+                    date_end=date_end,
+                    top_k=search_top_k,
+                )
+            else:
+                retrieved = await vector_search_chunks(
+                    collection=collection,
+                    query_embedding=query_embedding,
+                    content_sources=content_sources,
+                    date_start=date_start,
+                    date_end=date_end,
+                    top_k=search_top_k,
+                    min_score=self._settings.min_similarity_score,
+                )
 
         if not retrieved:
-            logger.info("No chunks retrieved from vector search")
+            logger.info(f"No chunks retrieved (mode={retrieval_mode})")
             record_results(source_label, date_filter_used, 0)
             return {
                 "retrieved_chunks": [],
@@ -144,10 +161,12 @@ class RetrievalPipeline:
                 "freshness_warning": freshness_warning,
                 "oldest_source_date": oldest.isoformat() if oldest else None,
                 "newest_source_date": newest.isoformat() if newest else None,
+                "retrieval_mode": retrieval_mode,
             })
 
         logger.info(
-            f"Retrieval complete: {len(retrieved)} searched -> {len(reranked)} reranked, "
+            f"Retrieval complete: mode={retrieval_mode}, "
+            f"{len(retrieved)} searched -> {len(reranked)} reranked, "
             f"freshness_warning={freshness_warning}"
         )
 

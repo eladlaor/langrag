@@ -213,8 +213,31 @@ class EmbeddingSettings(BaseSettings):
     max_text_length: int = Field(default=8000, description="Maximum text length for embedding")
     batch_size: int = Field(default=100, description="Batch size for embedding multiple texts")
     discussion_batch_size: int = Field(default=50, description="Batch size for embedding discussions")
+    # text-embedding-3-* models accept an optional `dimensions` parameter that
+    # truncates the output vector via Matryoshka. Lets us A/B smaller dims
+    # (e.g. 512, 768) without swapping models. None = use the model's native
+    # full dimension. Existing chunks ARE NOT re-embedded when this changes;
+    # switching requires a full re-ingest because the vector index stores
+    # numDimensions at build time and HNSW comparisons require dim equality.
+    output_dimensions: int | None = Field(default=None, description="Optional OpenAI 'dimensions' override (Matryoshka truncation). When set, must match the vector index's numDimensions or queries will fail.")
 
     model_config = SettingsConfigDict(env_prefix="EMBEDDING_")
+
+
+class RAGEmbeddingSettings(BaseSettings):
+    """RAG-specific embedding model overrides for A/B testing.
+
+    Separate from EmbeddingSettings so the discussion-embedding path
+    (`utils.embedding.openai_embedder.OpenAIEmbedder`) used outside RAG is
+    not implicitly retuned. When `model` is left at the default, the RAG
+    ingestion/retrieval paths use `EmbeddingSettings.default_model` for
+    backward compatibility.
+    """
+
+    model: str | None = Field(default=None, description="Override embedding model for RAG ingestion/retrieval. Defaults to embedding.default_model.")
+    dimensions: int | None = Field(default=None, description="Override OpenAI 'dimensions' for RAG embeddings. Defaults to embedding.output_dimensions.")
+
+    model_config = SettingsConfigDict(env_prefix="RAG_EMBEDDING_")
 
 
 # ============================================================================
@@ -263,9 +286,12 @@ class DatabaseSettings(BaseSettings):
 
 
 class CheckpointerSettings(BaseSettings):
-    """LangGraph checkpoint persistence configuration."""
+    """LangGraph checkpoint persistence configuration (MongoDB-backed)."""
 
-    sqlite_path: str = Field(default="data/checkpoints/langgraph.db", description="Path to SQLite checkpoint database file")
+    db_name: str | None = Field(default=None, description="MongoDB database name for checkpoints. None = use the main app database.")
+    checkpoint_collection: str = Field(default="checkpoints", description="Collection name for checkpoint documents.")
+    writes_collection: str = Field(default="checkpoint_writes", description="Collection name for intermediate writes.")
+    ttl_seconds: int | None = Field(default=None, description="Optional TTL for checkpoint documents in seconds. None = never expire.")
 
     model_config = SettingsConfigDict(env_prefix="CHECKPOINTER_")
 
@@ -448,7 +474,9 @@ class RAGSettings(BaseSettings):
 
     # Retrieval
     vector_search_top_k: int = Field(default=20, description="Top-K candidates from vector search before reranking")
+    vector_search_num_candidates_multiplier: int = Field(default=15, ge=1, description="Multiplier applied to top_k to derive $vectorSearch numCandidates for the vector-only retrieval path. Bumped from 10 -> 15 to widen the HNSW candidate pool and improve recall at the cost of a small extra mongot scan.")
     rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
+    hybrid_enabled: bool = Field(default=True, description="When true, retrieve via MongoDB 8.1+ $rankFusion (server-side RRF over vector + lexical) instead of vector-only search. Requires the lexical Atlas Search index 'rag_chunks_lexical' to be built (created automatically on startup by ensure_indexes()).")
     min_similarity_score: float = Field(default=0.5, description="Minimum cosine similarity score for vector search results. With text-embedding-3-small, question->passage cosine scores cluster in the 0.5-0.75 range; values >=0.7 starve retrieval. Override per deployment.")
     max_conversation_history: int = Field(default=10, description="Maximum number of previous messages to include as conversation context")
 
@@ -525,6 +553,7 @@ class Settings(BaseSettings):
     # Nested settings
     llm: LLMSettings = Field(default_factory=LLMSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    rag_embedding: RAGEmbeddingSettings = Field(default_factory=RAGEmbeddingSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     api: APISettings = Field(default_factory=APISettings)
     beeper: BeeperSettings = Field(default_factory=BeeperSettings)

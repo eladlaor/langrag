@@ -10,8 +10,10 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from bson.binary import Binary, BinaryVectorDtype
 from motor.motor_asyncio import AsyncIOMotorCollection
 
+from config import get_settings
 from constants import RAG_VECTOR_INDEX_NAME
 from custom_types.field_keys import RAGChunkKeys as Keys
 
@@ -55,12 +57,21 @@ async def vector_search_chunks(
     if date_start is not None:
         pre_filter[Keys.SOURCE_DATE_END] = {"$gte": date_start}
 
+    # Encode the query vector as BSON Binary subtype 9 (FLOAT32). MongoDB 8.1+
+    # accepts BinData queryVectors against scalar-quantized vector indexes and
+    # this avoids serializing a 1536-element BSON array on every request.
+    query_vector_bin = Binary.from_vector(
+        list(query_embedding),
+        dtype=BinaryVectorDtype.FLOAT32,
+    )
+
+    num_candidates_multiplier = get_settings().rag.vector_search_num_candidates_multiplier
     vector_search_stage: dict[str, Any] = {
         "$vectorSearch": {
             "index": RAG_VECTOR_INDEX_NAME,
             "path": Keys.EMBEDDING,
-            "queryVector": query_embedding,
-            "numCandidates": top_k * 10,
+            "queryVector": query_vector_bin,
+            "numCandidates": top_k * num_candidates_multiplier,
             "limit": top_k,
         }
     }

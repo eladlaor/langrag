@@ -10,7 +10,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_RUNS, RunStatus
+from constants import COLLECTION_RUNS, CURRENT_SCHEMA_VERSION_RUN, RunStatus, SCHEMA_VERSION_FIELD
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ class RunsRepository(BaseRepository):
             Inserted document ID
         """
         document = {
+            SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_RUN,
             "run_id": run_id,
             "data_source_name": data_source_name,
             "chat_names": chat_names,

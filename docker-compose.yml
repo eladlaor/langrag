@@ -349,9 +349,23 @@ services:
       - langrag-network
     restart: unless-stopped
 
-  # MongoDB 8.0 with Atlas Search + Vector Search (bundled mongod + mongot)
+  # MongoDB 8.2 with Atlas Search + Vector Search (bundled mongod + mongot)
+  # 8.2 unlocks server-side $rankFusion (hybrid lexical + vector RRF) and
+  # BinData vector subtype 9 with scalar quantization on the index.
+  # After upgrade, bump FCV inside the container:
+  #   mongosh --eval 'db.adminCommand({setFeatureCompatibilityVersion: "8.2", confirm: true})'
+  #
+  # NOTE: mongodb-atlas-local is officially branded "for development and testing only" —
+  # NOT a production architecture. It bundles mongod + mongot inside a single container
+  # for API parity with Atlas Cloud (same $search / $vectorSearch / $rankFusion syntax),
+  # but Atlas Cloud production deploys them as separate tiers: mongod on data nodes and
+  # mongot on dedicated Search Nodes that scale independently (HNSW is RAM-hungry).
+  # Our local stack is API-faithful, not architecture-faithful. For a real prod deployment
+  # the choice is: (a) move to Atlas Cloud and get real Search Nodes, or (b) self-host
+  # on-prem and replace mongot with Elasticsearch/OpenSearch synced via change streams
+  # (mongot is not separately deployable outside Atlas). See knowledge/mongodb/INTERVIEW_PREP.md §14.1.
   mongodb:
-    image: mongodb/mongodb-atlas-local:8.0
+    image: mongodb/mongodb-atlas-local:8.2
     container_name: langrag-mongodb
     hostname: langrag-mongodb
     logging:

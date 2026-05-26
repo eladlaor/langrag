@@ -53,7 +53,7 @@ class TestGraphCompilation:
         assert graph is not None
 
     async def test_graph_has_checkpointer(self):
-        """Test that the graph has checkpointing enabled with AsyncSqliteSaver."""
+        """Test that the graph has checkpointing enabled with MongoDBSaver."""
         from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 
         graph = await get_parallel_orchestrator_graph()

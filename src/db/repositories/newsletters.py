@@ -14,7 +14,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_NEWSLETTERS, FileFormat, NewsletterStatus, NewsletterVersionType, FILE_EXT_JSON, FILE_EXT_MD, FILE_EXT_HTML
+from constants import COLLECTION_NEWSLETTERS, CURRENT_SCHEMA_VERSION_NEWSLETTER, FileFormat, NewsletterStatus, NewsletterVersionType, FILE_EXT_JSON, FILE_EXT_MD, FILE_EXT_HTML, SCHEMA_VERSION_FIELD
 from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys, ContentResultKeys
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,7 @@ class NewslettersRepository(BaseRepository):
             now = datetime.now(UTC)
 
             document = {
+                SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_NEWSLETTER,
                 DbFieldKeys.NEWSLETTER_ID: newsletter_id,
                 DbFieldKeys.RUN_ID: run_id,
                 DbFieldKeys.NEWSLETTER_TYPE: newsletter_type,

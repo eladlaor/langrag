@@ -987,7 +987,7 @@ def build_parallel_orchestrator_graph(checkpointer=None) -> StateGraph:
 
     Notes:
     - Uses newsletter_generation_graph as the "chat_worker" subgraph
-    - Checkpointer configured via get_parallel_orchestrator_graph() with AsyncSqliteSaver
+    - Checkpointer configured via get_parallel_orchestrator_graph() with MongoDBSaver
     - Each worker failure is isolated (doesn't stop other workers)
     - Fail-fast only if ALL workers fail
     - Consolidation only triggers if consolidate_chats=True and >1 successful chats

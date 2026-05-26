@@ -27,9 +27,13 @@ class OpenAIEmbedder(EmbeddingProviderInterface):
     OpenAI embedding provider implementation.
 
     Uses OpenAI's embedding API to generate vector embeddings for text.
+    Honors the optional `dimensions` parameter on text-embedding-3-* models
+    (Matryoshka truncation). When `dimensions` is set, the value is forwarded
+    on every API call and self.dimension reports the truncated size.
     """
 
     model: str = DEFAULT_MODEL
+    dimensions: int | None = None
     _client: OpenAI | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -43,10 +47,18 @@ class OpenAIEmbedder(EmbeddingProviderInterface):
 
     @property
     def dimension(self) -> int:
-        """Return the embedding dimension for the configured model."""
+        """Return the embedding dimension actually emitted by this embedder."""
         from constants import DEFAULT_EMBEDDING_DIMENSION
 
+        if self.dimensions is not None:
+            return self.dimensions
         return EMBEDDING_MODEL_DIMENSIONS.get(self.model, DEFAULT_EMBEDDING_DIMENSION)
+
+    def _build_create_kwargs(self, input_payload) -> dict:
+        kwargs: dict = {"model": self.model, "input": input_payload}
+        if self.dimensions is not None:
+            kwargs["dimensions"] = self.dimensions
+        return kwargs
 
     def embed_text(self, text: str) -> list[float] | None:
         """
@@ -64,8 +76,7 @@ class OpenAIEmbedder(EmbeddingProviderInterface):
         try:
             settings = get_settings()
             response = self._client.embeddings.create(
-                model=self.model,
-                input=text.strip()[: settings.embedding.max_text_length],
+                **self._build_create_kwargs(text.strip()[: settings.embedding.max_text_length])
             )
             return response.data[0].embedding
         except Exception as e:
@@ -97,8 +108,7 @@ class OpenAIEmbedder(EmbeddingProviderInterface):
 
             try:
                 response = self._client.embeddings.create(
-                    model=self.model,
-                    input=cleaned_batch,
+                    **self._build_create_kwargs(cleaned_batch)
                 )
                 batch_results = [None] * len(batch)
                 for j, item in enumerate(response.data):

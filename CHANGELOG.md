@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-26
+
+### Added
+- Per-document `schema_version` stamp on persisted MongoDB documents (`runs`, `discussions`, `messages`, `newsletters`, `rag_chunks`) with matching `CURRENT_SCHEMA_VERSION_*` constants in `src/constants.py` and Pydantic schemas (`NewsletterDocument`, `RAGChunkDocument`) added for the formerly raw-dict collections. No migration logic yet; the stamp enables future lazy migration.
+- `RAGEmbeddingSettings` config section (`RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_DIMENSIONS`) and `EmbeddingSettings.output_dimensions` for A/B testing OpenAI's `dimensions` parameter (Matryoshka truncation) on the RAG ingestion/retrieval paths without touching discussion embeddings. Switching dimensions requires a full re-ingest because the vector index stores `numDimensions` at build time.
+- Startup fail-fast validation that the configured RAG embedding dimensions match the active `rag_chunk_embeddings_v2` index; mismatched dims would silently break HNSW recall.
+- `RAGSettings.vector_search_num_candidates_multiplier` (default 15) controlling the vector-only retrieval `numCandidates` multiplier; raised from the previous hardcoded 10 to widen the HNSW candidate pool.
+
+### Changed
+- Newsletter scheduler replaced its every-minute discovery poll with a MongoDB change stream on `scheduled_newsletters`. APScheduler now holds one `DateTrigger` job per enabled schedule, keyed by `schedule_id`, and fires at the exact `next_run`; the change-stream watcher keeps the in-memory job set in sync with inserts/updates/deletes. Fail-fast on stream loss with a bounded reconcile-and-retry.
+- Lexical leg of the hybrid `$rankFusion` retrieval now pushes `content_source` and `source_date_*` clauses into `$search.compound.filter` instead of a downstream `$match`, so mongot prunes non-matching docs before Lucene scoring.
+- LangGraph checkpointer migrated from `AsyncSqliteSaver` (local SQLite file) to `MongoDBSaver` (collections `checkpoints` and `checkpoint_writes` in the main MongoDB database). Consolidates all durable state into a single engine, enables horizontal scaling (checkpoints shared across replicas), and unifies backup. Requires `langgraph-checkpoint-mongodb>=0.4.0`.
+
+### Removed
+- Legacy compound TEXT index on `discussions.(title, nutshell)` and the dead `$text` fallback path in `/api/search/discussions`. Vector search is now the only path; embedding failures surface as a real 503 instead of silently degrading. `ensure_indexes()` drops the legacy text index idempotently on startup for existing deployments.
+- `DiscussionsRepository.search_discussions()` (legacy `$text` query, no remaining callers after the fallback removal).
+- Dependency on `langgraph-checkpoint-sqlite`.
+- `CHECKPOINTER_SQLITE_PATH` env var (replaced by `CHECKPOINTER_DB_NAME`, `CHECKPOINTER_CHECKPOINT_COLLECTION`, `CHECKPOINTER_WRITES_COLLECTION`, `CHECKPOINTER_TTL_SECONDS`). Existing SQLite checkpoint files under `data/checkpoints/` are no longer read; safe to delete.
+
+
 ## [1.10.0] - 2026-05-21
 
 ### Changed
@@ -125,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/eladlaor/langrag/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/eladlaor/langrag/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/eladlaor/langrag/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/eladlaor/langrag/compare/v1.7.3...v1.8.0

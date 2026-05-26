@@ -9,6 +9,8 @@ import logging
 import math
 from typing import Any
 
+from bson.binary import Binary
+
 from custom_types.field_keys import RAGChunkKeys as Keys
 from constants import RAG_SEARCH_SCORE_FIELD
 
@@ -39,9 +41,11 @@ def rerank_chunks_mmr(
     if len(chunks) <= top_k:
         return chunks
 
-    # Extract embeddings from chunks
+    # Extract embeddings from chunks. Embeddings are stored as BSON Binary
+    # subtype 9 (BinaryVectorDtype.FLOAT32); legacy chunks may still be BSON
+    # arrays of doubles. Coerce both shapes to list[float] for MMR.
     chunk_embeddings: list[list[float] | None] = [
-        chunk.get(Keys.EMBEDDING) for chunk in chunks
+        _coerce_embedding(chunk.get(Keys.EMBEDDING)) for chunk in chunks
     ]
     has_embeddings = any(e is not None for e in chunk_embeddings)
 
@@ -76,6 +80,18 @@ def rerank_chunks_mmr(
             remaining.remove(best_idx)
 
     return selected
+
+
+def _coerce_embedding(value: Any) -> list[float] | None:
+    """Normalize an embedding field to list[float] regardless of BSON shape."""
+    if value is None:
+        return None
+    if isinstance(value, Binary):
+        vec = value.as_vector()
+        return list(vec.data)
+    if isinstance(value, list):
+        return value
+    return None
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

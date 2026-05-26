@@ -850,15 +850,19 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
         db = await get_database()
         repo = DiscussionsRepository(db)
 
-        # Try vector search first if embeddings available
+        # Vector search is the only path now that the legacy $text index has
+        # been removed; an embedding failure surfaces as a real 503 rather
+        # than a silent fallback.
         results = []
-        search_method = "unknown"
+        search_method = SearchMethod.VECTOR
 
         try:
             from utils.embedding import EmbeddingProviderFactory
 
             embedder = EmbeddingProviderFactory.create()
             query_embedding = embedder.embed_text(query)
+            if not query_embedding:
+                raise HTTPException(status_code=503, detail="Embedding service returned no vector for the query")
 
             if query_embedding:
                 # Vector search pipeline
@@ -894,23 +898,22 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
 
                 logger.info(f"Vector search returned {len(results)} results")
 
+        except HTTPException:
+            raise
         except Exception as vector_err:
-            logger.debug(f"Vector search unavailable: {vector_err}, falling back to text search")
-
-        # Fall back to text search if vector search failed or returned nothing
-        if not results:
-            results = await repo.search_discussions(query=query, limit=limit)
-            # Filter by run_id if specified (text search doesn't support it natively)
-            if run_id:
-                results = [r for r in results if r.get("run_id") == run_id]
-            search_method = SearchMethod.FULL_TEXT
-
-            logger.info(f"Text search returned {len(results)} results")
+            # The legacy $text fallback has been removed (the (title, nutshell)
+            # TEXT index is dropped). Vector search is the only path; propagate
+            # the failure so callers see a real 503 rather than silently
+            # degrading to a weaker mechanism.
+            logger.error(f"Vector search failed: {vector_err}")
+            raise HTTPException(status_code=503, detail=f"Vector search unavailable: {vector_err}") from vector_err
 
         search_results = [SearchResult(discussion_id=r.get(DbFieldKeys.DISCUSSION_ID, ""), run_id=r.get("run_id", ""), chat_name=r.get(DbFieldKeys.CHAT_NAME, ""), title=r.get(DbFieldKeys.TITLE, ""), nutshell=r.get(DbFieldKeys.NUTSHELL, ""), score=r.get("score"), created_at=r.get("created_at").isoformat() if r.get("created_at") else None, similarity_score=r.get("similarity_score")) for r in results]
 
         return SearchResponse(query=query, total=len(search_results), results=search_results, search_metadata={"method": search_method, "embedding_model": DEFAULT_EMBEDDING_MODEL if search_method == SearchMethod.VECTOR else None, "min_similarity": min_similarity if search_method == SearchMethod.VECTOR else None, "time_range_days": time_range_days, "run_id_filter": run_id})
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Discussion search failed: {e}")
         raise HTTPException(status_code=503, detail=f"Search unavailable: {e}")

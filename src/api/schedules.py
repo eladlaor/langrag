@@ -197,6 +197,7 @@ async def get_scheduler_status():
     the next schedule check will occur.
     """
     try:
+        from constants import SCHEDULER_JOB_ID_PREFIX
         from scheduler.newsletter_scheduler import is_scheduler_running, get_scheduler
 
         running = is_scheduler_running()
@@ -204,9 +205,15 @@ async def get_scheduler_status():
 
         next_check = None
         if running:
-            job = scheduler.get_job("newsletter_schedule_checker")
-            if job and job.next_run_time:
-                next_check = job.next_run_time.isoformat()
+            # No more discovery poll: each schedule is a DateTrigger job.
+            # Surface the soonest upcoming fire across registered schedules.
+            upcoming = [
+                job.next_run_time
+                for job in scheduler.get_jobs()
+                if job.id.startswith(SCHEDULER_JOB_ID_PREFIX) and job.next_run_time
+            ]
+            if upcoming:
+                next_check = min(upcoming).isoformat()
 
         return SchedulerStatusResponse(running=running, next_check=next_check, message="Scheduler is running" if running else "Scheduler is not running")
     except Exception as e:

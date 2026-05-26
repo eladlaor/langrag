@@ -8,12 +8,20 @@ These models define the structure of documents stored in MongoDB collections.
 from datetime import datetime, UTC
 from typing import Any
 from pydantic import BaseModel, Field
-from constants import RunStatus
+from constants import (
+    CURRENT_SCHEMA_VERSION_DISCUSSION,
+    CURRENT_SCHEMA_VERSION_MESSAGE,
+    CURRENT_SCHEMA_VERSION_NEWSLETTER,
+    CURRENT_SCHEMA_VERSION_RAG_CHUNK,
+    CURRENT_SCHEMA_VERSION_RUN,
+    RunStatus,
+)
 
 
 class RunDocument(BaseModel):
     """Schema for pipeline run records."""
 
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_RUN, description="Document schema version for lazy migration")
     run_id: str = Field(..., description="Unique identifier for the run")
     data_source_name: str = Field(..., description="Data source (e.g., 'langtalks', 'mcp_israel')")
     chat_names: list[str] = Field(..., description="List of chat names included in the run")
@@ -32,6 +40,7 @@ class RunDocument(BaseModel):
 class DiscussionDocument(BaseModel):
     """Schema for discussion records."""
 
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_DISCUSSION, description="Document schema version for lazy migration")
     discussion_id: str = Field(..., description="Unique identifier for the discussion")
     run_id: str = Field(..., description="Associated pipeline run ID")
     chat_name: str = Field(..., description="Source chat name")
@@ -48,6 +57,7 @@ class DiscussionDocument(BaseModel):
 class MessageDocument(BaseModel):
     """Schema for raw message records."""
 
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_MESSAGE, description="Document schema version for lazy migration")
     message_id: str = Field(..., description="Unique identifier (Matrix event ID)")
     discussion_id: str = Field(..., description="Associated discussion ID")
     chat_name: str = Field(..., description="Source chat name")
@@ -69,6 +79,51 @@ class CacheDocument(BaseModel):
     response_data: Any = Field(..., description="Cached response data")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
     expires_at: datetime = Field(..., description="Expiration timestamp (TTL)")
+
+
+class NewsletterDocument(BaseModel):
+    """Schema for persisted newsletter records.
+
+    The newsletters repository writes documents as dicts (the versioned content
+    is dynamic and not easily modeled as a closed Pydantic schema). This class
+    documents the canonical shape and carries the schema_version stamp.
+    """
+
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_NEWSLETTER, description="Document schema version for lazy migration")
+    newsletter_id: str = Field(..., description="Unique newsletter identifier")
+    run_id: str = Field(..., description="Associated pipeline run ID")
+    newsletter_type: str = Field(..., description="'per_chat' or 'consolidated'")
+    data_source_name: str = Field(..., description="Source community key")
+    chat_name: str | None = Field(None, description="Source chat name (None for consolidated)")
+    start_date: str = Field(..., description="Coverage start date (YYYY-MM-DD)")
+    end_date: str = Field(..., description="Coverage end date (YYYY-MM-DD)")
+    summary_format: str = Field(..., description="Newsletter format identifier")
+    desired_language: str = Field(..., description="Target language")
+    status: str = Field(..., description="Newsletter status (draft/enriched/completed)")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Last update timestamp")
+
+
+class RAGChunkDocument(BaseModel):
+    """Schema for embedded content chunks in the rag_chunks collection.
+
+    The ingestion pipeline writes chunks as dicts (embedding is a BSON Binary,
+    metadata is open-ended). This class documents the canonical shape and
+    carries the schema_version stamp.
+    """
+
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_RAG_CHUNK, description="Document schema version for lazy migration")
+    chunk_id: str = Field(..., description="Unique chunk identifier")
+    content_source: str = Field(..., description="Source type (podcast/newsletter/chat_message)")
+    source_id: str = Field(..., description="Identifier of the parent source")
+    source_title: str = Field(..., description="Human-readable source title")
+    content: str = Field(..., description="Chunk text content")
+    embedding_model: str = Field(..., description="Embedding model identifier used at ingest time")
+    chunk_index: int = Field(..., description="0-based chunk index within source")
+    source_date_start: datetime = Field(..., description="Inclusive lower bound of source content date range")
+    source_date_end: datetime = Field(..., description="Inclusive upper bound of source content date range")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Source-specific metadata")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
 
 
 class AnalyticsDocument(BaseModel):

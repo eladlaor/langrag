@@ -9,6 +9,7 @@ without a live cluster.
 from datetime import UTC, datetime
 
 import pytest
+from bson.binary import Binary
 
 from rag.retrieval.vector_search import vector_search_chunks
 
@@ -33,6 +34,18 @@ async def test_no_filters_means_no_filter_clause():
     await vector_search_chunks(spy, query_embedding=[0.0] * 4, top_k=5)
     stage = spy.last_pipeline[0]["$vectorSearch"]
     assert "filter" not in stage
+
+
+@pytest.mark.asyncio
+async def test_query_vector_encoded_as_bson_binary():
+    """queryVector must be BSON Binary subtype 9 (FLOAT32) so MongoDB 8.1+ scalar
+    quantized indexes can accept it without per-request array serialization."""
+    spy = _SpyCollection()
+    await vector_search_chunks(spy, query_embedding=[0.1, 0.2, 0.3, 0.4], top_k=5)
+    stage = spy.last_pipeline[0]["$vectorSearch"]
+    assert isinstance(stage["queryVector"], Binary)
+    # subtype 9 is BSON vector subtype
+    assert stage["queryVector"].subtype == 9
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,10 @@ import asyncio
 import logging
 from typing import Any
 
+from bson.binary import Binary, BinaryVectorDtype
+
 from config import get_settings
+from constants import CURRENT_SCHEMA_VERSION_RAG_CHUNK, SCHEMA_VERSION_FIELD
 from custom_types.field_keys import RAGChunkKeys as Keys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
@@ -32,8 +35,14 @@ class IngestionPipeline:
     """
 
     def __init__(self) -> None:
-        self._embedder = EmbeddingProviderFactory.create()
-        self._embedding_model = get_settings().embedding.default_model
+        settings = get_settings()
+        rag_model = settings.rag_embedding.model or settings.embedding.default_model
+        rag_dims = settings.rag_embedding.dimensions if settings.rag_embedding.dimensions is not None else settings.embedding.output_dimensions
+        # Strategy pattern: keep the factory the producer, but pass A/B knobs
+        # through kwargs so OpenAIEmbedder honors the dimensions parameter
+        # without other providers needing to care.
+        self._embedder = EmbeddingProviderFactory.create(model=rag_model, dimensions=rag_dims)
+        self._embedding_model = rag_model
 
     async def ingest(
         self,
@@ -90,20 +99,30 @@ class IngestionPipeline:
         texts = [chunk.content for chunk in chunks]
         embeddings = await asyncio.to_thread(self._embedder.embed_texts_batch, texts)
 
-        # Step 3: Build documents for storage
+        # Step 3: Build documents for storage. Embeddings are stored as BSON
+        # Binary subtype 9 (BinaryVectorDtype.FLOAT32) for ~2.3x smaller payload
+        # vs a BSON array of doubles and faster deserialization. Atlas Vector
+        # Search performs scalar quantization to int8 at index build time per
+        # the index spec in src/db/indexes.py.
         documents = []
         for chunk, embedding in zip(chunks, embeddings):
             if embedding is None:
                 logger.warning(f"Embedding failed for chunk_id={chunk.chunk_id}, skipping")
                 continue
 
+            embedding_bin = Binary.from_vector(
+                list(embedding),
+                dtype=BinaryVectorDtype.FLOAT32,
+            )
+
             documents.append({
+                SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_RAG_CHUNK,
                 Keys.CHUNK_ID: chunk.chunk_id,
                 Keys.CONTENT_SOURCE: str(chunk.content_source),
                 Keys.SOURCE_ID: chunk.source_id,
                 Keys.SOURCE_TITLE: chunk.source_title,
                 Keys.CONTENT: chunk.content,
-                Keys.EMBEDDING: embedding,
+                Keys.EMBEDDING: embedding_bin,
                 Keys.EMBEDDING_MODEL: self._embedding_model,
                 Keys.CHUNK_INDEX: chunk.chunk_index,
                 Keys.SOURCE_DATE_START: chunk.source_date_start,

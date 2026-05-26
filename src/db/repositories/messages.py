@@ -10,7 +10,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_MESSAGES
+from constants import COLLECTION_MESSAGES, CURRENT_SCHEMA_VERSION_MESSAGE, SCHEMA_VERSION_FIELD
 from custom_types.field_keys import DbFieldKeys
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class MessagesRepository(BaseRepository):
             Inserted document ID
         """
         document = {
+            SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_MESSAGE,
             DbFieldKeys.MESSAGE_ID: message_id,
             DbFieldKeys.DISCUSSION_ID: discussion_id,
             DbFieldKeys.CHAT_NAME: chat_name,
@@ -80,6 +81,7 @@ class MessagesRepository(BaseRepository):
         """Bulk insert messages."""
         for msg in messages:
             msg["created_at"] = datetime.now(UTC)
+            msg.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
         return await self.create_many(messages)
 
     async def upsert_batch(self, messages: list[dict[str, Any]], key_field: str = "message_id") -> int:
@@ -107,6 +109,7 @@ class MessagesRepository(BaseRepository):
             now = datetime.now(UTC)
             for doc in messages:
                 doc.setdefault("created_at", now)
+                doc.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
                 doc["updated_at"] = now
                 operations.append(
                     UpdateOne(
@@ -143,6 +146,7 @@ class MessagesRepository(BaseRepository):
             for msg in messages:
                 if "created_at" not in msg:
                     msg["created_at"] = datetime.now(UTC)
+                msg.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
 
             # Use ordered=False to continue inserting even if some fail (e.g., duplicates)
             result = await self.collection.insert_many(messages, ordered=False)

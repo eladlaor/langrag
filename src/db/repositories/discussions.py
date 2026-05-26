@@ -11,7 +11,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_DISCUSSIONS, DEFAULT_EMBEDDING_MODEL
+from constants import COLLECTION_DISCUSSIONS, CURRENT_SCHEMA_VERSION_DISCUSSION, DEFAULT_EMBEDDING_MODEL, SCHEMA_VERSION_FIELD
 from custom_types.field_keys import DbFieldKeys, DiscussionKeys
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ class DiscussionsRepository(BaseRepository):
             Inserted document ID
         """
         document = {
+            SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_DISCUSSION,
             DbFieldKeys.DISCUSSION_ID: discussion_id,
             DbFieldKeys.RUN_ID: run_id,
             DbFieldKeys.CHAT_NAME: chat_name,
@@ -130,17 +131,6 @@ class DiscussionsRepository(BaseRepository):
         return await self.find_many(
             {DbFieldKeys.RUN_ID: run_id},
             sort=[(DbFieldKeys.RANKING_SCORE, -1)],
-            limit=limit,
-        )
-
-    async def search_discussions(
-        self,
-        search_text: str,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        """Full-text search on discussion titles and nutshells."""
-        return await self.find_many(
-            {"$text": {"$search": search_text}},
             limit=limit,
         )
 
