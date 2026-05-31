@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-05-31
+
+### Added
+- Agent golden conversation eval gate (v1.14.0 release gate): `tests/evals/agent/golden_conversations.jsonl` ships 6 scenarios — new-user newsletter flow, returning-user "run it again" memory reuse, cross-community ACL denial, RAG query inside an agent turn, tool-call ceiling halts a runaway loop, and memory-extractor persistence of a high-importance fact. `scripts/run_agent_evals.py` drives the runtime with scripted LangChain LLMs (no Anthropic credits), exits 0 only when pass-rate ≥ threshold (default 1.0). `.github/workflows/agent-evals.yml` runs unit + integration + the eval gate on PRs touching `src/agent/**`, `src/api/agent_chat.py`, the test trees, or the workflow file itself. `tests/integration/agent/test_evals_runner.py` invokes the runner as a subprocess and asserts exit 0 — proves the eval-gate harness is itself healthy.
+
+### Added
+- Agent Prometheus metrics module (`src/observability/metrics/agent_metrics.py`): `agent_tool_calls_total{tool, status}` incremented per tool invocation (success vs error); `agent_session_duration_seconds` histogram via `track_session_duration()` context manager; `agent_memory_writes_total{namespace}` incremented inside the memory extractor on every persisted memory; `agent_budget_halts_total{reason}` incremented by `route_after_budget` when the per-turn tool-call ceiling is hit; `agent_acl_denials_total{tool, community}` incremented by the tool node on `CommunityPermissionError`. Lazy singleton with `reset_for_tests()` so the process-global Prometheus registry doesn't refuse re-instantiation under pytest. The agent graph's `tools_node` is the central wiring point: success path records `tool_calls_total{status=success}`; ACL denial records both `tool_calls_total{status=error}` AND `acl_denials_total`; ValueError + generic exception paths each record `tool_calls_total{status=error}`. Test: `tests/unit/observability/test_agent_metrics.py` (6 tests covering each counter's increments, label sets matching plan §I, and the histogram observation).
+
+### Added
+- HITL (Human-in-the-Loop) gating on destructive agent tools: `delete_schedule`, `forget`, and `generate_newsletter(send_email=True)` now call LangGraph `interrupt(...)` BEFORE any side effect. The agent graph's tools node propagates `GraphInterrupt` instead of swallowing it, so the graph suspends at the checkpoint; the route handler emits an `interrupt_required` SSE event; the frontend pops `InterruptDialog` and on user click POSTs `/api/agent/chat/resume` with `Command(resume="approve" | "reject")`. Reject returns `{deleted: false, reason: "rejected_by_user"}` (or the equivalent for the other tools) without firing the side effect. Tests: `tests/integration/agent/test_hitl_destructive_tools.py` (3 end-to-end tests against the real LangGraph runtime — approve fires the kickoff, reject does NOT fire it, send_email=False skips the interrupt entirely). The pre-existing `tests/unit/agent/tools/test_*.py` happy-path tests for the destructive variants now assert that bare `.ainvoke()` outside a graph context fails AND that the side effect never fires.
+
+- Agent chat frontend (v1.14.0 scope): `ui/frontend/src/components/agent/AgentChat.tsx` is a split-pane container (message thread + composer on the left, `ArtifactPanelRouter` on the right) wired to the new SSE streaming endpoint via `ui/frontend/src/hooks/useAgentStream.ts`. The hook reducer encodes the `AgentEventType` taxonomy and is parser-isolated so synthetic SSE chunks can drive it under test. Companion components: `ToolCallChip` (inline tool-invocation pill), `InterruptDialog` (HITL approve/reject modal — wired but inactive until commit 10), `MemoryInspector` (list/forget user memories with optimistic delete + rollback on failure). New TS types in `ui/frontend/src/types/agent.ts` mirror the backend `AgentEventType` enum and DTOs. `agentApi` helpers added to `ui/frontend/src/services/api.ts`. Tests: `useAgentStream.test.ts` (12 reducer + parser invariants — token accumulation, tool-call round-trip by call_id, error → status='error', artifact_panel accumulation, interrupt_required payload preservation, error event flips streaming off, done event flips done, unknown events ignored, malformed data no-crash, multi-line data parse, reset clears state) + `MemoryInspector.test.tsx` (2 tests: list+render, optimistic delete + rollback on API failure). 14 new frontend tests, all passing.
+
 ## [1.13.0] - 2026-05-31
 
 ### Added
@@ -172,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/eladlaor/langrag/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/eladlaor/langrag/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/eladlaor/langrag/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/eladlaor/langrag/compare/v1.10.0...v1.11.0

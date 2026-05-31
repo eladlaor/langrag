@@ -88,7 +88,11 @@ async def test_generate_newsletter_unowned_raises_acl_and_does_not_kickoff():
     assert kickoff_called == []
 
 
-async def test_generate_newsletter_send_email_carried_in_params():
+async def test_generate_newsletter_send_email_raises_interrupt_before_kickoff():
+    """v1.14.0: send_email=True is HITL-gated; the interrupt fires
+    BEFORE the kickoff so a rejected request never triggers the
+    pipeline. End-to-end approve/reject in
+    tests/integration/agent/test_hitl_destructive_tools.py."""
     captured: list[dict] = []
 
     async def kickoff(params, ctx):
@@ -98,12 +102,37 @@ async def test_generate_newsletter_send_email_carried_in_params():
     tools = build_newsletter_tools(kickoff_fn=kickoff)
     gen = _by_name(tools, "generate_newsletter")
     with user_context(_ctx("mcp_israel")):
-        await gen.ainvoke(
+        with pytest.raises((Exception,)):  # noqa: BLE001
+            await gen.ainvoke(
+                {
+                    "community": "mcp_israel",
+                    "start_date": "2026-05-20",
+                    "end_date": "2026-05-27",
+                    "send_email": True,
+                }
+            )
+    # Kickoff must NOT have fired — the interrupt is BEFORE the side effect.
+    assert captured == []
+
+
+async def test_generate_newsletter_without_send_email_skips_interrupt():
+    """Non-destructive variant (send_email=False, the default) must run
+    end-to-end without an interrupt."""
+    captured: list[dict] = []
+
+    async def kickoff(params, ctx):
+        captured.append(params)
+        return "run-x"
+
+    tools = build_newsletter_tools(kickoff_fn=kickoff)
+    gen = _by_name(tools, "generate_newsletter")
+    with user_context(_ctx("mcp_israel")):
+        out = await gen.ainvoke(
             {
                 "community": "mcp_israel",
                 "start_date": "2026-05-20",
                 "end_date": "2026-05-27",
-                "send_email": True,
             }
         )
-    assert captured[0]["send_email"] is True
+    assert out["run_id"] == "run-x"
+    assert captured[0]["send_email"] is False

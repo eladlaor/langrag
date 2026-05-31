@@ -22,6 +22,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from langchain_core.tools import BaseTool, tool
+from langgraph.types import interrupt
 
 from agent.auth.acl import assert_user_owns_community
 from agent.auth.user_context import current_user_context
@@ -87,6 +88,38 @@ def build_newsletter_tools(kickoff_fn: KickoffFn) -> list[BaseTool]:
         """
         ctx = current_user_context()
         assert_user_owns_community(ctx, community)
+
+        # HITL gate: send_email is the destructive variant (a real
+        # email goes out to recipients). Non-send_email runs only
+        # produce on-disk artifacts that the user can inspect before
+        # deciding what to do, so they don't need the confirm step.
+        if send_email:
+            decision = interrupt(
+                {
+                    "kind": "confirm",
+                    "action": "generate_newsletter_and_email",
+                    "args": {
+                        "community": community,
+                        "start_date": start_date,
+                        "end_date": end_date,
+                        "desired_language": desired_language,
+                    },
+                }
+            )
+            if str(decision).lower() != "approve":
+                logger.info(
+                    "generate_newsletter+email: user_id=%s community=%s rejected by user",
+                    ctx.user_id,
+                    community,
+                )
+                return {
+                    "run_id": None,
+                    "description": (
+                        "Newsletter generation was rejected by the user; "
+                        "no run was started."
+                    ),
+                    "reason": "rejected_by_user",
+                }
 
         params: dict[str, Any] = {
             "community": community,

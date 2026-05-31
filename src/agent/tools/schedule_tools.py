@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
+from langgraph.types import interrupt
 
 from agent.auth.acl import assert_user_owns_community
 from agent.auth.user_context import current_user_context
@@ -130,9 +131,8 @@ def build_schedule_tools() -> list[BaseTool]:
         ACL-gated: the schedule's `data_source_name` must be one the
         user owns. Cross-tenant deletion is refused.
 
-        This is a destructive operation; commit 10 will route it through
-        an interrupt() so the user confirms in the UI before the delete
-        actually happens.
+        Destructive — gated by a HITL `interrupt()` so the user must
+        approve in the UI before the delete actually fires.
 
         Args:
             schedule_id: Identifier returned by `create_schedule` or
@@ -153,9 +153,37 @@ def build_schedule_tools() -> list[BaseTool]:
             # Refuse without revealing that the schedule exists.
             return {"deleted": False, "reason": "not_found"}
 
+        # HITL gate: suspend the graph and ask the user to confirm
+        # before the destructive delete fires. `interrupt(...)` is
+        # captured by the SSE stream handler as `interrupt_required`;
+        # the frontend pops a modal and POSTs to /agent/chat/resume
+        # with the user's decision ("approve" / "reject").
+        decision = interrupt(
+            {
+                "kind": "confirm",
+                "action": "delete_schedule",
+                "args": {
+                    "schedule_id": schedule_id,
+                    "community": ds,
+                    "schedule_name": existing.get("name", ""),
+                },
+            }
+        )
+        if str(decision).lower() != "approve":
+            logger.info(
+                "delete_schedule: user_id=%s schedule_id=%s rejected by user",
+                ctx.user_id,
+                schedule_id,
+            )
+            return {
+                "deleted": False,
+                "schedule_id": schedule_id,
+                "reason": "rejected_by_user",
+            }
+
         ok = await manager.delete(schedule_id)
         logger.info(
-            "delete_schedule: user_id=%s schedule_id=%s ok=%s",
+            "delete_schedule: user_id=%s schedule_id=%s ok=%s (approved)",
             ctx.user_id,
             schedule_id,
             ok,

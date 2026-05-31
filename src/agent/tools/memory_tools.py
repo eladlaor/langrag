@@ -16,6 +16,7 @@ import logging
 from typing import Any, Callable, Protocol
 
 from langchain_core.tools import BaseTool, tool
+from langgraph.types import interrupt
 
 from agent.auth.user_context import current_user_context
 from agent.memory.mongodb_store import VALUE_CONTENT, new_memory_id
@@ -102,12 +103,31 @@ def build_memory_tools(store_factory: Callable[[], _StoreLike]) -> list[BaseTool
             when no matching row exists).
         """
         ctx = current_user_context()
+        # HITL gate: suspend the graph and ask the user to confirm.
+        decision = interrupt(
+            {
+                "kind": "confirm",
+                "action": "forget",
+                "args": {"memory_id": memory_id},
+            }
+        )
+        if str(decision).lower() != "approve":
+            logger.info(
+                "forget: user_id=%s memory_id=%s rejected by user",
+                ctx.user_id,
+                memory_id,
+            )
+            return {
+                "deleted": False,
+                "memory_id": memory_id,
+                "reason": "rejected_by_user",
+            }
         store = store_factory()
         # We don't know the namespace from just memory_id; try all three.
         # adelete is cheap (one Mongo round-trip with a unique index).
         for ns in MemoryNamespace:
             await store.adelete((ctx.user_id, str(ns)), memory_id)
-        logger.info("forget: user_id=%s memory_id=%s", ctx.user_id, memory_id)
+        logger.info("forget: user_id=%s memory_id=%s (approved)", ctx.user_id, memory_id)
         return {"deleted": True, "memory_id": memory_id}
 
     @tool

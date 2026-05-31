@@ -39,7 +39,10 @@ from langgraph.graph import StateGraph
 from langgraph.store.base import BaseStore
 from langgraph.types import RetryPolicy
 
+from langgraph.errors import GraphInterrupt
+
 from agent.auth.acl import CommunityPermissionError
+from observability.metrics import agent_metrics as _agent_metrics
 from agent.auth.user_context import current_user_context
 from agent.memory.extractor import extract_and_persist_memories
 from agent.memory.retriever import load_relevant_memories
@@ -215,7 +218,16 @@ async def build_agent_graph(
                 # route handler set it via `with user_context(ctx):` around
                 # `graph.ainvoke`, so it's present here.
                 result = await tool.ainvoke(args or {})
+            except GraphInterrupt:
+                # HITL gate: a destructive tool called `interrupt()`.
+                # Re-raise so LangGraph suspends the graph at this
+                # checkpoint. The route handler emits an
+                # `interrupt_required` SSE event; the user resumes via
+                # /agent/chat/resume with Command(resume=<decision>).
+                raise
             except CommunityPermissionError as e:
+                _agent_metrics.record_tool_call(name, "error")
+                _agent_metrics.record_acl_denial(name, e.community_key)
                 tool_messages.append(
                     ToolMessage(
                         content=(
@@ -229,6 +241,7 @@ async def build_agent_graph(
                 )
                 continue
             except ValueError as e:
+                _agent_metrics.record_tool_call(name, "error")
                 tool_messages.append(
                     ToolMessage(
                         content=str(e),
@@ -239,6 +252,7 @@ async def build_agent_graph(
                 )
                 continue
             except Exception as e:  # pragma: no cover — defensive
+                _agent_metrics.record_tool_call(name, "error")
                 logger.exception("Tool %s raised", name)
                 tool_messages.append(
                     ToolMessage(
@@ -249,6 +263,7 @@ async def build_agent_graph(
                     )
                 )
                 continue
+            _agent_metrics.record_tool_call(name, "success")
             tool_messages.append(
                 ToolMessage(
                     content=_serialize_tool_result(result),
@@ -327,6 +342,7 @@ async def build_agent_graph(
                 state.get(Keys.TOOL_CALL_COUNT, 0),
                 settings.max_tool_calls_per_turn,
             )
+            _agent_metrics.record_budget_halt("max_tool_calls_per_turn")
             return NodeNames.EXTRACT_MEMORY
         return NodeNames.AGENT
 

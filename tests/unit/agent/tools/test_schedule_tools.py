@@ -140,7 +140,15 @@ async def test_list_schedules_filters_cross_tenant(fake_manager):
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_schedule_owned_succeeds(fake_manager):
+async def test_delete_schedule_owned_raises_interrupt_before_delete(fake_manager):
+    """v1.14.0: delete_schedule is HITL-gated. The interrupt fires
+    BEFORE the destructive delete, so direct .ainvoke() outside a
+    graph context raises GraphInterrupt and nothing is deleted.
+    End-to-end approve/reject lives in
+    tests/integration/agent/test_hitl_destructive_tools.py."""
+    # Outside a graph context, `interrupt()` raises KeyError or
+    # GraphInterrupt depending on LangGraph internals — either way the
+    # destructive call MUST not have run.
     fake_manager.existing_by_id["s-mine"] = {
         "_id": "s-mine",
         "data_source_name": "mcp_israel",
@@ -148,9 +156,9 @@ async def test_delete_schedule_owned_succeeds(fake_manager):
     tools = build_schedule_tools()
     delete = _by_name(tools, "delete_schedule")
     with user_context(_ctx("mcp_israel")):
-        out = await delete.ainvoke({"schedule_id": "s-mine"})
-    assert out["deleted"] is True
-    assert fake_manager.deleted == ["s-mine"]
+        with pytest.raises((Exception,)):  # noqa: BLE001 — accept any failure
+            await delete.ainvoke({"schedule_id": "s-mine"})
+    assert fake_manager.deleted == []
 
 
 async def test_delete_schedule_unowned_refused_without_revealing_existence(fake_manager):

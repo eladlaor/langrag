@@ -101,23 +101,18 @@ async def test_remember_unknown_namespace_raises():
 # ---------------------------------------------------------------------------
 
 
-async def test_forget_attempts_delete_across_all_three_namespaces():
-    """Without a namespace param, forget asks the store to delete the key
-    under each of the three namespaces. The store's own ACL ensures
-    nothing happens to other users' rows."""
+async def test_forget_raises_interrupt_before_delete():
+    """v1.14.0: forget is HITL-gated — the interrupt fires BEFORE the
+    destructive delete. Outside a graph context this surfaces as
+    GraphInterrupt; the store is never touched. End-to-end
+    approve/reject in tests/integration/agent/test_hitl_destructive_tools.py."""
     store = FakeStore()
     tools = build_memory_tools(lambda: store)
     forget = _by_name(tools, "forget")
     with user_context(_ctx()):
-        out = await forget.ainvoke({"memory_id": "m-123"})
-    assert out["deleted"] is True
-    assert {ns[1] for (ns, _) in store.deletes} == {
-        str(MemoryNamespace.SEMANTIC),
-        str(MemoryNamespace.EPISODIC),
-        str(MemoryNamespace.PROCEDURAL),
-    }
-    # user_id always matches the contextvar — never accepted from the LLM.
-    assert all(ns[0] == "u1" for (ns, _) in store.deletes)
+        with pytest.raises((Exception,)):  # noqa: BLE001
+            await forget.ainvoke({"memory_id": "m-123"})
+    assert store.deletes == []
 
 
 # ---------------------------------------------------------------------------

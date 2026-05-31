@@ -384,4 +384,73 @@ export const api = {
   },
 };
 
+// ============================================================================
+// Agent chat API (v1.14.0+)
+// ============================================================================
+
+import {
+  AgentMemoryItem,
+  AgentSessionSummary,
+  CreateSessionRequest,
+  CreateSessionResponse,
+} from "../types/agent";
+
+function _withApiKey(apiKey: string, extra?: HeadersInit): HeadersInit {
+  return { ...(extra || {}), "X-API-Key": apiKey };
+}
+
+export const agentApi = {
+  async createSession(
+    apiKey: string,
+    payload: CreateSessionRequest = {}
+  ): Promise<CreateSessionResponse> {
+    const response = await fetch(`${API_BASE_URL}/api/agent/sessions`, {
+      method: "POST",
+      headers: _withApiKey(apiKey, { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON }),
+      body: JSON.stringify(payload),
+    });
+    return handleResponse<CreateSessionResponse>(response);
+  },
+
+  async listSessions(apiKey: string): Promise<AgentSessionSummary[]> {
+    const response = await fetch(`${API_BASE_URL}/api/agent/sessions`, {
+      headers: _withApiKey(apiKey),
+    });
+    return handleResponse<AgentSessionSummary[]>(response);
+  },
+
+  async deleteSession(apiKey: string, sessionId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/agent/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE", headers: _withApiKey(apiKey) }
+    );
+    if (!response.ok) {
+      throw new ApiError(response.status, `HTTP ${response.status}`);
+    }
+  },
+
+  async listMemories(
+    apiKey: string,
+    namespace?: string
+  ): Promise<AgentMemoryItem[]> {
+    const qs = namespace
+      ? `?namespace=${encodeURIComponent(namespace)}`
+      : "";
+    const response = await fetch(`${API_BASE_URL}/api/agent/memories${qs}`, {
+      headers: _withApiKey(apiKey),
+    });
+    return handleResponse<AgentMemoryItem[]>(response);
+  },
+
+  async deleteMemory(apiKey: string, memoryId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/agent/memories/${encodeURIComponent(memoryId)}`,
+      { method: "DELETE", headers: _withApiKey(apiKey) }
+    );
+    if (!response.ok) {
+      throw new ApiError(response.status, `HTTP ${response.status}`);
+    }
+  },
+};
+
 export { ApiError };

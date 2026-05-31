@@ -136,6 +136,12 @@ async def extract_and_persist_memories(
         memory_id = new_memory_id()
         await store.aput((user_id, str(namespace)), memory_id, value)
         persisted.append(memory_id)
+        try:
+            from observability.metrics import agent_metrics as _am
+
+            _am.record_memory_write(str(namespace))
+        except Exception:
+            pass  # best-effort observability
 
     logger.info(
         "extracted memories: user_id=%s candidates=%d persisted=%d (threshold=%.2f)",
