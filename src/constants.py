@@ -321,6 +321,11 @@ COLLECTION_RAG_CHUNKS = "rag_chunks"
 COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
 COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
 COLLECTION_RAG_API_KEYS = "rag_api_keys"
+# Agentic chatbot layer (v1.13.0+). See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
+COLLECTION_USERS = "users"
+COLLECTION_USER_API_KEYS = "user_api_keys"
+COLLECTION_AGENT_SESSIONS = "agent_sessions"
+COLLECTION_AGENT_MEMORIES = "agent_memories"
 
 # Schema version stamps written on every persisted document. Per-collection so
 # each document type can evolve its schema independently without forcing
@@ -332,6 +337,24 @@ CURRENT_SCHEMA_VERSION_DISCUSSION = 1
 CURRENT_SCHEMA_VERSION_MESSAGE = 1
 CURRENT_SCHEMA_VERSION_NEWSLETTER = 1
 CURRENT_SCHEMA_VERSION_RAG_CHUNK = 1
+CURRENT_SCHEMA_VERSION_USER = 1
+CURRENT_SCHEMA_VERSION_USER_API_KEY = 1
+CURRENT_SCHEMA_VERSION_AGENT_SESSION = 1
+CURRENT_SCHEMA_VERSION_AGENT_MEMORY = 1
+
+# Agent memory Atlas Search indexes (paired via $rankFusion).
+AGENT_MEMORY_VECTOR_INDEX_NAME = "agent_memory_embeddings"
+AGENT_MEMORY_LEXICAL_INDEX_NAME = "agent_memory_lexical"
+# Default RRF weights for the agent memory hybrid retriever.
+AGENT_MEMORY_HYBRID_VECTOR_WEIGHT = 0.7
+AGENT_MEMORY_HYBRID_LEXICAL_WEIGHT = 0.3
+# Episodic memories expire automatically after 30 days; semantic + procedural
+# memories are permanent until the owning user deletes them.
+AGENT_EPISODIC_MEMORY_TTL_DAYS = 30
+# Default API key prefix for user-scoped agent keys. Distinct from the public
+# RAG prefix so an operator can tell at a glance which surface a leaked key
+# belongs to.
+AGENT_USER_API_KEY_PREFIX = "lk_user_"
 
 # RAG Vector Search Index Name (created on startup against MongoDB Atlas / mongot)
 # v2 carries scalar quantization (MongoDB 8.0.4+) on BinData (subtype 9) embeddings.
@@ -1020,6 +1043,23 @@ class RAGEventType(StrEnum):
     DONE = "done"
     ERROR = "error"
     EVALUATION_SCORE = "evaluation_score"
+
+
+class AgentEventType(StrEnum):
+    """SSE event types for the v1.13.0 agent chat streaming endpoint.
+
+    See knowledge/plans/AGENTIC_CHATBOT_LAYER.md §G.
+    """
+
+    TOKEN = "token"
+    TOOL_CALL_STARTED = "tool_call_started"
+    TOOL_CALL_FINISHED = "tool_call_finished"
+    ARTIFACT_PANEL = "artifact_panel"
+    INTERRUPT_REQUIRED = "interrupt_required"
+    MEMORY_WRITTEN = "memory_written"
+    BUDGET_WARNING = "budget_warning"
+    ERROR = "error"
+    DONE = "done"
 
 
 class EvaluationMetric(StrEnum):

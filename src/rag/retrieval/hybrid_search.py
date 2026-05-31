@@ -31,13 +31,34 @@ from constants import (
     RAG_VECTOR_INDEX_NAME,
 )
 from custom_types.field_keys import RAGChunkKeys as Keys
+from db.queries.rankfusion import (
+    RRF_RAW_SCORE_FIELD,
+    build_rankfusion_pipeline,
+    normalize_rrf_scores,
+)
 
 # Atlas Search caps numCandidates around 10,000 in practice; keep a defensive
 # upper bound so callers can't accidentally over-request.
 _MAX_NUM_CANDIDATES = 1000
-RRF_RAW_SCORE_FIELD = "rrf_score"
 
 logger = logging.getLogger(__name__)
+
+# Backwards-compatible re-export: prior callers imported RRF_RAW_SCORE_FIELD
+# from this module. The canonical definition now lives in db.queries.rankfusion;
+# keep the name available here so external code doesn't break.
+__all__ = ["hybrid_search_chunks", "RRF_RAW_SCORE_FIELD", "_normalize_rrf_scores"]
+
+
+def _normalize_rrf_scores(results: list[dict[str, Any]]) -> None:
+    """Backwards-compatible wrapper over `normalize_rrf_scores`.
+
+    Pre-v1.13.0 callers (notably `tests/unit/rag/test_hybrid_search.py`)
+    imported a private `_normalize_rrf_scores` from this module. The shared
+    helper now lives at `db.queries.rankfusion.normalize_rrf_scores`; this
+    shim delegates with the RAG-specific score field name so existing code
+    keeps working unchanged.
+    """
+    normalize_rrf_scores(results, score_field=RAG_SEARCH_SCORE_FIELD)
 
 
 async def hybrid_search_chunks(
@@ -107,40 +128,23 @@ async def hybrid_search_chunks(
         {"$limit": top_k * 4},
     ]
 
-    rank_fusion_stage: dict[str, Any] = {
-        "$rankFusion": {
-            "input": {
-                "pipelines": {
-                    "vector": [vector_stage],
-                    "lexical": lexical_pipeline,
-                }
-            },
-            "combination": {
-                "weights": {
-                    "vector": vector_weight,
-                    "lexical": lexical_weight,
-                }
-            },
-        }
-    }
-    if debug_score_details:
-        rank_fusion_stage["$rankFusion"]["scoreDetails"] = True
-
     # Surface the raw RRF score under RRF_RAW_SCORE_FIELD so we can normalize
     # it to [0, 1] in Python before downstream consumers (MMR rerank, citation
     # UI) see it under the shared search_score key. We deliberately do NOT
     # emit the un-normalized RRF score under search_score: it would silently
     # break MMR (lambda * relevance collapses to ~0 when relevance is RRF).
-    pipeline: list[dict[str, Any]] = [
-        rank_fusion_stage,
-        {"$addFields": {RRF_RAW_SCORE_FIELD: {"$meta": "score"}}},
-        {"$limit": top_k},
-        {"$project": {"_id": 0}},
-    ]
+    pipeline = build_rankfusion_pipeline(
+        vector_stage=vector_stage,
+        lexical_pipeline=lexical_pipeline,
+        vector_weight=vector_weight,
+        lexical_weight=lexical_weight,
+        top_k=top_k,
+        score_details=debug_score_details,
+    )
 
     try:
         results = await collection.aggregate(pipeline).to_list(length=None)
-        _normalize_rrf_scores(results)
+        normalize_rrf_scores(results, score_field=RAG_SEARCH_SCORE_FIELD)
         logger.info(
             f"Hybrid $rankFusion returned {len(results)} chunks "
             f"(top_k={top_k}, num_candidates={num_candidates}, "
@@ -198,30 +202,3 @@ def _build_lexical_search_stage(
     }
 
 
-def _normalize_rrf_scores(results: list[dict[str, Any]]) -> None:
-    """
-    Min-max normalize the raw RRF scores into [0, 1] and write under
-    RAG_SEARCH_SCORE_FIELD so MMR rerank, citation snippets, and eval gates
-    see a value on the same scale as cosine vector scores.
-
-    The raw RRF score remains available under RRF_RAW_SCORE_FIELD for
-    debugging.
-
-    Edge cases:
-    - Empty page: no-op.
-    - Single result or all-equal raw scores: write 1.0 across the page so
-      MMR's relevance term doesn't collapse to 0.
-    """
-    if not results:
-        return
-
-    raw = [r.get(RRF_RAW_SCORE_FIELD, 0.0) for r in results]
-    lo = min(raw)
-    hi = max(raw)
-    span = hi - lo
-
-    for chunk, score in zip(results, raw):
-        if span > 0:
-            chunk[RAG_SEARCH_SCORE_FIELD] = (score - lo) / span
-        else:
-            chunk[RAG_SEARCH_SCORE_FIELD] = 1.0

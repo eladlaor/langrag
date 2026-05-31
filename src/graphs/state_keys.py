@@ -341,6 +341,35 @@ class RAGConversationStateKeys:
     PROGRESS_QUEUE = "progress_queue"
 
 
+class AgentStateKeys:
+    """Keys for AgentState TypedDict (v1.13.0+ agentic chatbot)."""
+
+    # === Conversation ===
+    MESSAGES = "messages"
+
+    # === Principal (sourced from configurable, NEVER from the LLM) ===
+    USER_ID = "user_id"
+    COMMUNITIES = "communities"
+
+    # === Long-term memory ===
+    RETRIEVED_MEMORIES = "retrieved_memories"
+
+    # === Per-turn budget tracking ===
+    TOOL_CALL_COUNT = "tool_call_count"
+    CHAT_INPUT_TOKENS = "chat_input_tokens"
+    CHAT_OUTPUT_TOKENS = "chat_output_tokens"
+    MEMORY_TOKENS = "memory_tokens"
+    QUOTA_REMAINING = "quota_remaining"
+
+    # === Control flow ===
+    PENDING_INTERRUPT = "pending_interrupt"
+    ARTIFACT_EVENTS = "artifact_events"
+
+    # === Observability ===
+    SESSION_ID = "session_id"
+    LANGFUSE_TRACE_ID = "langfuse_trace_id"
+
+
 # ============================================================================
 # CONVENIENCE ALIASES
 # ============================================================================
@@ -358,3 +387,6 @@ EnricherKeys = LinkEnricherStateKeys
 
 # RAG conversation
 RAGKeys = RAGConversationStateKeys
+
+# Agentic chatbot
+AgentKeys = AgentStateKeys

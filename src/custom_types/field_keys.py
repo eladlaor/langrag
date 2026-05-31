@@ -401,6 +401,78 @@ class DbFieldKeys:
     RUN_COUNT = "run_count"
 
 
+class UserKeys:
+    """Keys for `users` collection documents (agentic chatbot layer)."""
+
+    USER_ID = "user_id"
+    EMAIL = "email"
+    ROLE = "role"
+    COMMUNITIES = "communities"
+    PREFERENCES = "preferences"
+    QUOTAS = "quotas"
+    DAILY_USAGE = "daily_usage"
+    CREATED_AT = "created_at"
+    LAST_SEEN_AT = "last_seen_at"
+
+    # Nested `quotas` sub-keys
+    QUOTA_DAILY_CHAT_INPUT_TOKENS = "daily_chat_input_tokens"
+    QUOTA_DAILY_CHAT_OUTPUT_TOKENS = "daily_chat_output_tokens"
+    QUOTA_DAILY_MEMORY_TOKENS = "daily_memory_tokens"
+    QUOTA_DAILY_NEWSLETTER_RUNS = "daily_newsletter_runs"
+
+    # Nested `daily_usage` sub-keys
+    USAGE_DATE = "date"
+    USAGE_CHAT_INPUT_TOKENS = "chat_input_tokens"
+    USAGE_CHAT_OUTPUT_TOKENS = "chat_output_tokens"
+    USAGE_MEMORY_TOKENS = "memory_tokens"
+    USAGE_NEWSLETTER_RUNS = "newsletter_runs"
+
+
+class UserApiKeyKeys:
+    """Keys for `user_api_keys` collection documents (agentic chatbot layer)."""
+
+    KEY_ID = "key_id"
+    KEY_HASH = "key_hash"
+    USER_ID = "user_id"
+    NAME = "name"
+    SCOPES = "scopes"
+    ENABLED = "enabled"
+    CREATED_AT = "created_at"
+    LAST_USED_AT = "last_used_at"
+    EXPIRES_AT = "expires_at"
+
+
+class AgentSessionKeys:
+    """Keys for `agent_sessions` collection documents (agentic chatbot layer)."""
+
+    SESSION_ID = "session_id"
+    USER_ID = "user_id"
+    TITLE = "title"
+    COMMUNITY_CONTEXT = "community_context"
+    CREATED_AT = "created_at"
+    LAST_MESSAGE_AT = "last_message_at"
+    MESSAGE_COUNT = "message_count"
+    COST_SO_FAR = "cost_so_far"
+    EXPIRES_AT = "expires_at"
+
+
+class AgentMemoryKeys:
+    """Keys for `agent_memories` collection documents (agentic chatbot layer)."""
+
+    MEMORY_ID = "memory_id"
+    USER_ID = "user_id"
+    NAMESPACE = "namespace"
+    CONTENT = "content"
+    EMBEDDING = "embedding"
+    EMBEDDING_MODEL = "embedding_model"
+    IMPORTANCE = "importance"
+    METADATA = "metadata"
+    CREATED_AT = "created_at"
+    LAST_ACCESSED_AT = "last_accessed_at"
+    ACCESS_COUNT = "access_count"
+    EXPIRES_AT = "expires_at"
+
+
 class DeliveryResultKeys:
     """Keys for delivery result dicts (email, LinkedIn, Substack, webhook)."""
 

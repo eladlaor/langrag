@@ -296,6 +296,21 @@ class CheckpointerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CHECKPOINTER_")
 
 
+class AgentSettings(BaseSettings):
+    """Agentic chatbot runtime configuration (v1.13.0+)."""
+
+    enabled: bool = Field(default=False, description="Feature flag: when False, /api/agent/* routes are not mounted.")
+    agent_model: str = Field(default="claude-sonnet-4-6", description="Chat model identifier for the agent node (tool-calling loop).")
+    memory_model: str = Field(default="claude-opus-4-7", description="Chat model identifier for the memory extractor + summarizer.")
+    max_tool_calls_per_turn: int = Field(default=12, description="Hard ceiling on tool invocations within a single agent turn.")
+    summarize_threshold: int = Field(default=30, description="Trigger conversation summarization when len(messages) exceeds this.")
+    summarize_keep_recent: int = Field(default=12, description="How many recent messages to keep verbatim after summarization.")
+    importance_threshold: float = Field(default=0.4, description="Memories below this extractor-assigned importance are dropped.")
+    memory_top_k: int = Field(default=6, description="Top-K memories injected into the agent prompt per turn.")
+
+    model_config = SettingsConfigDict(env_prefix="AGENT_")
+
+
 # ============================================================================
 # API CONFIGURATION
 # ============================================================================
@@ -595,6 +610,7 @@ class Settings(BaseSettings):
     runtime_eval: RuntimeEvalSettings = Field(default_factory=RuntimeEvalSettings)
     deepeval: DeepEvalSettings = Field(default_factory=DeepEvalSettings)
     checkpointer: CheckpointerSettings = Field(default_factory=CheckpointerSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

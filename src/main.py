@@ -168,6 +168,13 @@ app.include_router(metrics_router, tags=["observability-metrics"])
 app.include_router(schedules.router, prefix=API_V1_PREFIX, tags=["schedules"])
 app.include_router(rag_conversation.router, prefix=API_V1_PREFIX, tags=["rag-conversation"])
 
+# Agentic chatbot (v1.13.0+): mounted only when AGENT_ENABLED=true so the
+# default deployment is unaffected. See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
+if get_settings().agent.enabled:
+    from api import agent_chat
+
+    app.include_router(agent_chat.router, prefix=API_V1_PREFIX, tags=["agent"])
+
 
 @app.get(ROUTE_ROOT)
 async def root():

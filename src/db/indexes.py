@@ -60,6 +60,9 @@ from pymongo import ASCENDING, DESCENDING
 from pymongo.operations import SearchIndexModel
 
 from constants import (
+    AGENT_MEMORY_LEXICAL_INDEX_NAME,
+    AGENT_MEMORY_VECTOR_INDEX_NAME,
+    COLLECTION_AGENT_MEMORIES,
     COLLECTION_DISCUSSIONS,
     COLLECTION_RAG_CHUNKS,
     DEFAULT_EMBEDDING_DIMENSION,
@@ -67,7 +70,7 @@ from constants import (
     RAG_VECTOR_INDEX_NAME,
     RAG_VECTOR_INDEX_NAME_LEGACY,
 )
-from custom_types.field_keys import RAGChunkKeys
+from custom_types.field_keys import AgentMemoryKeys, RAGChunkKeys
 
 # Legacy on-disk text index that no longer has a queryer in the codebase.
 # Kept here so ensure_indexes() can drop it idempotently from existing
@@ -256,6 +259,43 @@ INDEXES = {
         {"keys": [("created_at", DESCENDING)]},
         {"keys": [("last_accessed_at", DESCENDING)]},
     ],
+    # Agentic chatbot layer (v1.13.0+). See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
+    "users": [
+        # Primary lookup
+        {"keys": [("user_id", ASCENDING)], "unique": True},
+        # Unique-by-email gives us idempotent signup + cheap email auth lookups
+        {"keys": [("email", ASCENDING)], "unique": True},
+        # Reverse community lookup (e.g., "who owns mcp_israel?")
+        {"keys": [("communities", ASCENDING)]},
+    ],
+    "user_api_keys": [
+        # Per-request lookup on the hashed bearer
+        {"keys": [("key_hash", ASCENDING)], "unique": True},
+        # Admin operations (rotation, revocation)
+        {"keys": [("key_id", ASCENDING)], "unique": True},
+        # List a user's keys
+        {"keys": [("user_id", ASCENDING), ("created_at", DESCENDING)]},
+        # Filter enabled keys quickly
+        {"keys": [("enabled", ASCENDING), ("created_at", DESCENDING)]},
+    ],
+    "agent_sessions": [
+        # Primary lookup (session_id == LangGraph thread_id)
+        {"keys": [("session_id", ASCENDING)], "unique": True},
+        # Session browser: a user's sessions, newest first
+        {"keys": [("user_id", ASCENDING), ("last_message_at", DESCENDING)]},
+        # Sliding TTL: abandoned sessions self-clean
+        {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
+    ],
+    "agent_memories": [
+        # Primary lookup
+        {"keys": [("memory_id", ASCENDING)], "unique": True},
+        # User-scoped retrieval (every query MUST pre-filter on user_id)
+        {"keys": [("user_id", ASCENDING), ("namespace", ASCENDING)]},
+        # Listing: user's memories newest first
+        {"keys": [("user_id", ASCENDING), ("created_at", DESCENDING)]},
+        # Episodic TTL: only set on namespace=="episodic"
+        {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
+    ],
 }
 
 
@@ -308,6 +348,14 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
                 f"to start in a half-broken state. Verify mongot is running and "
                 f"capable of building search indexes, then restart."
             )
+
+        # Agentic chatbot layer (v1.13.0+): paired vector + lexical Atlas
+        # Search indexes on agent_memories for $rankFusion hybrid retrieval.
+        # Best-effort: when mongot is unavailable (e.g., local dev without
+        # the sidecar) the agent runtime falls back to BSON-level queries
+        # without hybrid retrieval; the warning is loud enough to notice.
+        await _ensure_agent_memory_vector_index(db)
+        await _ensure_agent_memory_lexical_index(db)
 
     except Exception as e:
         logger.error(f"Failed to create indexes: {e}")
@@ -580,6 +628,96 @@ async def _ensure_lexical_search_index(db: AsyncIOMotorDatabase) -> bool:
         logger.warning(
             f"Could not create lexical search index '{RAG_LEXICAL_INDEX_NAME}': {e}. "
             f"Hybrid retrieval via $rankFusion will be unavailable until this index exists."
+        )
+        return False
+
+
+async def _ensure_agent_memory_vector_index(db: AsyncIOMotorDatabase) -> bool:
+    """Create the Atlas Vector Search index on agent_memories.embedding.
+
+    Filter fields (`user_id`, `namespace`) are declared so the agent retriever
+    can pre-filter inside `$vectorSearch` itself, which is what makes the
+    shared multi-tenant index safe: every query MUST pre-filter on `user_id`.
+
+    Returns True if the index exists and is queryable, False otherwise.
+    """
+    collection = db[COLLECTION_AGENT_MEMORIES]
+    try:
+        existing = [idx.get("name", "") async for idx in collection.list_search_indexes()]
+        if AGENT_MEMORY_VECTOR_INDEX_NAME in existing:
+            logger.debug(f"Agent memory vector index '{AGENT_MEMORY_VECTOR_INDEX_NAME}' already exists")
+            return await _wait_for_search_index_ready(collection, AGENT_MEMORY_VECTOR_INDEX_NAME)
+
+        target_dims = _resolve_target_index_dimensions()
+        search_index = SearchIndexModel(
+            definition={
+                "fields": [
+                    {
+                        "type": "vector",
+                        "path": AgentMemoryKeys.EMBEDDING,
+                        "numDimensions": target_dims,
+                        "similarity": "cosine",
+                        "quantization": "scalar",
+                    },
+                    {"type": "filter", "path": AgentMemoryKeys.USER_ID},
+                    {"type": "filter", "path": AgentMemoryKeys.NAMESPACE},
+                ]
+            },
+            name=AGENT_MEMORY_VECTOR_INDEX_NAME,
+            type="vectorSearch",
+        )
+        await collection.create_search_index(search_index)
+        logger.info(f"Created agent memory vector index: {AGENT_MEMORY_VECTOR_INDEX_NAME}")
+        return await _wait_for_search_index_ready(collection, AGENT_MEMORY_VECTOR_INDEX_NAME)
+    except Exception as e:
+        logger.warning(
+            f"Could not create agent memory vector index '{AGENT_MEMORY_VECTOR_INDEX_NAME}': {e}. "
+            f"Agent long-term memory retrieval will not work until this index is created. "
+            f"If using local MongoDB, ensure the mongot sidecar is running."
+        )
+        return False
+
+
+async def _ensure_agent_memory_lexical_index(db: AsyncIOMotorDatabase) -> bool:
+    """Create the Atlas Search lexical index on agent_memories.content.
+
+    Paired with the vector index above via `$rankFusion` for hybrid memory
+    retrieval. Indexes `content` (text) plus `user_id` and `namespace`
+    (token) so the lexical leg of the fusion can pre-filter at mongot level.
+
+    Returns True if queryable, False otherwise.
+    """
+    collection = db[COLLECTION_AGENT_MEMORIES]
+    try:
+        existing = [idx.get("name", "") async for idx in collection.list_search_indexes()]
+        if AGENT_MEMORY_LEXICAL_INDEX_NAME in existing:
+            logger.debug(f"Agent memory lexical index '{AGENT_MEMORY_LEXICAL_INDEX_NAME}' already exists")
+            return await _wait_for_search_index_ready(collection, AGENT_MEMORY_LEXICAL_INDEX_NAME)
+
+        search_index = SearchIndexModel(
+            definition={
+                "mappings": {
+                    "dynamic": False,
+                    "fields": {
+                        AgentMemoryKeys.CONTENT: {
+                            "type": "string",
+                            "analyzer": "lucene.standard",
+                        },
+                        AgentMemoryKeys.USER_ID: {"type": "token"},
+                        AgentMemoryKeys.NAMESPACE: {"type": "token"},
+                    },
+                }
+            },
+            name=AGENT_MEMORY_LEXICAL_INDEX_NAME,
+            type="search",
+        )
+        await collection.create_search_index(search_index)
+        logger.info(f"Created agent memory lexical index: {AGENT_MEMORY_LEXICAL_INDEX_NAME}")
+        return await _wait_for_search_index_ready(collection, AGENT_MEMORY_LEXICAL_INDEX_NAME)
+    except Exception as e:
+        logger.warning(
+            f"Could not create agent memory lexical index '{AGENT_MEMORY_LEXICAL_INDEX_NAME}': {e}. "
+            f"Hybrid memory retrieval via $rankFusion will be unavailable until this index exists."
         )
         return False
 
