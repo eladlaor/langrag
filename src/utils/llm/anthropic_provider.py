@@ -21,11 +21,8 @@ from utils.llm.retry import with_retry
 from constants import (
     LlmInputPurposes,
     LLMCallType,
-    DEFAULT_LANGUAGE,
-    DEFAULT_HTML_LANGUAGE,
     MessageRole,
 )
-from custom_types.field_keys import LlmInputKeys
 from custom_types.exceptions import (
     LLMError,
     LLMResponseError,
@@ -33,6 +30,8 @@ from custom_types.exceptions import (
     ValidationError,
 )
 from utils.llm.interface import LLMProviderInterface
+from utils.llm.json_parser import parse_json_response
+from utils.llm.prompt_inputs import PromptInputBuilderMixin
 from observability.llm import is_langfuse_enabled
 
 # Conditional import for Langfuse decorators
@@ -51,57 +50,8 @@ except ImportError:
 
     langfuse_context = None
 
-from utils.llm.prompts.translation.translate_messages import TRANSLATE_MESSAGES_PROMPT
-from utils.llm.prompts.translation.translate_newsletter import TRANSLATE_NEWSLETTER_PROMPT
-from utils.llm.prompts.discussion_separation.separate_discussions import SEPARATE_DISCUSSIONS_PROMPT
-from utils.llm.prompts.newsletter_generation.langtalks_newsletter import (
-    LANGTALKS_NEWSLETTER_PROMPT,
-    WORTH_MENTIONING_WITH_CANDIDATES,
-    WORTH_MENTIONING_WITHOUT_CANDIDATES,
-)
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_json_object(raw_text: str, purpose: str) -> dict:
-    """
-    Extract a JSON object from a model response.
-
-    Handles common LLM output shapes: bare JSON, JSON wrapped in ```json ... ```
-    fences, or prose surrounding a JSON object. Raises LLMResponseError with the
-    original text on failure. No silent fallback — callers must handle the raise.
-    """
-    if raw_text is None:
-        raise LLMResponseError(f"No text in Anthropic response for {purpose}")
-
-    text = raw_text.strip()
-
-    # Strip markdown code fences if present.
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline != -1:
-            text = text[first_newline + 1 :]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-
-    # First attempt: direct parse.
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Second attempt: slice from first '{' to last '}'.
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        candidate = text[start : end + 1]
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            raise LLMResponseError(f"Failed to parse Anthropic response as JSON ({purpose}): {e}. Raw text (first 500 chars): {raw_text[:500]!r}") from e
-
-    raise LLMResponseError(f"No JSON object found in Anthropic response ({purpose}). Raw text (first 500 chars): {raw_text[:500]!r}")
 
 
 def _pydantic_to_tool(response_schema: Any, tool_name: str = "structured_response") -> dict:
@@ -157,7 +107,7 @@ def _extract_system_and_messages(messages: list[dict]) -> tuple[str | None, list
     return system_content, non_system
 
 
-class AnthropicProvider(LLMProviderInterface):
+class AnthropicProvider(PromptInputBuilderMixin, LLMProviderInterface):
     """
     Anthropic LLM provider implementation.
 
@@ -390,7 +340,7 @@ class AnthropicProvider(LLMProviderInterface):
             raw_text = text_parts[0]
             self._update_langfuse_output(raw_text, response.usage)
 
-            parsed = _extract_json_object(raw_text, purpose=purpose)
+            parsed = parse_json_response(raw_text)
             return parsed
 
         except json.JSONDecodeError as e:
@@ -450,78 +400,3 @@ class AnthropicProvider(LLMProviderInterface):
             raise
         except Exception as e:
             raise LLMError(f"Error in _get_input_by_purpose: {e}") from e
-
-    # =========================================================================
-    # Purpose-specific input builders (identical prompts, different API shape)
-    # =========================================================================
-
-    def _get_input_for_translate_whatsapp_group_messages(self, **kwargs) -> Any:
-        try:
-            translate_from = kwargs.get(LlmInputKeys.TRANSLATE_FROM, DEFAULT_LANGUAGE)
-            translate_to = kwargs.get(LlmInputKeys.TRANSLATE_TO, DEFAULT_HTML_LANGUAGE)
-            content_batch = kwargs.get(LlmInputKeys.CONTENT_BATCH)
-            if not content_batch or not isinstance(content_batch, list):
-                raise ValueError("content_batch is required")
-
-            system_prompt = TRANSLATE_MESSAGES_PROMPT.format(translate_from=translate_from, translate_to=translate_to)
-            messages = [{"role": MessageRole.SYSTEM, "content": system_prompt}, {"role": MessageRole.USER, "content": json.dumps(content_batch, ensure_ascii=False, indent=4)}]
-            settings = get_settings()
-            return {"model": settings.llm.default_model, "messages": messages, "temperature": settings.llm.temperature_translation}
-        except Exception as e:
-            raise LLMError(f"Error building translate input: {e}") from e
-
-    def _get_input_for_separate_whatsapp_group_message_discussions(self, **kwargs) -> Any:
-        try:
-            messages = kwargs.get(LlmInputKeys.MESSAGES, [])
-            if not messages or not isinstance(messages, list):
-                raise ValueError("messages list is required")
-            chat_name = kwargs.get(LlmInputKeys.CHAT_NAME)
-            if not chat_name:
-                raise ValueError("chat_name is required")
-
-            from utils.validation import sanitize_chat_name_for_prompt
-            chat_name = sanitize_chat_name_for_prompt(chat_name)
-
-            system_prompt = SEPARATE_DISCUSSIONS_PROMPT.format(chat_name=chat_name)
-            messages_prompt = [{"role": MessageRole.SYSTEM, "content": system_prompt}, {"role": MessageRole.USER, "content": json.dumps(messages, ensure_ascii=False)}]
-            settings = get_settings()
-            return {"model": settings.llm.default_model, "messages": messages_prompt, "temperature": settings.llm.temperature_discussion_separation}
-        except Exception as e:
-            raise LLMError(f"Error building separate discussions input: {e}") from e
-
-    def _get_input_for_translate_newsletter_summary(self, **kwargs) -> Any:
-        try:
-            input_to_translate = kwargs.get(LlmInputKeys.INPUT_TO_TRANSLATE)
-            if not input_to_translate:
-                raise ValueError("input_to_translate is required")
-            desired_language_for_summary = kwargs.get(LlmInputKeys.DESIRED_LANGUAGE_FOR_SUMMARY)
-            system_prompt = TRANSLATE_NEWSLETTER_PROMPT.format(desired_language=desired_language_for_summary)
-            messages_prompt = [{"role": MessageRole.SYSTEM, "content": system_prompt}, {"role": MessageRole.USER, "content": f"Here is the technical newsletter summary to translate:\n\n{input_to_translate}. Maintain the requirements."}]
-            settings = get_settings()
-            return {"messages": messages_prompt, "model": settings.llm.default_model, "temperature": settings.llm.temperature_json}
-        except Exception as e:
-            raise LLMError(f"Error building translate summary input: {e}") from e
-
-    def _get_input_for_generate_content_wa_community_langtalks_newsletter(self, **kwargs) -> Any:
-        try:
-            separate_discussions = kwargs.get(LlmInputKeys.JSON_INPUT_TO_SUMMARIZE)
-            if not separate_discussions:
-                raise ValueError("json_input_to_summarize is required")
-            examples = kwargs.get(LlmInputKeys.EXAMPLES)
-            if not examples:
-                raise ValueError("examples is required")
-            settings = get_settings()
-            model = kwargs.get(LlmInputKeys.MODEL, settings.llm.default_model)
-            brief_mention_items = kwargs.get(LlmInputKeys.BRIEF_MENTION_ITEMS, [])
-            if brief_mention_items:
-                worth_mentioning_guidance = WORTH_MENTIONING_WITH_CANDIDATES.format(num_candidates=len(brief_mention_items), brief_mention_items=json.dumps(brief_mention_items, indent=2, ensure_ascii=False))
-            else:
-                worth_mentioning_guidance = WORTH_MENTIONING_WITHOUT_CANDIDATES
-            system_prompt = LANGTALKS_NEWSLETTER_PROMPT.format(worth_mentioning_guidance=worth_mentioning_guidance)
-            messages = [{"role": MessageRole.SYSTEM, "content": system_prompt}]
-            for i, example in enumerate(examples):
-                messages.append({"role": MessageRole.ASSISTANT, "content": f"Example {i+1}:\n\n{example}"})
-            messages.append({"role": MessageRole.USER, "content": ("According to the requirements and instructions you were given, and inspired by the examples Please generate the LangTalks newsletter summary for the following discussions:\n\n" f"{json.dumps(separate_discussions, indent=2, ensure_ascii=False)}")})
-            return {"model": model, "messages": messages, "temperature": settings.llm.temperature_json}
-        except Exception as e:
-            raise LLMError(f"Error building LangTalks newsletter input: {e}") from e

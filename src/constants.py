@@ -65,12 +65,52 @@ FILE_EXT_MD = ".md"
 FILE_EXT_HTML = ".html"
 FILE_EXT_JSON = ".json"
 
+# Bare (dot-less) newsletter output extensions, used to probe for generated
+# newsletter files on disk via f"{stem}.{ext}". Order is the lookup preference.
+NEWSLETTER_OUTPUT_EXTENSIONS = ["json", "md", "html"]
+
 
 # ============================================================================
 # AUTH CONSTANTS
 # ============================================================================
 
 AUTH_BEARER_PREFIX = "Bearer"
+
+# --- Shared-password UI login gate (Fernet session cookie) ---
+# These are a SEPARATE auth surface from the RAG_API_KEY_* public-API keys.
+# Route paths are applied AFTER the API_V1_PREFIX ("/api") when mounted.
+ROUTE_AUTH_PREFIX = "/auth"
+ROUTE_AUTH_LOGIN = "/auth/login"
+ROUTE_AUTH_LOGOUT = "/auth/logout"
+ROUTE_AUTH_SESSION = "/auth/session"
+
+# Admin-only user management routes (mounted after API_V1_PREFIX, like the
+# auth routes above). Every route on this surface requires an ADMIN session.
+ROUTE_AUTH_USERS = "/auth/users"
+ROUTE_AUTH_USER_BY_ID = "/auth/users/{user_id}"
+ROUTE_AUTH_USER_PASSWORD = "/auth/users/{user_id}/password"
+ROUTE_AUTH_USER_DISABLE = "/auth/users/{user_id}/disable"
+
+# Name of the HttpOnly cookie carrying the Fernet-encrypted session token.
+SESSION_COOKIE_NAME = "langrag_session"
+
+# Fernet payload (JSON) keys/values. The cookie carries ONLY these opaque
+# claims, never the password itself.
+SESSION_SUBJECT_CLAIM = "sub"
+SESSION_SUBJECT_VALUE = "langrag-ui"
+# Per-user session claims (individual-account login). SESSION_SUBJECT_CLAIM now
+# carries the user_id; these add the role and the revocation epoch so a session
+# can be invalidated server-side by bumping the user's stored epoch.
+SESSION_ROLE_CLAIM = "role"
+SESSION_EPOCH_CLAIM = "epoch"
+
+
+class CookieSameSite(StrEnum):
+    """SameSite policy values for the session cookie."""
+
+    LAX = "lax"
+    STRICT = "strict"
+    NONE = "none"
 
 
 # ============================================================================
@@ -273,6 +313,11 @@ ROUTE_RAG_SOURCES_NEWSLETTERS = "/rag/sources/newsletters"
 # Metrics Routes (no prefix)
 ROUTE_METRICS = "/metrics"
 
+# Extracted Images Routes (admin-only gallery + media serving)
+ROUTE_IMAGES = "/images"
+ROUTE_IMAGE_BY_ID = "/images/{image_id}"
+ROUTE_MEDIA_IMAGE = "/media/images/{image_id}"
+
 # External Service URLs
 N8N_LINKEDIN_WEBHOOK_URL = "http://n8n:5678/webhook/linkedin-draft"
 
@@ -296,6 +341,7 @@ HTTP_STATUS_BAD_REQUEST = 400
 HTTP_STATUS_UNAUTHORIZED = 401
 HTTP_STATUS_FORBIDDEN = 403
 HTTP_STATUS_NOT_FOUND = 404
+HTTP_STATUS_CONFLICT = 409
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
 
@@ -319,6 +365,7 @@ COLLECTION_SENDER_MAPS = "sender_maps"
 COLLECTION_POLLS = "polls"
 COLLECTION_RAG_CHUNKS = "rag_chunks"
 COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
+COLLECTION_RAG_MESSAGES = "rag_messages"
 COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
 COLLECTION_RAG_API_KEYS = "rag_api_keys"
 # Agentic chatbot layer (v1.13.0+). See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
@@ -337,7 +384,9 @@ CURRENT_SCHEMA_VERSION_DISCUSSION = 1
 CURRENT_SCHEMA_VERSION_MESSAGE = 1
 CURRENT_SCHEMA_VERSION_NEWSLETTER = 1
 CURRENT_SCHEMA_VERSION_RAG_CHUNK = 1
-CURRENT_SCHEMA_VERSION_USER = 1
+# v2 adds individual-account login fields (password_hash, session_epoch,
+# disabled). Additive with defaults, so old v1 docs read back cleanly.
+CURRENT_SCHEMA_VERSION_USER = 2
 CURRENT_SCHEMA_VERSION_USER_API_KEY = 1
 CURRENT_SCHEMA_VERSION_AGENT_SESSION = 1
 CURRENT_SCHEMA_VERSION_AGENT_MEMORY = 1
@@ -755,6 +804,19 @@ ENV_APP_BASE_URL = "APP_BASE_URL"
 ENV_DEFAULT_EMAIL_RECIPIENT = "DEFAULT_EMAIL_RECIPIENT"
 ENV_BEEPER_ACCESS_TOKEN = "BEEPER_ACCESS_TOKEN"
 
+# UI login gate (resolved via the LANGRAG_LOGIN_ prefix in config).
+# ENV_LOGIN_PASSWORD is deprecated: individual email+password accounts replaced
+# the single shared password. The Fernet session key MUST stay stable across
+# deploys or every live session is invalidated on restart.
+ENV_LOGIN_PASSWORD = "LANGRAG_LOGIN_PASSWORD"
+ENV_LOGIN_SESSION_KEY = "LANGRAG_LOGIN_SESSION_KEY"
+
+# Bootstrap-admin seeding (resolved via the LANGRAG_LOGIN_ prefix in config).
+# When the users collection is empty at startup, exactly one admin is seeded
+# from these two values. Required only for that first-boot path.
+ENV_BOOTSTRAP_ADMIN_EMAIL = "LANGRAG_BOOTSTRAP_ADMIN_EMAIL"
+ENV_BOOTSTRAP_ADMIN_PASSWORD = "LANGRAG_BOOTSTRAP_ADMIN_PASSWORD"
+
 
 # ============================================================================
 # LANGUAGE CONSTANTS
@@ -895,6 +957,14 @@ class FileFormat(StrEnum):
     JSON = "json"
     MARKDOWN = "markdown"
     HTML = "html"
+
+
+class DiagnosticReportStatus(StrEnum):
+    """Status of a run's diagnostic report."""
+
+    CLEAN = "clean"
+    ISSUES_FOUND = "issues_found"
+    UNKNOWN = "unknown"
 
 
 class LogFormat(StrEnum):

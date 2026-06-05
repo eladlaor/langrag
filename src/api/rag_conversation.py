@@ -48,6 +48,7 @@ from custom_types.api_schemas import (
     RAGSessionResponse,
     RAGSourceStats,
 )
+from custom_types.field_keys import RAGApiKeyKeys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
 from db.repositories.rag_evaluations import EvaluationsRepository
@@ -101,17 +102,18 @@ def _iso_date_or_none(value: datetime | None) -> str | None:
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_CHAT_STREAM, dependencies=[Depends(require_api_key)])
+@router.post(ROUTE_RAG_CHAT_STREAM)
 @limiter.limit(RAG_RATE_LIMIT_CHAT)
-async def rag_chat_stream(request: Request, body: RAGChatRequest):
+async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: dict = Depends(require_api_key)):
     """SSE streaming chat endpoint with optional date-range scoping."""
     manager = ConversationManager()
+    owner = key_record[RAGApiKeyKeys.OWNER]
 
     session_id = body.session_id
     if not session_id:
-        session_id = await manager.create_session(body.content_sources)
+        session_id = await manager.create_session(body.content_sources, owner=owner)
 
-    session = await manager.get_session(session_id)
+    session = await manager.get_session(session_id, owner=owner)
     if not session:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
 
@@ -185,13 +187,14 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest):
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_SESSIONS, dependencies=[Depends(require_api_key)])
+@router.post(ROUTE_RAG_SESSIONS)
 @limiter.limit(RAG_RATE_LIMIT_DEFAULT)
-async def create_session(request: Request, body: RAGSessionCreateRequest) -> RAGSessionResponse:
-    """Create a new conversation session."""
+async def create_session(request: Request, body: RAGSessionCreateRequest, key_record: dict = Depends(require_api_key)) -> RAGSessionResponse:
+    """Create a new conversation session owned by the calling API key."""
     manager = ConversationManager()
     session_id = await manager.create_session(
         content_sources=body.content_sources,
+        owner=key_record[RAGApiKeyKeys.OWNER],
         title=body.title,
     )
     return RAGSessionResponse(
@@ -201,12 +204,12 @@ async def create_session(request: Request, body: RAGSessionCreateRequest) -> RAG
     )
 
 
-@router.get(ROUTE_RAG_SESSIONS, dependencies=[Depends(require_api_key)])
+@router.get(ROUTE_RAG_SESSIONS)
 @limiter.limit(RAG_RATE_LIMIT_DEFAULT)
-async def list_sessions(request: Request, limit: int = 20, skip: int = 0) -> list[RAGSessionResponse]:
-    """List conversation sessions (most recent first)."""
+async def list_sessions(request: Request, limit: int = 20, skip: int = 0, key_record: dict = Depends(require_api_key)) -> list[RAGSessionResponse]:
+    """List the calling key's conversation sessions (most recent first)."""
     manager = ConversationManager()
-    sessions = await manager.list_sessions(limit=limit, skip=skip)
+    sessions = await manager.list_sessions(owner=key_record[RAGApiKeyKeys.OWNER], limit=limit, skip=skip)
     return [
         RAGSessionResponse(
             session_id=s.get("session_id", ""),
@@ -220,24 +223,24 @@ async def list_sessions(request: Request, limit: int = 20, skip: int = 0) -> lis
     ]
 
 
-@router.get(ROUTE_RAG_SESSION_BY_ID, dependencies=[Depends(require_api_key)])
+@router.get(ROUTE_RAG_SESSION_BY_ID)
 @limiter.limit(RAG_RATE_LIMIT_DEFAULT)
-async def get_session(request: Request, session_id: str):
-    """Get a session with full message history."""
+async def get_session(request: Request, session_id: str, key_record: dict = Depends(require_api_key)):
+    """Get a session with full message history (only if owned by the calling key)."""
     manager = ConversationManager()
-    session = await manager.get_session(session_id)
+    session = await manager.get_session(session_id, owner=key_record[RAGApiKeyKeys.OWNER], include_messages=True)
     if not session:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
     session.pop("_id", None)
     return session
 
 
-@router.delete(ROUTE_RAG_SESSION_BY_ID, dependencies=[Depends(require_api_key)])
+@router.delete(ROUTE_RAG_SESSION_BY_ID)
 @limiter.limit(RAG_RATE_LIMIT_DEFAULT)
-async def delete_session(request: Request, session_id: str):
-    """Delete a conversation session."""
+async def delete_session(request: Request, session_id: str, key_record: dict = Depends(require_api_key)):
+    """Delete a conversation session (only if owned by the calling key)."""
     manager = ConversationManager()
-    deleted = await manager.delete_session(session_id)
+    deleted = await manager.delete_session(session_id, owner=key_record[RAGApiKeyKeys.OWNER])
     if not deleted:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
     return {"message": f"Session {session_id} deleted"}
@@ -346,17 +349,18 @@ async def get_source_stats(request: Request) -> list[RAGSourceStats]:
 # ============================================================================
 
 
-@router.post(ROUTE_RAG_CHAT, dependencies=[Depends(require_api_key)])
+@router.post(ROUTE_RAG_CHAT)
 @limiter.limit(RAG_RATE_LIMIT_CHAT)
-async def rag_chat(request: Request, body: RAGChatRequest) -> RAGChatResponse:
+async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = Depends(require_api_key)) -> RAGChatResponse:
     """Non-streaming chat endpoint with optional date-range scoping."""
     manager = ConversationManager()
+    owner = key_record[RAGApiKeyKeys.OWNER]
 
     session_id = body.session_id
     if not session_id:
-        session_id = await manager.create_session(body.content_sources)
+        session_id = await manager.create_session(body.content_sources, owner=owner)
 
-    session = await manager.get_session(session_id)
+    session = await manager.get_session(session_id, owner=owner)
     if not session:
         raise HTTPException(status_code=HTTP_STATUS_NOT_FOUND, detail=f"Session not found: {session_id}")
 

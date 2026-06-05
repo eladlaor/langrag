@@ -128,6 +128,73 @@ class ImagesRepository(BaseRepository):
             query[ImageKeys.TIMESTAMP] = ts_filter
         return await self.find_many(query, sort=[(ImageKeys.TIMESTAMP, -1)])
 
+    async def get_image_by_id(self, image_id: str) -> dict[str, Any] | None:
+        """Get a single image document by its image_id (the Mongo _id)."""
+        return await self.find_one({"_id": image_id})
+
+    async def query_images(
+        self,
+        data_source_name: str | None = None,
+        chat_name: str | None = None,
+        discussion_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 0,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """
+        Composable image query for the admin gallery.
+
+        Any combination of community (data_source_name), chat, discussion, and
+        date range may be supplied; all provided filters are ANDed together.
+        Results are newest-first; pass limit=0 for no limit.
+        """
+        query: dict[str, Any] = {}
+        if data_source_name:
+            query[ImageKeys.DATA_SOURCE_NAME] = data_source_name
+        if chat_name:
+            query[ImageKeys.CHAT_NAME] = chat_name
+        if discussion_id:
+            query[ImageKeys.DISCUSSION_ID] = discussion_id
+        if start_date or end_date:
+            ts_filter: dict[str, Any] = {}
+            if start_date:
+                ts_filter["$gte"] = _date_to_timestamp_ms(start_date)
+            if end_date:
+                ts_filter["$lte"] = _date_to_timestamp_ms(end_date, end_of_day=True)
+            query[ImageKeys.TIMESTAMP] = ts_filter
+        return await self.find_many(
+            query,
+            sort=[(ImageKeys.TIMESTAMP, -1)],
+            limit=limit,
+            skip=offset,
+        )
+
+    async def count_images(
+        self,
+        data_source_name: str | None = None,
+        chat_name: str | None = None,
+        discussion_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> int:
+        """Count images matching the same composable filters as query_images (for pagination)."""
+        query: dict[str, Any] = {}
+        if data_source_name:
+            query[ImageKeys.DATA_SOURCE_NAME] = data_source_name
+        if chat_name:
+            query[ImageKeys.CHAT_NAME] = chat_name
+        if discussion_id:
+            query[ImageKeys.DISCUSSION_ID] = discussion_id
+        if start_date or end_date:
+            ts_filter: dict[str, Any] = {}
+            if start_date:
+                ts_filter["$gte"] = _date_to_timestamp_ms(start_date)
+            if end_date:
+                ts_filter["$lte"] = _date_to_timestamp_ms(end_date, end_of_day=True)
+            query[ImageKeys.TIMESTAMP] = ts_filter
+        return await self.count(query)
+
     async def update_description(self, image_id: str, description: str, model: str) -> None:
         """Update the vision description for an image."""
         await self.update_one(

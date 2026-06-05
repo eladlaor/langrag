@@ -37,13 +37,14 @@ from db.batch_jobs import (
 )
 from constants import (
     TIMEOUT_BATCH_WORKER,
-    OutputAction,
     HEADER_CONTENT_TYPE,
     CONTENT_TYPE_JSON,
     OUTPUT_DIR_PERIODIC_NEWSLETTER,
     OUTPUT_BASE_DIR_NAME,
+    WorkflowNames,
 )
 from graphs.state_keys import ParallelOrchestratorStateKeys as OrchestratorKeys
+from utils.output_paths import build_run_output_dir
 
 logger = logging.getLogger(__name__)
 
@@ -60,23 +61,6 @@ def signal_handler(signum, frame):
     global _shutdown_requested
     logger.info(f"Received signal {signum}, initiating graceful shutdown...")
     _shutdown_requested = True
-
-
-def _resolve_batch_output_actions(newsletter_request) -> list[str]:
-    """
-    Resolve output actions for batch jobs, handling legacy create_linkedin_draft flag.
-
-    Args:
-        newsletter_request: PeriodicNewsletterRequest with output_actions and legacy fields
-
-    Returns:
-        List of output action string values
-    """
-    actions = list(newsletter_request.output_actions or [])
-    if getattr(newsletter_request, "create_linkedin_draft", False) and OutputAction.SEND_LINKEDIN not in actions:
-        logger.info("Legacy create_linkedin_draft=True detected in batch job, adding 'send_linkedin' to output_actions")
-        actions.append(OutputAction.SEND_LINKEDIN)
-    return actions
 
 
 async def send_webhook_notification(webhook_url: str, job_id: str, status: str, output_dir: str | None = None, error_message: str | None = None) -> bool:
@@ -164,63 +148,28 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
         # Importing workflow components
         from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
         from custom_types.api_schemas import PeriodicNewsletterRequest
+        from api.newsletter_gen import build_orchestrator_state
 
         # Reconstructing request object
         newsletter_request = PeriodicNewsletterRequest(**request)
 
         # Setting up output directory
         base_output_dir = newsletter_request.output_dir or os.path.join(OUTPUT_BASE_DIR_NAME, OUTPUT_DIR_PERIODIC_NEWSLETTER)
-        run_output_dir = os.path.join(base_output_dir, f"{newsletter_request.data_source_name}_{newsletter_request.start_date}_to_{newsletter_request.end_date}")
+        run_output_dir = build_run_output_dir(base_output_dir, newsletter_request.data_source_name, newsletter_request.start_date, newsletter_request.end_date)
 
         # Creating output directory
         os.makedirs(run_output_dir, exist_ok=True)
 
-        # Preparing state for parallel orchestrator
-        # Note: use_batch_api is True in the request, which will trigger
-        # batch translation in the preprocessing nodes
-        state = {
-            "workflow_name": "periodic_newsletter_batch",
-            "data_source_name": newsletter_request.data_source_name,
-            "chat_names": newsletter_request.whatsapp_chat_names_to_include,
-            "start_date": newsletter_request.start_date,
-            "end_date": newsletter_request.end_date,
-            "desired_language_for_summary": newsletter_request.desired_language_for_summary,
-            "summary_format": newsletter_request.summary_format,
-            "base_output_dir": run_output_dir,
-            # Force refresh flags
-            "force_refresh_extraction": newsletter_request.force_refresh_extraction,
-            "force_refresh_preprocessing": newsletter_request.force_refresh_preprocessing,
-            "force_refresh_translation": newsletter_request.force_refresh_translation,
-            "force_refresh_separate_discussions": newsletter_request.force_refresh_separate_discussions,
-            "force_refresh_content": newsletter_request.force_refresh_content,
-            "force_refresh_final_translation": newsletter_request.force_refresh_final_translation,
-            # Cross-chat consolidation flags
-            "consolidate_chats": newsletter_request.consolidate_chats,
-            "force_refresh_cross_chat_aggregation": newsletter_request.force_refresh_cross_chat_aggregation,
-            "force_refresh_cross_chat_ranking": newsletter_request.force_refresh_cross_chat_ranking,
-            "force_refresh_consolidated_content": newsletter_request.force_refresh_consolidated_content,
-            "force_refresh_consolidated_link_enrichment": newsletter_request.force_refresh_consolidated_link_enrichment,
-            "force_refresh_consolidated_translation": newsletter_request.force_refresh_consolidated_translation,
-            # Top-K discussions configuration
-            "top_k_discussions": newsletter_request.top_k_discussions,
-            # Anti-repetition configuration
-            "previous_newsletters_to_consider": newsletter_request.previous_newsletters_to_consider,
-            # Discussion merging configuration
-            "enable_discussion_merging": newsletter_request.enable_discussion_merging,
-            "similarity_threshold": newsletter_request.similarity_threshold,
-            # Image extraction configuration
-            "enable_image_extraction": newsletter_request.enable_image_extraction,
-            # Output actions (resolved with backward compat for create_linkedin_draft)
-            "output_actions": _resolve_batch_output_actions(newsletter_request) or [OutputAction.SAVE_LOCAL],
-            "webhook_url": newsletter_request.webhook_url,
-            "email_recipients": newsletter_request.email_recipients,
-            "substack_blog_id": newsletter_request.substack_blog_id,
-            # CRITICAL: Enable batch API for translation
-            "use_batch_api": True,
-            # Initializing aggregation fields
-            OrchestratorKeys.CHAT_RESULTS: [],
-            OrchestratorKeys.CHAT_ERRORS: [],
-        }
+        # Preparing state for parallel orchestrator via the shared builder
+        # (single source of truth — also used by the sync/streaming endpoints).
+        # The batch worker overrides the workflow name and enables the Batch API
+        # so the preprocessing nodes route translation through it.
+        state = build_orchestrator_state(
+            newsletter_request,
+            run_output_dir,
+            workflow_name=WorkflowNames.PERIODIC_NEWSLETTER_BATCH,
+            use_batch_api=True,
+        )
 
         # Config for workflow
         thread_id = f"batch_job_{job_id}"

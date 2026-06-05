@@ -10,7 +10,7 @@
 
 import { useCallback, useReducer, useRef } from "react";
 
-import { API_BASE_URL } from "../constants";
+import { API_BASE_URL, FETCH_CREDENTIALS, SESSION_EXPIRED_EVENT } from "../constants";
 import {
   AgentEventType,
   ArtifactPanelPayload,
@@ -165,12 +165,12 @@ export function dispatchSSEChunk(
       });
       return;
     case AgentEventType.ArtifactPanel:
-      dispatch({ type: "artifact_panel", payload: d as ArtifactPanelPayload });
+      dispatch({ type: "artifact_panel", payload: d as unknown as ArtifactPanelPayload });
       return;
     case AgentEventType.InterruptRequired:
       dispatch({
         type: "interrupt_required",
-        payload: d as InterruptPayload,
+        payload: d as unknown as InterruptPayload,
       });
       return;
     case AgentEventType.Error:
@@ -202,6 +202,7 @@ export function useAgentStream(): UseAgentStream {
       try {
         const resp = await fetch(`${API_BASE_URL}${path}`, {
           method: "POST",
+          credentials: FETCH_CREDENTIALS,
           headers: {
             "Content-Type": "application/json",
             "X-API-Key": apiKey,
@@ -210,6 +211,9 @@ export function useAgentStream(): UseAgentStream {
           signal: controller.signal,
         });
         if (!resp.ok) {
+          if (resp.status === 401) {
+            window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+          }
           dispatch({ type: "error", message: `HTTP ${resp.status}` });
           return;
         }

@@ -16,7 +16,7 @@ Architecture:
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Loading environment variables FIRST, before any other imports that depend on env vars
@@ -33,7 +33,8 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Importing routers after logging setup
-from api import newsletter_gen, async_batch_orchestration, schedules, rag_conversation
+from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media
+from api.auth import require_session
 from api.observability import metrics_router, runs_router
 from constants import (
     API_V1_PREFIX,
@@ -72,14 +73,37 @@ async def lifespan(app: FastAPI):
     if _missing_keys:
         raise RuntimeError(f"Required API keys missing from environment: {_missing_keys}. Set them in .env and ensure docker-compose passes them through before starting the service.")
 
+    # Fail-fast on a misconfigured login gate so production never boots an open
+    # gate. When enabled, both the shared password and the Fernet session key
+    # MUST be present (mirrors the RAG_API_KEY_PEPPER check in hash_api_key).
+    from config import get_settings as _get_settings
+    from constants import ENV_LOGIN_PASSWORD, ENV_LOGIN_SESSION_KEY
+
+    _login_settings = _get_settings().login
+    if _login_settings.enabled:
+        _login_missing = []
+        if not _login_settings.password:
+            _login_missing.append(ENV_LOGIN_PASSWORD)
+        if not _login_settings.session_key:
+            _login_missing.append(ENV_LOGIN_SESSION_KEY)
+        if _login_missing:
+            raise RuntimeError(
+                f"Login gate is enabled but required secrets are missing: {_login_missing}. "
+                f"Set them in the environment (or set LANGRAG_LOGIN_ENABLED=false to disable the gate) before starting the service."
+            )
+
     try:
         from db.connection import get_database, close_connection
         from db.indexes import ensure_indexes
+
+        from db.bootstrap_admin import ensure_bootstrap_admin
 
         logger.info("Initializing MongoDB connection...")
         db = await get_database()
         logger.info("Creating database indexes...")
         await ensure_indexes(db)
+        logger.info("Ensuring bootstrap admin...")
+        await ensure_bootstrap_admin(db)
         logger.info("MongoDB initialization complete")
     except Exception as e:
         logger.error(f"MongoDB initialization failed: {e}")
@@ -160,20 +184,37 @@ from api.rate_limiting import setup_rate_limiting
 
 setup_rate_limiting(app)
 
-# Including routers
-app.include_router(newsletter_gen.router, prefix=API_V1_PREFIX, tags=["newsletter-generation"])
-app.include_router(async_batch_orchestration.router, prefix=API_V1_PREFIX, tags=["async-batch-orchestration"])
-app.include_router(runs_router, prefix=API_V1_PREFIX, tags=["observability-runs"])
+# Auth router is mounted PUBLICLY: login/logout/session must be reachable
+# without an existing session (it is what establishes the session).
+app.include_router(auth.router, prefix=API_V1_PREFIX, tags=["auth"])
+# Admin-only user management. The router self-guards every route with
+# require_admin (which depends on require_session), so no _session_gate here.
+app.include_router(admin_users.router, prefix=API_V1_PREFIX, tags=["admin-users"])
+# Admin-only extracted-images gallery + media serving. Both routers self-guard
+# every route with require_admin, so no _session_gate here.
+app.include_router(images.router, prefix=API_V1_PREFIX, tags=["images"])
+app.include_router(media.router, prefix=API_V1_PREFIX, tags=["media"])
+
+# UI-facing data routers are gated server-side by the require_session dependency
+# so even a client that bypasses the React LoginGate (e.g. curl) cannot read
+# newsletter / runs / schedules / RAG data without a valid session cookie.
+_session_gate = [Depends(require_session)]
+app.include_router(newsletter_gen.router, prefix=API_V1_PREFIX, tags=["newsletter-generation"], dependencies=_session_gate)
+# Was previously mounted with no session gate (the only UI-data router lacking
+# one). Closed while hardening the auth boundary: batch orchestration triggers
+# real newsletter runs and must not be reachable unauthenticated.
+app.include_router(async_batch_orchestration.router, prefix=API_V1_PREFIX, tags=["async-batch-orchestration"], dependencies=_session_gate)
+app.include_router(runs_router, prefix=API_V1_PREFIX, tags=["observability-runs"], dependencies=_session_gate)
 app.include_router(metrics_router, tags=["observability-metrics"])
-app.include_router(schedules.router, prefix=API_V1_PREFIX, tags=["schedules"])
-app.include_router(rag_conversation.router, prefix=API_V1_PREFIX, tags=["rag-conversation"])
+app.include_router(schedules.router, prefix=API_V1_PREFIX, tags=["schedules"], dependencies=_session_gate)
+app.include_router(rag_conversation.router, prefix=API_V1_PREFIX, tags=["rag-conversation"], dependencies=_session_gate)
 
 # Agentic chatbot (v1.13.0+): mounted only when AGENT_ENABLED=true so the
 # default deployment is unaffected. See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
 if get_settings().agent.enabled:
     from api import agent_chat
 
-    app.include_router(agent_chat.router, prefix=API_V1_PREFIX, tags=["agent"])
+    app.include_router(agent_chat.router, prefix=API_V1_PREFIX, tags=["agent"], dependencies=_session_gate)
 
 
 @app.get(ROUTE_ROOT)

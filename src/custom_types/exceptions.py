@@ -357,6 +357,18 @@ class ChatNameError(ValidationError):
     pass
 
 
+class PathContainmentError(ValidationError):
+    """
+    Resolved filesystem path escapes its allowed base directory.
+
+    Raised by ``utils.validation.resolve_path_within_base`` when a
+    client-supplied path, after symlink/realpath resolution, would
+    fall outside the permitted base directory (path-traversal attempt).
+    """
+
+    pass
+
+
 # =============================================================================
 # WORKFLOW ERRORS
 # =============================================================================

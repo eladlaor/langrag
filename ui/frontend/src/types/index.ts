@@ -286,3 +286,39 @@ export interface DiagnosticReport {
   raw_issues?: DiagnosticIssue[];
   generated_at?: string;
 }
+
+// ==================== Extracted Images Gallery ====================
+
+export interface ExtractedImageItem {
+  image_id: string;
+  image_url: string;
+  chat_name: string | null;
+  data_source_name: string | null;
+  timestamp: number | null;
+  sender_id: string | null;
+  mimetype: string | null;
+  width: number | null;
+  height: number | null;
+  size_bytes: number | null;
+  filename: string | null;
+  description: string | null;
+  discussion_id: string | null;
+  discussion_title: string | null;
+}
+
+export interface ExtractedImagesResponse {
+  images: ExtractedImageItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ExtractedImagesQuery {
+  data_source_name?: string;
+  chat_name?: string;
+  discussion_id?: string;
+  start_date?: string;
+  end_date?: string;
+  limit?: number;
+  offset?: number;
+}

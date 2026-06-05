@@ -22,6 +22,7 @@ but doesn't yet enforce token quotas — commit 11 adds full
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import Any, Awaitable, Callable
 
 from langchain_core.messages import (
@@ -56,8 +57,11 @@ from graphs.state_keys import AgentStateKeys as Keys
 logger = logging.getLogger(__name__)
 
 
-# Node names — exposed so tests can assert on the routing.
-class NodeNames:
+# Node names — exposed so tests can assert on the routing. StrEnum so node
+# identifiers are type-checked at the call sites (a typo'd member is an
+# AttributeError, not a silently-misrouted string) while still comparing and
+# hashing equal to their string values for LangGraph edges/mappings.
+class NodeNames(StrEnum):
     LOAD_MEMORY = "load_memory"
     AGENT = "agent"
     TOOLS = "tools"
@@ -376,7 +380,11 @@ async def build_agent_graph(
             NodeNames.EXTRACT_MEMORY: NodeNames.EXTRACT_MEMORY,
         },
     )
-    g.add_edge(NodeNames.SUMMARIZE, NodeNames.AGENT)
+    # End-of-turn compaction: the agent has already produced its final answer (no
+    # tool calls) before routing here, so summarize → extract_memory → END. Routing
+    # back to AGENT would re-answer on a compacted history and, worse, could oscillate
+    # SUMMARIZE↔AGENT without ever reaching EXTRACT_MEMORY (memory loss on long turns).
+    g.add_edge(NodeNames.SUMMARIZE, NodeNames.EXTRACT_MEMORY)
     g.add_edge(NodeNames.EXTRACT_MEMORY, END)
 
     return g.compile(checkpointer=checkpointer, store=store)

@@ -86,6 +86,17 @@ services:
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
       DEFAULT_EMAIL_RECIPIENT: ${DEFAULT_EMAIL_RECIPIENT:-}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+
+      # UI login gate (shared password + Fernet session cookie). When enabled,
+      # the app fails fast at startup if PASSWORD or SESSION_KEY is missing.
+      LANGRAG_LOGIN_ENABLED: ${LANGRAG_LOGIN_ENABLED:-true}
+      LANGRAG_LOGIN_PASSWORD: ${LANGRAG_LOGIN_PASSWORD:-}
+      LANGRAG_LOGIN_SESSION_KEY: ${LANGRAG_LOGIN_SESSION_KEY:-}
+      LANGRAG_LOGIN_SESSION_TTL_MINUTES: ${LANGRAG_LOGIN_SESSION_TTL_MINUTES:-720}
+      LANGRAG_LOGIN_COOKIE_SECURE: ${LANGRAG_LOGIN_COOKIE_SECURE:-true}
+      LANGRAG_LOGIN_COOKIE_SAMESITE: ${LANGRAG_LOGIN_COOKIE_SAMESITE:-lax}
+      LANGRAG_BOOTSTRAP_ADMIN_EMAIL: ${LANGRAG_BOOTSTRAP_ADMIN_EMAIL:-}
+      LANGRAG_BOOTSTRAP_ADMIN_PASSWORD: ${LANGRAG_BOOTSTRAP_ADMIN_PASSWORD:-}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -158,6 +169,16 @@ services:
     networks:
       - langrag-network
     restart: unless-stopped
+    # The mcp-server reuses the app Dockerfile, whose HEALTHCHECK probes
+    # :8000/health. This service listens on :8765 (FastMCP streamable-http,
+    # no plain /health route), so we override with a stdlib TCP-connect probe
+    # that needs no extra endpoint or auth.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('localhost',8765),3); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   # ----------------------------------------------------------------------
   # certbot — Let's Encrypt issuance & renewal for langrag.ai +
@@ -362,8 +383,10 @@ services:
   # mongot on dedicated Search Nodes that scale independently (HNSW is RAM-hungry).
   # Our local stack is API-faithful, not architecture-faithful. For a real prod deployment
   # the choice is: (a) move to Atlas Cloud and get real Search Nodes, or (b) self-host
-  # on-prem and replace mongot with Elasticsearch/OpenSearch synced via change streams
-  # (mongot is not separately deployable outside Atlas). See knowledge/mongodb/INTERVIEW_PREP.md §14.1.
+  # on-prem and replace mongot with Elasticsearch/OpenSearch synced via change streams.
+  # (A standalone self-managed mongot — mongodb-community-search, mongod 8.2+ — exists as
+  # PUBLIC PREVIEW / dev-only since 2025-09-17, so it is NOT a production option yet;
+  # production-grade mongot still ships only inside Atlas.) See knowledge/mongodb/INTERVIEW_PREP.md §14.1.
   mongodb:
     image: mongodb/mongodb-atlas-local:8.2
     container_name: langrag-mongodb

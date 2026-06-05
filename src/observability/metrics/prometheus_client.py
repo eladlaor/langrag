@@ -72,6 +72,17 @@ class PrometheusMetricsClient:
 
             self.parallel_queue_depth = Gauge(name="langgraph_parallel_queue_depth", documentation="Number of tasks in parallel execution queue", labelnames=["workflow_name"])
 
+            # MongoDB connection-pool observability (fed by MongoPoolMetricsListener).
+            # `client` distinguishes the async (motor) pool from the sync (pymongo) pool.
+            self.mongodb_pool_connections = Gauge(name="mongodb_pool_connections", documentation="Current MongoDB connections by state (checked_out / available / created)", labelnames=["client", "state"])
+
+            # Time a checkout waited from request to a usable connection — the head-of-line signal.
+            # Buckets in seconds: sub-ms checkouts up to a multi-second wait near serverSelectionTimeout.
+            self.mongodb_pool_checkout_wait = Histogram(name="mongodb_pool_checkout_wait_seconds", documentation="Time spent waiting to check out a MongoDB connection from the pool", labelnames=["client"], buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, float("inf")])
+
+            # Non-zero values here are the saturation alarm: checkouts that timed out or errored.
+            self.mongodb_pool_checkout_failures = Counter(name="mongodb_pool_checkout_failures_total", documentation="Total MongoDB connection checkout failures by reason", labelnames=["client", "reason"])
+
             logger.info("Prometheus metrics client initialized successfully")
 
         except Exception as e:
@@ -154,6 +165,27 @@ class PrometheusMetricsClient:
             logger.debug(f"Tracked parallel workers: workflow={workflow_name}, active={active_count}, queue_depth={queue_depth}")
         except Exception as e:
             logger.warning(f"Failed to track parallel worker metrics: {e}")
+
+    def set_pool_connections(self, client: str, state: str, count: int) -> None:
+        """Set the gauge for current pool connections in a given state. Fail-soft."""
+        try:
+            self.mongodb_pool_connections.labels(client=client, state=state).set(count)
+        except Exception as e:
+            logger.warning(f"Failed to set mongodb pool connections metric: {e}")
+
+    def observe_pool_checkout_wait(self, client: str, wait_seconds: float) -> None:
+        """Record how long a successful connection checkout waited. Fail-soft."""
+        try:
+            self.mongodb_pool_checkout_wait.labels(client=client).observe(wait_seconds)
+        except Exception as e:
+            logger.warning(f"Failed to observe mongodb pool checkout wait metric: {e}")
+
+    def increment_pool_checkout_failure(self, client: str, reason: str) -> None:
+        """Increment the checkout-failure counter (saturation signal). Fail-soft."""
+        try:
+            self.mongodb_pool_checkout_failures.labels(client=client, reason=reason).inc()
+        except Exception as e:
+            logger.warning(f"Failed to increment mongodb pool checkout failure metric: {e}")
 
     def get_metrics_export(self) -> bytes:
         """Get Prometheus-formatted metrics for /metrics endpoint.

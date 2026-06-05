@@ -52,6 +52,11 @@ class PreviousNewslettersContext:
     newsletters: list[PreviousNewsletterContext] = field(default_factory=list)
     total_editions: int = 0
     date_range_covered: str = ""  # e.g., "2025-09-01 to 2025-10-26"
+    # True when the history backend (MongoDB / filesystem) errored out, so callers can
+    # distinguish "no previous newsletters exist" (genuinely empty, first run) from
+    # "history could not be loaded" (backend outage). An empty newsletters list with this
+    # flag set means history is UNAVAILABLE, not absent.
+    history_unavailable: bool = False
 
 
 def _parse_run_directory_name(dir_name: str) -> tuple[str, str, str] | None:
@@ -244,9 +249,10 @@ async def load_previous_newsletters(
         return _load_previous_newsletters_from_files(data_source_name=data_source_name, current_start_date=current_start_date, max_newsletters=max_newsletters, output_base_dir=output_base_dir)
 
     except Exception as e:
-        logger.error(f"Error in load_previous_newsletters: {e}")
-        # Graceful degradation
-        return PreviousNewslettersContext()
+        # Backend error (not "no history"): flag as unavailable so the ranker does not
+        # mistake an outage for a genuine first run.
+        logger.error(f"Error in load_previous_newsletters: {e}", extra={"data_source_name": data_source_name, "current_start_date": current_start_date, "max_newsletters": max_newsletters})
+        return PreviousNewslettersContext(history_unavailable=True)
 
 
 def _load_previous_newsletters_from_files(
@@ -298,6 +304,12 @@ def _load_previous_newsletters_from_files(
             logger.warning(f"Output directory not found: {base_dir}")
             return PreviousNewslettersContext()
 
+        # Runs are nested per community: <base_dir>/<data_source_name>/<run_id>/
+        community_dir = base_dir / data_source_name
+        if not community_dir.exists():
+            logger.warning(f"No runs found for data source '{data_source_name}' under {base_dir}")
+            return PreviousNewslettersContext()
+
         # Parse current start date for comparison
         try:
             current_date = datetime.strptime(current_start_date, "%Y-%m-%d")
@@ -307,7 +319,7 @@ def _load_previous_newsletters_from_files(
 
         # Find matching run directories
         matching_runs = []
-        for item in base_dir.iterdir():
+        for item in community_dir.iterdir():
             if not item.is_dir():
                 continue
 
@@ -367,9 +379,9 @@ def _load_previous_newsletters_from_files(
         return result
 
     except Exception as e:
-        logger.error(f"Unexpected error loading previous newsletters: {e}")
-        # Graceful degradation - return empty context
-        return PreviousNewslettersContext()
+        # Backend/filesystem error (not "no history"): flag as unavailable.
+        logger.error(f"Unexpected error loading previous newsletters from files: {e}", extra={"data_source_name": data_source_name, "current_start_date": current_start_date, "output_base_dir": output_base_dir})
+        return PreviousNewslettersContext(history_unavailable=True)
 
 
 async def load_previous_newsletters_from_mongodb(
@@ -502,9 +514,10 @@ async def load_previous_newsletters_from_mongodb(
         return result
 
     except Exception as e:
-        logger.error(f"Unexpected error loading previous newsletters from MongoDB: {e}")
-        # Graceful degradation - return empty context
-        return PreviousNewslettersContext()
+        # MongoDB backend error (not "no history"): flag as unavailable so a DB outage is
+        # not silently indistinguishable from a genuine first run.
+        logger.error(f"Unexpected error loading previous newsletters from MongoDB: {e}", extra={"data_source_name": data_source_name, "current_start_date": current_start_date, "max_newsletters": max_newsletters})
+        return PreviousNewslettersContext(history_unavailable=True)
 
 
 def format_previous_context_for_prompt(

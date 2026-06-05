@@ -20,7 +20,8 @@
 <br>
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG pipeline overview - animated" width="800">
+  <img src="docs/figures/pipeline_overview/pipeline_overview.gif" alt="LangRAG newsletter generation pipeline - animated" width="800">
+  <p><sub><em>The newsletter generation pipeline. LangRAG also exposes a RAG query layer (REST API + MCP server) over past newsletters and podcast transcripts — see <a href="#how">How</a>.</em></sub></p>
 </div>
 
 <br>
@@ -38,7 +39,7 @@
   - [AI Transformation Guild](#ai-transformation-guild)
   - [AIL - AI Leaders](#ail---ai-leaders)
 - [How It Works](#how-it-works)
-  - [Pipeline Overview](#pipeline-overview)
+  - [Newsletter Generation Pipeline](#newsletter-generation-pipeline)
   - [What Gives This Solution an Edge](#what-gives-this-solution-an-edge)
   - [Why Reply Correlation Matters](#why-reply-correlation-matters)
 - [Setup](#setup)
@@ -154,10 +155,12 @@ Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melam
 
 ## How It Works
 
-### Pipeline Overview
+### Newsletter Generation Pipeline
+
+The diagram below covers the **newsletter generation** flow only — message extraction through final, multi-channel delivery. The separate RAG query layer (REST API + MCP server over past newsletters and podcast transcripts) is described under [How](#how).
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG pipeline overview - full diagram" width="800">
+  <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG newsletter generation pipeline - full diagram" width="800">
 </div>
 
 ---

@@ -227,8 +227,17 @@ INDEXES = {
     "rag_conversations": [
         # Primary lookup by session_id
         {"keys": [("session_id", ASCENDING)], "unique": True},
+        # Owner-scoped session listing, sorted by recency (match owner, then sort updated_at desc)
+        {"keys": [("owner", ASCENDING), ("updated_at", DESCENDING)]},
         # List sessions by recency
         {"keys": [("created_at", DESCENDING)]},
+    ],
+    "rag_messages": [
+        # Unique message_id guards against duplicate inserts (idempotent migration too)
+        {"keys": [("message_id", ASCENDING)], "unique": True},
+        # History retrieval: last-N for a session, newest first. Also serves
+        # count_for_session and cascade delete_for_session (session_id prefix).
+        {"keys": [("session_id", ASCENDING), ("created_at", DESCENDING)]},
     ],
     "rag_api_keys": [
         # Primary lookup by hashed key (used on every authenticated request)
@@ -263,7 +272,13 @@ INDEXES = {
     "users": [
         # Primary lookup
         {"keys": [("user_id", ASCENDING)], "unique": True},
-        # Unique-by-email gives us idempotent signup + cheap email auth lookups
+        # Unique-by-email gives us idempotent signup + cheap email auth lookups.
+        # Email is canonicalized (lowercased + trimmed) at the repository boundary
+        # by normalize_email(), so this case-sensitive unique index is sufficient:
+        # every stored value is already lowercase. (A case-insensitive collation
+        # would be defense-in-depth, but changing an existing index's collation
+        # requires an explicit drop+recreate migration; normalization at the one
+        # repo chokepoint closes the duplicate-identity hole without that.)
         {"keys": [("email", ASCENDING)], "unique": True},
         # Reverse community lookup (e.g., "who owns mcp_israel?")
         {"keys": [("communities", ASCENDING)]},

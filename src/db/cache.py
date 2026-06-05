@@ -46,7 +46,8 @@ class CacheService:
             self._initialized = True
             return True
         except Exception as e:
-            logger.debug(f"MongoDB cache not available: {e}")
+            # Fail-soft (cache is optional) but visible: a real outage must not hide at DEBUG.
+            logger.warning("MongoDB cache unavailable; proceeding without cache", extra={"error": str(e)})
             return False
 
     @staticmethod
@@ -67,7 +68,8 @@ class CacheService:
                 return cached["value"]
             return None
         except Exception as e:
-            logger.debug(f"Cache get failed: {e}")
+            # A read error after successful init is an operational fault, not a miss — surface it.
+            logger.warning("Cache get failed; treating as miss", extra={"operation": operation, "error": str(e)})
             return None
 
     async def set(self, operation: str, content_hash: str, value: Any, metadata: dict | None = None) -> bool:
@@ -81,7 +83,7 @@ class CacheService:
             await self._cache_repo.set_cached(key=cache_key, value=value, operation=operation, ttl_seconds=ttl_seconds, metadata=metadata)
             return True
         except Exception as e:
-            logger.debug(f"Cache set failed: {e}")
+            logger.warning("Cache set failed; value not cached", extra={"operation": operation, "error": str(e)})
             return False
 
     async def invalidate(self, operation: str, content_hash: str) -> bool:
@@ -94,7 +96,7 @@ class CacheService:
             await self._cache_repo.invalidate(cache_key)
             return True
         except Exception as e:
-            logger.debug(f"Cache invalidate failed: {e}")
+            logger.warning("Cache invalidate failed", extra={"operation": operation, "error": str(e)})
             return False
 
     async def invalidate_operation(self, operation: str) -> int:
@@ -105,7 +107,7 @@ class CacheService:
         try:
             return await self._cache_repo.invalidate_by_operation(operation)
         except Exception as e:
-            logger.debug(f"Cache invalidate_operation failed: {e}")
+            logger.warning("Cache invalidate_operation failed", extra={"operation": operation, "error": str(e)})
             return 0
 
     async def get_stats(self) -> dict:

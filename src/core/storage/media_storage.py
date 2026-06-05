@@ -35,6 +35,11 @@ class MediaStorageInterface(ABC):
         ...
 
     @abstractmethod
+    async def read(self, path: str) -> bytes:
+        """Read and return the raw bytes stored at the given relative path."""
+        ...
+
+    @abstractmethod
     async def exists(self, path: str) -> bool:
         """Check if a file exists at the given path."""
         ...
@@ -65,6 +70,19 @@ class LocalMediaStorage(MediaStorageInterface):
             await f.write(data)
         return path
 
+    async def read(self, path: str) -> bytes:
+        full_path = self._resolve_within_base(path)
+        async with aiofiles.open(full_path, "rb") as f:
+            return await f.read()
+
+    def _resolve_within_base(self, path: str) -> str:
+        """Resolve a relative storage path under base_dir, rejecting traversal escapes."""
+        base = os.path.realpath(self._base_dir)
+        full_path = os.path.realpath(os.path.join(base, path))
+        if full_path != base and not full_path.startswith(base + os.sep):
+            raise ValueError(f"Resolved path escapes media base directory: {path}")
+        return full_path
+
     async def exists(self, path: str) -> bool:
         full_path = os.path.join(self._base_dir, path)
         return await asyncio.to_thread(os.path.exists, full_path)
@@ -85,6 +103,19 @@ class LocalMediaStorage(MediaStorageInterface):
 
     def get_full_path(self, relative_path: str) -> str:
         return os.path.join(self._base_dir, relative_path)
+
+
+def get_media_storage() -> MediaStorageInterface:
+    """
+    Construct the configured media storage backend.
+
+    Single construction site for media storage so the ingestion pipeline and the
+    serving endpoint stay in sync, and so swapping LocalMediaStorage for an
+    S3/MinIO backend later is a one-line change here.
+    """
+    from config import get_settings
+
+    return LocalMediaStorage(base_dir=get_settings().vision.media_base_dir)
 
 
 def _slugify(text: str) -> str:

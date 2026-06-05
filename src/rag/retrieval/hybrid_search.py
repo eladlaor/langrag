@@ -23,6 +23,7 @@ from typing import Any
 from bson.binary import Binary, BinaryVectorDtype
 from motor.motor_asyncio import AsyncIOMotorCollection
 
+from config import get_settings
 from constants import (
     RAG_HYBRID_LEXICAL_WEIGHT,
     RAG_HYBRID_VECTOR_WEIGHT,
@@ -104,7 +105,8 @@ async def hybrid_search_chunks(
         dtype=BinaryVectorDtype.FLOAT32,
     )
 
-    num_candidates = min(top_k * 20, _MAX_NUM_CANDIDATES)
+    num_candidates_multiplier = get_settings().rag.vector_search_num_candidates_multiplier
+    num_candidates = min(top_k * num_candidates_multiplier, _MAX_NUM_CANDIDATES)
     vector_stage: dict[str, Any] = {
         "$vectorSearch": {
             "index": RAG_VECTOR_INDEX_NAME,

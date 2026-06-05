@@ -8,9 +8,81 @@ Models follow the same structure as the original Flask endpoints to maintain
 API contract compatibility.
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from constants import OutputAction, BatchJobStatus
+from custom_types.db_schemas import UserRole
+
+
+# ============= Auth / Login Gate Models =============
+
+
+class LoginRequest(BaseModel):
+    """Request body for the individual-account login endpoint."""
+
+    email: EmailStr = Field(..., description="Account email address.")
+    password: str = Field(..., description="Account password supplied by the user.")
+
+
+class SessionResponse(BaseModel):
+    """Response indicating whether the caller holds a valid session."""
+
+    authenticated: bool = Field(..., description="True when a valid, unexpired session cookie was presented.")
+    email: str | None = Field(default=None, description="Email of the authenticated user, when known.")
+    role: UserRole | None = Field(default=None, description="Role of the authenticated user, when known.")
+
+
+class SessionPayload(BaseModel):
+    """Decoded contents of the Fernet session cookie.
+
+    `sub` carries the user_id; `epoch` is the user's revocation epoch at the
+    time the token was issued, compared against the stored epoch to honor
+    server-side session revocation (password reset bumps the epoch).
+    """
+
+    sub: str = Field(..., description="Subject claim: the authenticated user_id.")
+    role: UserRole = Field(..., description="Role claim captured at token issue time.")
+    epoch: int = Field(..., description="Session revocation epoch captured at token issue time.")
+
+
+class CurrentUser(BaseModel):
+    """The resolved, authorized user attached to a request by require_session."""
+
+    user_id: str = Field(..., description="Application-level user identifier.")
+    email: str = Field(..., description="User email address.")
+    role: UserRole = Field(..., description="User role for authorization branching.")
+    communities: list[str] = Field(default_factory=list, description="Community keys this user may act on.")
+
+
+class AdminUserView(BaseModel):
+    """Admin-facing projection of a user document. NEVER includes password_hash."""
+
+    user_id: str = Field(..., description="Application-level user identifier.")
+    email: str = Field(..., description="User email address.")
+    role: UserRole = Field(..., description="User role.")
+    communities: list[str] = Field(default_factory=list, description="Community keys this user may act on.")
+    disabled: bool = Field(default=False, description="True when the account is disabled (cannot log in).")
+
+
+class CreateUserRequest(BaseModel):
+    """Admin request to create (invite) a new user account."""
+
+    email: EmailStr = Field(..., description="Email for the new account (must be unique).")
+    password: str = Field(..., min_length=1, description="Initial password for the new account.")
+    role: UserRole = Field(default=UserRole.VIEWER, description="Role to assign to the new account.")
+    communities: list[str] = Field(default_factory=list, description="Community keys the new account may act on.")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Admin request to set a new password for an existing user."""
+
+    password: str = Field(..., min_length=1, description="New password to set (also revokes existing sessions).")
+
+
+class SetDisabledRequest(BaseModel):
+    """Admin request to enable or disable a user account."""
+
+    disabled: bool = Field(..., description="True to disable the account, False to re-enable it.")
 
 
 # ============= Periodic Newsletter Models =============
@@ -394,3 +466,34 @@ class RAGChatResponse(BaseModel):
     freshness_warning: bool = Field(default=False, description="True if the most recent retrieved chunk is older than the configured freshness threshold")
     oldest_source_date: str | None = Field(default=None, description="ISO date of the oldest retrieved source")
     newest_source_date: str | None = Field(default=None, description="ISO date of the newest retrieved source")
+
+
+# ============= Extracted Images Gallery Models =============
+
+
+class ExtractedImageItem(BaseModel):
+    """A single extracted image with serving URL and gallery metadata."""
+
+    image_id: str
+    image_url: str = Field(description="Ready-to-use URL for fetching the image bytes (GET /api/media/images/{image_id})")
+    chat_name: str | None = None
+    data_source_name: str | None = None
+    timestamp: int | None = Field(default=None, description="Original message timestamp in epoch milliseconds")
+    sender_id: str | None = None
+    mimetype: str | None = None
+    width: int | None = None
+    height: int | None = None
+    size_bytes: int | None = None
+    filename: str | None = None
+    description: str | None = Field(default=None, description="Vision-LLM generated description, if image description was enabled")
+    discussion_id: str | None = None
+    discussion_title: str | None = Field(default=None, description="Title of the associated discussion, resolved for display/linking")
+
+
+class ExtractedImagesResponse(BaseModel):
+    """Paginated gallery response for extracted images."""
+
+    images: list[ExtractedImageItem]
+    total: int = Field(description="Total number of images matching the filters, ignoring pagination")
+    limit: int
+    offset: int

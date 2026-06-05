@@ -14,6 +14,7 @@ Endpoints:
 - GET /search/discussions - Semantic search across discussions
 """
 
+import asyncio
 import os
 import json
 import logging
@@ -58,7 +59,9 @@ from constants import (
     ROUTE_MONGODB_RUN_POLLS,
     ROUTE_MONGODB_STATS,
     ENGLISH_LANGUAGE_CODES,
+    DiagnosticReportStatus,
     FileFormat,
+    NEWSLETTER_OUTPUT_EXTENSIONS,
     NewsletterType,
     RunStatus,
     RunType,
@@ -66,6 +69,10 @@ from constants import (
     TextDirection,
 )
 from custom_types.field_keys import DbFieldKeys, DiscussionKeys, RankingResultKeys
+from custom_types.exceptions import PathContainmentError
+from utils.output_paths import resolve_run_dir
+from utils.validation import resolve_path_within_base
+from utils.run_diagnostics import DiagnosticSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -305,190 +312,38 @@ def parse_run_directory(dir_name: str) -> dict:
         return {"data_source": "unknown", "start_date": "unknown", "end_date": "unknown"}
 
 
-def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
-    """Get detailed information about a run from its directory."""
-    run_id = os.path.basename(run_dir)
-    parsed = parse_run_directory(run_id)
+def _scan_periodic_runs() -> list[RunInfo]:
+    """Walk the periodic output directory and build a RunInfo per run dir.
 
-    # Get creation time from directory
-    try:
-        created_at = datetime.fromtimestamp(os.path.getctime(run_dir), tz=UTC).isoformat()
-    except OSError:
-        created_at = None
+    Layout is nested per community:
+    <PERIODIC_OUTPUT_DIR>/<community>/<community>_<start>_to_<end>/
 
-    # Check for consolidated outputs
-    consolidated_dir = os.path.join(run_dir, DIR_NAME_CONSOLIDATED)
-    has_consolidated = os.path.isdir(consolidated_dir)
-
-    # Check for per-chat outputs
-    per_chat_dir = os.path.join(run_dir, DIR_NAME_PER_CHAT)
-    has_per_chat = os.path.isdir(per_chat_dir)
-
-    # Check for HITL pending state
-    has_hitl_pending = False
-    ranked_file = os.path.join(consolidated_dir, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
-    after_selection_dir = os.path.join(consolidated_dir, DIR_NAME_AFTER_SELECTION)
-
-    # HITL is NOT pending if after_selection output exists (Phase 2 completed)
-    phase2_completed = os.path.isdir(after_selection_dir) and any(os.path.exists(os.path.join(after_selection_dir, subdir, f)) for subdir in [DIR_NAME_NEWSLETTER, DIR_NAME_LINK_ENRICHMENT] for f in [OUTPUT_FILENAME_NEWSLETTER_JSON, OUTPUT_FILENAME_ENRICHED_JSON])
-
-    if not phase2_completed and os.path.exists(ranked_file):
-        try:
-            with open(ranked_file) as f:
-                ranked_data = json.load(f)
-                # HITL is pending if phase_1_complete but Phase 2 not done
-                has_hitl_pending = ranked_data.get(HITL_KEY_PHASE_1_COMPLETE, False)
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    # Find available newsletter paths
-    newsletter_paths = {}
-
-    # Check consolidated/after_selection first (HITL completed)
-    after_selection_dir = os.path.join(consolidated_dir, DIR_NAME_AFTER_SELECTION, DIR_NAME_LINK_ENRICHMENT)
-    if os.path.isdir(after_selection_dir):
-        for ext in ["html", "md", "json"]:
-            path = os.path.join(after_selection_dir, f"{OUTPUT_FILESTEM_ENRICHED}.{ext}")
-            if os.path.exists(path):
-                newsletter_paths[f"consolidated_{ext}"] = path
-
-    # Fallback to consolidated/newsletter
-    if not newsletter_paths:
-        newsletter_dir = os.path.join(consolidated_dir, DIR_NAME_NEWSLETTER)
-        if os.path.isdir(newsletter_dir):
-            for ext in ["html", "md", "json"]:
-                path = os.path.join(newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
-                if os.path.exists(path):
-                    newsletter_paths[f"consolidated_{ext}"] = path
-
-    # Also check link_enrichment in consolidated root
-    link_enrichment_dir = os.path.join(consolidated_dir, DIR_NAME_LINK_ENRICHMENT)
-    if os.path.isdir(link_enrichment_dir):
-        for ext in ["html", "md", "json"]:
-            for prefix in [OUTPUT_FILESTEM_ENRICHED, OUTPUT_FILESTEM_ENRICHED_SUMMARY]:
-                path = os.path.join(link_enrichment_dir, f"{prefix}.{ext}")
-                if os.path.exists(path) and f"consolidated_{ext}" not in newsletter_paths:
-                    newsletter_paths[f"consolidated_{ext}"] = path
-                    break
-
-    # Check per-chat directories for single-chat runs (no consolidated output)
-    # This handles runs where only one chat is processed (no consolidated output)
-    if not newsletter_paths and not has_consolidated:
-        for chat_dir_name in os.listdir(run_dir):
-            chat_dir = os.path.join(run_dir, chat_dir_name)
-            if not os.path.isdir(chat_dir) or chat_dir_name in [DIR_NAME_CONSOLIDATED, DIR_NAME_PER_CHAT]:
+    Pure blocking filesystem work; callers offload it via asyncio.to_thread
+    so the event loop is never stalled on the os.listdir tree walk.
+    """
+    runs: list[RunInfo] = []
+    if os.path.isdir(PERIODIC_OUTPUT_DIR):
+        for community_name in os.listdir(PERIODIC_OUTPUT_DIR):
+            community_path = os.path.join(PERIODIC_OUTPUT_DIR, community_name)
+            if not os.path.isdir(community_path):
                 continue
-
-            # Check link_enrichment first (enriched newsletter)
-            chat_enrichment_dir = os.path.join(chat_dir, DIR_NAME_LINK_ENRICHMENT)
-            if os.path.isdir(chat_enrichment_dir):
-                for ext in ["html", "md", "json"]:
-                    for prefix in [OUTPUT_FILESTEM_ENRICHED_SUMMARY, OUTPUT_FILESTEM_ENRICHED]:
-                        path = os.path.join(chat_enrichment_dir, f"{prefix}.{ext}")
-                        if os.path.exists(path):
-                            newsletter_paths[f"per_chat_{ext}"] = path
-                            break
-
-            # Fallback to newsletter directory
-            if not newsletter_paths:
-                chat_newsletter_dir = os.path.join(chat_dir, DIR_NAME_NEWSLETTER)
-                if os.path.isdir(chat_newsletter_dir):
-                    for ext in ["html", "md", "json"]:
-                        path = os.path.join(chat_newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
-                        if os.path.exists(path):
-                            newsletter_paths[f"per_chat_{ext}"] = path
-
-            # Only need to find one chat's newsletter for single-chat runs
-            if newsletter_paths:
-                break
-
-    return RunInfo(run_id=run_id, run_type=run_type, data_source=parsed["data_source"], start_date=parsed["start_date"], end_date=parsed["end_date"], created_at=created_at, has_consolidated=has_consolidated, has_per_chat=has_per_chat, has_hitl_pending=has_hitl_pending, newsletter_paths=newsletter_paths)
-
-
-# ============================================================================
-# File-Based Endpoints (Legacy)
-# ============================================================================
-
-
-@router.get(ROUTE_RUNS, response_model=RunsListResponse)
-async def list_runs(run_type: str | None = Query(None, description="Filter by run type: 'periodic'"), data_source: str | None = Query(None, description="Filter by data source"), limit: int = Query(50, ge=1, le=200, description="Maximum number of runs to return"), offset: int = Query(0, ge=0, description="Offset for pagination")):
-    """
-    List all newsletter generation runs.
-
-    Returns runs sorted by creation date (newest first).
-    Sources data from file system (legacy) for backward compatibility.
-    """
-    runs = []
-
-    # Scan periodic runs
-    if run_type is None or run_type == RunType.PERIODIC:
-        if os.path.isdir(PERIODIC_OUTPUT_DIR):
-            for dir_name in os.listdir(PERIODIC_OUTPUT_DIR):
-                dir_path = os.path.join(PERIODIC_OUTPUT_DIR, dir_name)
+            for dir_name in os.listdir(community_path):
+                dir_path = os.path.join(community_path, dir_name)
                 if os.path.isdir(dir_path):
                     run_info = get_run_info(dir_path, RunType.PERIODIC)
                     if run_info:
                         runs.append(run_info)
-
-    # Filter by data source if specified
-    if data_source:
-        runs = [r for r in runs if r.data_source == data_source]
-
-    # Sort by creation date (newest first)
-    runs.sort(key=lambda r: r.created_at or "", reverse=True)
-
-    # Apply pagination
-    total = len(runs)
-    runs = runs[offset : offset + limit]
-
-    return RunsListResponse(total=total, runs=runs)
+    return runs
 
 
-@router.delete("/runs/{run_id}")
-async def delete_run(run_id: str, run_type: str = Query(RunType.PERIODIC, description="Run type: 'periodic'")):
+def _resolve_and_read_newsletter(run_dir: str, source: str, format: str) -> tuple[str | None, str | None, str]:
+    """Resolve the newsletter file for a run, read it, and detect text direction.
+
+    Pure blocking filesystem work (path probing + file reads); callers offload
+    it via asyncio.to_thread so the event loop is never stalled. Returns
+    (content_path, content, direction). content_path is None when no newsletter
+    file is found. Raises OSError if a located file cannot be read.
     """
-    Delete a newsletter generation run and all its associated files.
-
-    Removes the entire run directory from the file system.
-    """
-    # Determine base directory
-    if run_type == RunType.PERIODIC:
-        base_dir = PERIODIC_OUTPUT_DIR
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid run_type: {run_type}. Only 'periodic' is supported.")
-
-    run_dir = os.path.join(base_dir, run_id)
-
-    if not os.path.isdir(run_dir):
-        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-
-    try:
-        shutil.rmtree(run_dir)
-        logger.info(f"Deleted run directory: {run_dir}")
-        return {"status": "deleted", "run_id": run_id, "message": f"Run {run_id} deleted successfully"}
-    except Exception as e:
-        logger.error(f"Failed to delete run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete run: {str(e)}")
-
-
-@router.get(ROUTE_RUN_NEWSLETTER)
-async def get_newsletter_content(run_id: str, run_type: str = Query(RunType.PERIODIC, description="Run type: 'periodic'"), format: str = Query(FileFormat.HTML, description="Content format: 'html', 'md', or 'json'"), source: str = Query(NewsletterType.CONSOLIDATED, description="Source: 'consolidated' or 'per_chat'")):
-    """
-    Get newsletter content for a specific run.
-
-    Returns the newsletter in the requested format with metadata for UI rendering.
-    """
-    # Determine base directory
-    if run_type == RunType.PERIODIC:
-        base_dir = PERIODIC_OUTPUT_DIR
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid run_type: {run_type}. Only 'periodic' is supported.")
-
-    run_dir = os.path.join(base_dir, run_id)
-
-    if not os.path.isdir(run_dir):
-        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-
     # Search for newsletter file
     search_paths = []
 
@@ -537,18 +392,14 @@ async def get_newsletter_content(run_id: str, run_type: str = Query(RunType.PERI
             if content_path:
                 break
 
-    if not content_path:
-        raise HTTPException(status_code=404, detail=f"Newsletter not found for run {run_id} in {format} format")
-
-    # Read content
-    try:
-        with open(content_path, encoding="utf-8") as f:
-            content = f.read()
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read newsletter: {e}")
-
-    # Determine text direction based on content or metadata
     direction = TextDirection.RTL  # Default for Hebrew
+
+    if not content_path:
+        return None, None, direction
+
+    # Read content (OSError propagates to the caller for a 500 response)
+    with open(content_path, encoding="utf-8") as f:
+        content = f.read()
 
     # Try to detect from ranked_discussions.json
     ranked_file = os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
@@ -556,12 +407,225 @@ async def get_newsletter_content(run_id: str, run_type: str = Query(RunType.PERI
         try:
             with open(ranked_file) as f:
                 ranked_data = json.load(f)
-                summary_format = ranked_data.get("summary_format", "")
+                summary_format = ranked_data.get(DbFieldKeys.SUMMARY_FORMAT, "")
                 # English format typically means LTR
                 if any(code in summary_format.lower() for code in ENGLISH_LANGUAGE_CODES):
                     direction = TextDirection.LTR
         except (OSError, json.JSONDecodeError):
             pass
+
+    return content_path, content, direction
+
+
+def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
+    """Get detailed information about a run from its directory."""
+    run_id = os.path.basename(run_dir)
+    parsed = parse_run_directory(run_id)
+
+    # Get creation time from directory
+    try:
+        created_at = datetime.fromtimestamp(os.path.getctime(run_dir), tz=UTC).isoformat()
+    except OSError:
+        created_at = None
+
+    # Check for consolidated outputs
+    consolidated_dir = os.path.join(run_dir, DIR_NAME_CONSOLIDATED)
+    has_consolidated = os.path.isdir(consolidated_dir)
+
+    # Check for per-chat outputs
+    per_chat_dir = os.path.join(run_dir, DIR_NAME_PER_CHAT)
+    has_per_chat = os.path.isdir(per_chat_dir)
+
+    # Check for HITL pending state
+    has_hitl_pending = False
+    ranked_file = os.path.join(consolidated_dir, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
+    after_selection_dir = os.path.join(consolidated_dir, DIR_NAME_AFTER_SELECTION)
+
+    # HITL is NOT pending if after_selection output exists (Phase 2 completed)
+    phase2_completed = os.path.isdir(after_selection_dir) and any(os.path.exists(os.path.join(after_selection_dir, subdir, f)) for subdir in [DIR_NAME_NEWSLETTER, DIR_NAME_LINK_ENRICHMENT] for f in [OUTPUT_FILENAME_NEWSLETTER_JSON, OUTPUT_FILENAME_ENRICHED_JSON])
+
+    if not phase2_completed and os.path.exists(ranked_file):
+        try:
+            with open(ranked_file) as f:
+                ranked_data = json.load(f)
+                # HITL is pending if phase_1_complete but Phase 2 not done
+                has_hitl_pending = ranked_data.get(HITL_KEY_PHASE_1_COMPLETE, False)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Find available newsletter paths
+    newsletter_paths = {}
+
+    # Check consolidated/after_selection first (HITL completed)
+    after_selection_dir = os.path.join(consolidated_dir, DIR_NAME_AFTER_SELECTION, DIR_NAME_LINK_ENRICHMENT)
+    if os.path.isdir(after_selection_dir):
+        for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+            path = os.path.join(after_selection_dir, f"{OUTPUT_FILESTEM_ENRICHED}.{ext}")
+            if os.path.exists(path):
+                newsletter_paths[f"consolidated_{ext}"] = path
+
+    # Fallback to consolidated/newsletter
+    if not newsletter_paths:
+        newsletter_dir = os.path.join(consolidated_dir, DIR_NAME_NEWSLETTER)
+        if os.path.isdir(newsletter_dir):
+            for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+                path = os.path.join(newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
+                if os.path.exists(path):
+                    newsletter_paths[f"consolidated_{ext}"] = path
+
+    # Also check link_enrichment in consolidated root
+    link_enrichment_dir = os.path.join(consolidated_dir, DIR_NAME_LINK_ENRICHMENT)
+    if os.path.isdir(link_enrichment_dir):
+        for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+            for prefix in [OUTPUT_FILESTEM_ENRICHED, OUTPUT_FILESTEM_ENRICHED_SUMMARY]:
+                path = os.path.join(link_enrichment_dir, f"{prefix}.{ext}")
+                if os.path.exists(path) and f"consolidated_{ext}" not in newsletter_paths:
+                    newsletter_paths[f"consolidated_{ext}"] = path
+                    break
+
+    # Check per-chat directories for single-chat runs (no consolidated output)
+    # This handles runs where only one chat is processed (no consolidated output)
+    if not newsletter_paths and not has_consolidated:
+        for chat_dir_name in os.listdir(run_dir):
+            chat_dir = os.path.join(run_dir, chat_dir_name)
+            if not os.path.isdir(chat_dir) or chat_dir_name in [DIR_NAME_CONSOLIDATED, DIR_NAME_PER_CHAT]:
+                continue
+
+            # Check link_enrichment first (enriched newsletter)
+            chat_enrichment_dir = os.path.join(chat_dir, DIR_NAME_LINK_ENRICHMENT)
+            if os.path.isdir(chat_enrichment_dir):
+                for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+                    for prefix in [OUTPUT_FILESTEM_ENRICHED_SUMMARY, OUTPUT_FILESTEM_ENRICHED]:
+                        path = os.path.join(chat_enrichment_dir, f"{prefix}.{ext}")
+                        if os.path.exists(path):
+                            newsletter_paths[f"per_chat_{ext}"] = path
+                            break
+
+            # Fallback to newsletter directory
+            if not newsletter_paths:
+                chat_newsletter_dir = os.path.join(chat_dir, DIR_NAME_NEWSLETTER)
+                if os.path.isdir(chat_newsletter_dir):
+                    for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+                        path = os.path.join(chat_newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
+                        if os.path.exists(path):
+                            newsletter_paths[f"per_chat_{ext}"] = path
+
+            # Only need to find one chat's newsletter for single-chat runs
+            if newsletter_paths:
+                break
+
+    return RunInfo(run_id=run_id, run_type=run_type, data_source=parsed["data_source"], start_date=parsed["start_date"], end_date=parsed["end_date"], created_at=created_at, has_consolidated=has_consolidated, has_per_chat=has_per_chat, has_hitl_pending=has_hitl_pending, newsletter_paths=newsletter_paths)
+
+
+# ============================================================================
+# File-Based Endpoints (Legacy)
+# ============================================================================
+
+
+@router.get(ROUTE_RUNS, response_model=RunsListResponse)
+async def list_runs(run_type: str | None = Query(None, description="Filter by run type: 'periodic'"), data_source: str | None = Query(None, description="Filter by data source"), limit: int = Query(50, ge=1, le=200, description="Maximum number of runs to return"), offset: int = Query(0, ge=0, description="Offset for pagination")):
+    """
+    List all newsletter generation runs.
+
+    Returns runs sorted by creation date (newest first).
+    Sources data from file system (legacy) for backward compatibility.
+    """
+    runs = []
+
+    # Scan periodic runs (blocking nested filesystem walk offloaded off the event loop).
+    # Layout is nested per community:
+    # <PERIODIC_OUTPUT_DIR>/<community>/<community>_<start>_to_<end>/
+    if run_type is None or run_type == RunType.PERIODIC:
+        runs = await asyncio.to_thread(_scan_periodic_runs)
+
+    # Filter by data source if specified
+    if data_source:
+        runs = [r for r in runs if r.data_source == data_source]
+
+    # Sort by creation date (newest first)
+    runs.sort(key=lambda r: r.created_at or "", reverse=True)
+
+    # Apply pagination
+    total = len(runs)
+    runs = runs[offset : offset + limit]
+
+    return RunsListResponse(total=total, runs=runs)
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str, run_type: str = Query(RunType.PERIODIC, description="Run type: 'periodic'")):
+    """
+    Delete a newsletter generation run and all its associated files.
+
+    Removes the entire run directory from the file system.
+    """
+    # Determine base directory
+    if run_type == RunType.PERIODIC:
+        base_dir = PERIODIC_OUTPUT_DIR
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid run_type: {run_type}. Only 'periodic' is supported.")
+
+    # run_id is client-supplied and feeds shutil.rmtree, so the resolved path must
+    # stay inside the periodic output base. resolve_run_dir builds the correct nested
+    # layout and rejects malformed/traversal run_ids via its strict regex;
+    # resolve_path_within_base adds belt-and-suspenders realpath + commonpath
+    # containment (resolves symlinks, not a string prefix check) on the resolved path.
+    try:
+        run_dir = resolve_run_dir(base_dir, run_id)
+        run_dir = resolve_path_within_base(base_dir, run_dir)
+    except (ValueError, PathContainmentError) as e:
+        logger.warning("Run path rejected", extra={"run_id": run_id, "error": str(e)})
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    if not os.path.isdir(run_dir):
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    try:
+        await asyncio.to_thread(shutil.rmtree, run_dir)
+        logger.info(f"Deleted run directory: {run_dir}")
+        return {"status": "deleted", "run_id": run_id, "message": f"Run {run_id} deleted successfully"}
+    except Exception as e:
+        logger.error(f"Failed to delete run {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete run: {str(e)}")
+
+
+@router.get(ROUTE_RUN_NEWSLETTER)
+async def get_newsletter_content(run_id: str, run_type: str = Query(RunType.PERIODIC, description="Run type: 'periodic'"), format: str = Query(FileFormat.HTML, description="Content format: 'html', 'md', or 'json'"), source: str = Query(NewsletterType.CONSOLIDATED, description="Source: 'consolidated' or 'per_chat'")):
+    """
+    Get newsletter content for a specific run.
+
+    Returns the newsletter in the requested format with metadata for UI rendering.
+    """
+    # Determine base directory
+    if run_type == RunType.PERIODIC:
+        base_dir = PERIODIC_OUTPUT_DIR
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid run_type: {run_type}. Only 'periodic' is supported.")
+
+    # run_id is client-supplied. resolve_run_dir builds the correct nested layout and
+    # rejects malformed/traversal run_ids via its strict regex; resolve_path_within_base
+    # adds belt-and-suspenders realpath + commonpath containment (resolves symlinks, not
+    # a string prefix check) on the resolved path.
+    try:
+        run_dir = resolve_run_dir(base_dir, run_id)
+        run_dir = resolve_path_within_base(base_dir, run_dir)
+    except (ValueError, PathContainmentError) as e:
+        logger.warning("Run path rejected", extra={"run_id": run_id, "error": str(e)})
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    if not os.path.isdir(run_dir):
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+    # Resolve the newsletter file path, read it, and detect text direction in a
+    # single blocking step offloaded off the event loop. Returns
+    # (content_path, content, direction); content_path is None when not found.
+    try:
+        content_path, content, direction = await asyncio.to_thread(_resolve_and_read_newsletter, run_dir, source, format)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read newsletter: {e}")
+
+    if not content_path:
+        raise HTTPException(status_code=404, detail=f"Newsletter not found for run {run_id} in {format} format")
 
     # Extract title if HTML
     title = None
@@ -615,7 +679,7 @@ async def list_mongodb_runs(data_source: str | None = Query(None, description="F
 
         runs = await runs_repo.get_recent_runs(limit=limit, data_source_name=data_source, status=status)
 
-        return [RunSummary(run_id=run["run_id"], data_source_name=run.get("data_source_name", "unknown"), chat_names=run.get("chat_names", []), start_date=run.get("start_date", ""), end_date=run.get("end_date", ""), status=run.get("status", "unknown"), created_at=str(run.get("created_at", "")), completed_at=str(run.get("completed_at")) if run.get("completed_at") else None, metrics=run.get("metrics")) for run in runs]
+        return [RunSummary(run_id=run[DbFieldKeys.RUN_ID], data_source_name=run.get(DbFieldKeys.DATA_SOURCE_NAME, "unknown"), chat_names=run.get("chat_names", []), start_date=run.get(DbFieldKeys.START_DATE, ""), end_date=run.get(DbFieldKeys.END_DATE, ""), status=run.get(DbFieldKeys.STATUS, "unknown"), created_at=str(run.get(DbFieldKeys.CREATED_AT, "")), completed_at=str(run.get(DbFieldKeys.COMPLETED_AT)) if run.get(DbFieldKeys.COMPLETED_AT) else None, metrics=run.get("metrics")) for run in runs]
     except Exception as e:
         logger.error(f"Failed to list runs from MongoDB: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch runs: {str(e)}")
@@ -640,15 +704,15 @@ async def get_mongodb_run(run_id: str):
             raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
         return RunDetail(
-            run_id=run["run_id"],
-            data_source_name=run.get("data_source_name", "unknown"),
+            run_id=run[DbFieldKeys.RUN_ID],
+            data_source_name=run.get(DbFieldKeys.DATA_SOURCE_NAME, "unknown"),
             chat_names=run.get("chat_names", []),
-            start_date=run.get("start_date", ""),
-            end_date=run.get("end_date", ""),
-            status=run.get("status", "unknown"),
-            created_at=str(run.get("created_at", "")),
+            start_date=run.get(DbFieldKeys.START_DATE, ""),
+            end_date=run.get(DbFieldKeys.END_DATE, ""),
+            status=run.get(DbFieldKeys.STATUS, "unknown"),
+            created_at=str(run.get(DbFieldKeys.CREATED_AT, "")),
             started_at=str(run.get("started_at")) if run.get("started_at") else None,
-            completed_at=str(run.get("completed_at")) if run.get("completed_at") else None,
+            completed_at=str(run.get(DbFieldKeys.COMPLETED_AT)) if run.get(DbFieldKeys.COMPLETED_AT) else None,
             config=run.get("config", {}),
             chats=run.get("chats"),
             stages=run.get("stages"),
@@ -678,7 +742,7 @@ async def get_mongodb_run_messages(run_id: str, chat_name: str | None = Query(No
 
         messages = await messages_repo.get_messages_by_run(run_id=run_id, chat_name=chat_name, limit=limit)
 
-        return [MessageSummary(message_id=msg["message_id"], chat_name=msg.get(DbFieldKeys.CHAT_NAME, "unknown"), sender=msg.get("sender", "unknown"), timestamp=msg.get("timestamp"), content=msg.get(DbFieldKeys.CONTENT, ""), word_count=msg.get("word_count", 0), is_translated=msg.get("is_translated", False)) for msg in messages]
+        return [MessageSummary(message_id=msg[DbFieldKeys.MESSAGE_ID], chat_name=msg.get(DbFieldKeys.CHAT_NAME, "unknown"), sender=msg.get(DbFieldKeys.SENDER, "unknown"), timestamp=msg.get(DbFieldKeys.TIMESTAMP), content=msg.get(DbFieldKeys.CONTENT, ""), word_count=msg.get("word_count", 0), is_translated=msg.get("is_translated", False)) for msg in messages]
     except Exception as e:
         logger.error(f"Failed to get messages for run {run_id} from MongoDB: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch messages: {str(e)}")
@@ -734,13 +798,13 @@ async def get_mongodb_run_diagnostics(run_id: str):
 
         # No diagnostic report available
         if not diagnostic_report:
-            return DiagnosticReportResponse(run_id=run_id, status="clean", total_issues=0, by_severity={"critical": 0, "warning": 0, "info": 0}, report=None, raw_issues=[], generated_at=None)
+            return DiagnosticReportResponse(run_id=run_id, status=DiagnosticReportStatus.CLEAN, total_issues=0, by_severity={DiagnosticSeverity.CRITICAL: 0, DiagnosticSeverity.WARNING: 0, DiagnosticSeverity.INFO: 0}, report=None, raw_issues=[], generated_at=None)
 
         # Convert raw_issues to response model
         raw_issues = diagnostic_report.get("raw_issues", [])
         issues_response = [DiagnosticIssueResponse(severity=issue["severity"], category=issue["category"], message=issue["message"], node=issue.get("node"), timestamp=issue["timestamp"], details=issue.get("details", {})) for issue in raw_issues]
 
-        return DiagnosticReportResponse(run_id=run_id, status=diagnostic_report.get("status", "unknown"), total_issues=diagnostic_report.get("total_issues"), by_severity=diagnostic_report.get("by_severity"), report=diagnostic_report.get("report"), raw_issues=issues_response, generated_at=diagnostic_report.get("generated_at").isoformat() if diagnostic_report.get("generated_at") else None)
+        return DiagnosticReportResponse(run_id=run_id, status=diagnostic_report.get(DbFieldKeys.STATUS, DiagnosticReportStatus.UNKNOWN), total_issues=diagnostic_report.get("total_issues"), by_severity=diagnostic_report.get("by_severity"), report=diagnostic_report.get("report"), raw_issues=issues_response, generated_at=diagnostic_report.get("generated_at").isoformat() if diagnostic_report.get("generated_at") else None)
 
     except HTTPException:
         raise
@@ -771,8 +835,8 @@ async def get_mongodb_stats():
         total_runs = await runs_repo.count({})
         total_messages = await messages_repo.count({})
         total_discussions = await discussions_repo.count({})
-        completed_runs = await runs_repo.count({"status": RunStatus.COMPLETED})
-        failed_runs = await runs_repo.count({"status": RunStatus.FAILED})
+        completed_runs = await runs_repo.count({DbFieldKeys.STATUS: RunStatus.COMPLETED})
+        failed_runs = await runs_repo.count({DbFieldKeys.STATUS: RunStatus.FAILED})
 
         return MongoDBStats(total_runs=total_runs, total_messages=total_messages, total_discussions=total_discussions, completed_runs=completed_runs, failed_runs=failed_runs)
     except Exception as e:
@@ -810,7 +874,7 @@ async def get_run_discussions(run_id: str, limit: int = Query(100, ge=1, le=500,
             return DiscussionsResponse(run_id=run_id, total=0, discussions=[])
 
         # Transform to response model
-        result_discussions = [DiscussionInfo(discussion_id=d.get(DbFieldKeys.DISCUSSION_ID, ""), run_id=d.get("run_id", ""), chat_name=d.get(DbFieldKeys.CHAT_NAME, ""), title=d.get(DbFieldKeys.TITLE, ""), nutshell=d.get(DbFieldKeys.NUTSHELL, ""), ranking_score=d.get(DbFieldKeys.RANKING_SCORE), rank=d.get(RankingResultKeys.RANK), created_at=d.get("created_at").isoformat() if d.get("created_at") else None) for d in discussions]
+        result_discussions = [DiscussionInfo(discussion_id=d.get(DbFieldKeys.DISCUSSION_ID, ""), run_id=d.get(DbFieldKeys.RUN_ID, ""), chat_name=d.get(DbFieldKeys.CHAT_NAME, ""), title=d.get(DbFieldKeys.TITLE, ""), nutshell=d.get(DbFieldKeys.NUTSHELL, ""), ranking_score=d.get(DbFieldKeys.RANKING_SCORE), rank=d.get(RankingResultKeys.RANK), created_at=d.get(DbFieldKeys.CREATED_AT).isoformat() if d.get(DbFieldKeys.CREATED_AT) else None) for d in discussions]
 
         return DiscussionsResponse(run_id=run_id, total=len(result_discussions), discussions=result_discussions)
 
@@ -883,14 +947,14 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
                 # Add time range filter if specified
                 if time_range_days:
                     cutoff_date = datetime.now(UTC) - timedelta(days=time_range_days)
-                    pipeline.insert(1, {"$match": {"created_at": {"$gte": cutoff_date}}})
+                    pipeline.insert(1, {"$match": {DbFieldKeys.CREATED_AT: {"$gte": cutoff_date}}})
 
                 # Add run_id filter if specified
                 if run_id:
-                    pipeline.insert(1, {"$match": {"run_id": run_id}})
+                    pipeline.insert(1, {"$match": {DbFieldKeys.RUN_ID: run_id}})
 
                 # Project fields
-                pipeline.append({"$project": {"_id": 0, DbFieldKeys.DISCUSSION_ID: 1, "run_id": 1, DbFieldKeys.CHAT_NAME: 1, DbFieldKeys.TITLE: 1, DbFieldKeys.NUTSHELL: 1, "created_at": 1, "similarity_score": 1}})
+                pipeline.append({"$project": {"_id": 0, DbFieldKeys.DISCUSSION_ID: 1, DbFieldKeys.RUN_ID: 1, DbFieldKeys.CHAT_NAME: 1, DbFieldKeys.TITLE: 1, DbFieldKeys.NUTSHELL: 1, DbFieldKeys.CREATED_AT: 1, "similarity_score": 1}})
 
                 collection = db[COLLECTION_DISCUSSIONS]
                 results = await collection.aggregate(pipeline).to_list(length=limit)
@@ -908,7 +972,7 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
             logger.error(f"Vector search failed: {vector_err}")
             raise HTTPException(status_code=503, detail=f"Vector search unavailable: {vector_err}") from vector_err
 
-        search_results = [SearchResult(discussion_id=r.get(DbFieldKeys.DISCUSSION_ID, ""), run_id=r.get("run_id", ""), chat_name=r.get(DbFieldKeys.CHAT_NAME, ""), title=r.get(DbFieldKeys.TITLE, ""), nutshell=r.get(DbFieldKeys.NUTSHELL, ""), score=r.get("score"), created_at=r.get("created_at").isoformat() if r.get("created_at") else None, similarity_score=r.get("similarity_score")) for r in results]
+        search_results = [SearchResult(discussion_id=r.get(DbFieldKeys.DISCUSSION_ID, ""), run_id=r.get(DbFieldKeys.RUN_ID, ""), chat_name=r.get(DbFieldKeys.CHAT_NAME, ""), title=r.get(DbFieldKeys.TITLE, ""), nutshell=r.get(DbFieldKeys.NUTSHELL, ""), score=r.get("score"), created_at=r.get(DbFieldKeys.CREATED_AT).isoformat() if r.get(DbFieldKeys.CREATED_AT) else None, similarity_score=r.get("similarity_score")) for r in results]
 
         return SearchResponse(query=query, total=len(search_results), results=search_results, search_metadata={"method": search_method, "embedding_model": DEFAULT_EMBEDDING_MODEL if search_method == SearchMethod.VECTOR else None, "min_similarity": min_similarity if search_method == SearchMethod.VECTOR else None, "time_range_days": time_range_days, "run_id_filter": run_id})
 
@@ -940,8 +1004,8 @@ async def get_run_stats():
         discussions_collection = db[COLLECTION_DISCUSSIONS]
 
         total_runs = await runs_collection.count_documents({})
-        completed_runs = await runs_collection.count_documents({"status": RunStatus.COMPLETED})
-        failed_runs = await runs_collection.count_documents({"status": RunStatus.FAILED})
+        completed_runs = await runs_collection.count_documents({DbFieldKeys.STATUS: RunStatus.COMPLETED})
+        failed_runs = await runs_collection.count_documents({DbFieldKeys.STATUS: RunStatus.FAILED})
         total_discussions = await discussions_collection.count_documents({})
 
         # Get runs grouped by data source
@@ -951,7 +1015,7 @@ async def get_run_stats():
 
         # Get recent runs
         recent = await runs_repo.get_recent_runs(limit=5)
-        recent_runs = [{"run_id": r.get("run_id"), "data_source_name": r.get("data_source_name"), "status": r.get("status"), "created_at": r.get("created_at").isoformat() if r.get("created_at") else None} for r in recent]
+        recent_runs = [{DbFieldKeys.RUN_ID: r.get(DbFieldKeys.RUN_ID), DbFieldKeys.DATA_SOURCE_NAME: r.get(DbFieldKeys.DATA_SOURCE_NAME), DbFieldKeys.STATUS: r.get(DbFieldKeys.STATUS), DbFieldKeys.CREATED_AT: r.get(DbFieldKeys.CREATED_AT).isoformat() if r.get(DbFieldKeys.CREATED_AT) else None} for r in recent]
 
         return RunStats(total_runs=total_runs, completed_runs=completed_runs, failed_runs=failed_runs, total_discussions=total_discussions, runs_by_source=runs_by_source, recent_runs=recent_runs)
 

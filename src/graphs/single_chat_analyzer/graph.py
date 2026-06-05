@@ -27,7 +27,6 @@ Architecture:
 import os
 import logging
 import re
-import json
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
@@ -48,6 +47,7 @@ from graphs.subgraphs.state import (
 from graphs.subgraphs.discussions_ranker import discussions_ranker_graph
 from graphs.subgraphs.link_enricher import link_enricher_graph
 from utils.validation import validate_single_chat_state
+from utils.async_json_io import load_json_async
 from utils.run_diagnostics import get_diagnostics
 from api.sse import with_cache_check, with_progress, with_logging, STAGE_EXTRACT, STAGE_PREPROCESS, STAGE_TRANSLATE, STAGE_SEPARATE, STAGE_RANK, STAGE_GENERATE, STAGE_ENRICH, STAGE_TRANSLATE_FINAL
 from observability.metrics import with_metrics
@@ -262,14 +262,13 @@ async def extract_messages(state: SingleChatState, config: RunnableConfig | None
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         message_count = None
         try:
-            with open(decrypted_file_path, encoding="utf-8") as f:
-                messages = json.load(f)
-                message_count = len(messages) if isinstance(messages, list) else 0
+            messages = await load_json_async(decrypted_file_path)
+            message_count = len(messages) if isinstance(messages, list) else 0
 
-                # Emitting diagnostic: Low message count warning
-                if mongodb_run_id and message_count < 10:
-                    diagnostics = get_diagnostics(mongodb_run_id)
-                    diagnostics.info(category=DIAGNOSTIC_CATEGORY_EXTRACTION, message=f"Low message count: only {message_count} messages extracted for date range {start_date} to {end_date}", node_name="extract_messages", details={"message_count": message_count, "chat_name": chat_name, "date_range": f"{start_date} to {end_date}"})
+            # Emitting diagnostic: Low message count warning
+            if mongodb_run_id and message_count < 10:
+                diagnostics = get_diagnostics(mongodb_run_id)
+                diagnostics.info(category=DIAGNOSTIC_CATEGORY_EXTRACTION, message=f"Low message count: only {message_count} messages extracted for date range {start_date} to {end_date}", node_name="extract_messages", details={"message_count": message_count, "chat_name": chat_name, "date_range": f"{start_date} to {end_date}"})
         except Exception as e:
             logger.warning(f"Failed to check message count: {e}")
 
@@ -334,9 +333,8 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
         # Counting messages for state propagation (NOT persisting to MongoDB yet - waiting for translation)
         message_count = None
         try:
-            with open(expected_file) as f:
-                messages = json.load(f)
-                message_count = len(messages) if isinstance(messages, list) else 0
+            messages = await load_json_async(expected_file)
+            message_count = len(messages) if isinstance(messages, list) else 0
         except Exception as e:
             logger.warning(f"Failed to load messages: {e}")
 
@@ -345,8 +343,7 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
             polls_file = os.path.join(preprocess_dir, OUTPUT_FILENAME_POLLS)
             mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
             if mongodb_run_id and os.path.exists(polls_file):
-                with open(polls_file) as f:
-                    polls = json.load(f)
+                polls = await load_json_async(polls_file)
                 if polls:
                     from db.run_tracker import get_tracker
                     tracker = get_tracker()
@@ -410,16 +407,15 @@ async def translate_messages(state: SingleChatState, config: RunnableConfig | No
         # Ensuring MongoDB has both original and translated content
         message_count = None
         try:
-            with open(expected_file) as f:
-                messages = json.load(f)
-                message_count = len(messages) if isinstance(messages, list) else 0
+            messages = await load_json_async(expected_file)
+            message_count = len(messages) if isinstance(messages, list) else 0
 
-                # Persisting messages to MongoDB (fail-soft) - async call
-                mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
-                if mongodb_run_id and isinstance(messages, list):
-                    tracker = get_tracker()
-                    stored_count = await tracker.store_messages(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, messages=messages)
-                    logger.info(f"Persisted {stored_count}/{message_count} TRANSLATED messages to MongoDB")
+            # Persisting messages to MongoDB (fail-soft) - async call
+            mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
+            if mongodb_run_id and isinstance(messages, list):
+                tracker = get_tracker()
+                stored_count = await tracker.store_messages(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, messages=messages)
+                logger.info(f"Persisted {stored_count}/{message_count} TRANSLATED messages to MongoDB")
         except Exception as e:
             logger.warning(f"Failed to load/persist translated messages: {e}")
 
@@ -475,10 +471,9 @@ async def separate_discussions(state: SingleChatState, config: RunnableConfig | 
         # Counting discussions
         discussions_count = None
         try:
-            with open(expected_file) as f:
-                data = json.load(f)
-                discussions = data.get(DiscussionKeys.DISCUSSIONS, []) if isinstance(data, dict) else data
-                discussions_count = len(discussions) if isinstance(discussions, list) else 0
+            data = await load_json_async(expected_file)
+            discussions = data.get(DiscussionKeys.DISCUSSIONS, []) if isinstance(data, dict) else data
+            discussions_count = len(discussions) if isinstance(discussions, list) else 0
         except Exception as e:
             logger.warning(f"Failed to count discussions: {e}")
 
@@ -545,8 +540,7 @@ async def rank_discussions(state: SingleChatState, config: RunnableConfig | None
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         if mongodb_run_id:
             try:
-                with open(ranking_file_path) as f:
-                    ranked_discussions = json.load(f)
+                ranked_discussions = await load_json_async(ranking_file_path)
 
                 # Extracting counts
                 featured_count = len(ranked_discussions.get(RankingResultKeys.FEATURED_DISCUSSION_IDS, [])) if isinstance(ranked_discussions, dict) else 0

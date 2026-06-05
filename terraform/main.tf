@@ -133,6 +133,12 @@ resource "cloudflare_record" "www" {
 }
 
 # --- Cloudflare SSL ---
-# NOTE: SSL mode set to "Full" manually in Cloudflare dashboard.
-# The "Edit zone DNS" API token doesn't have permission for zone settings.
-# To manage via Terraform, create a token with "Zone Settings: Edit" permission.
+# NOTE: SSL mode is "Flexible" (verified behaviorally 2026-06-03): the origin
+# listens only on :80 (no TLS on :443), and the site serves over HTTPS through
+# Cloudflare without a 521, which is only possible if CF terminates TLS at the
+# edge and talks to the origin over plain HTTP. An earlier comment here claimed
+# "Full", which was stale and wrong; Full would 521 against this HTTP-only
+# origin. The SSL mode is NOT managed by Terraform: the "Edit zone DNS" API
+# token lacks zone-settings permission. To manage it via Terraform, create a
+# token with "Zone Settings: Edit" and add a cloudflare_zone_settings_override
+# resource pinning ssl = "flexible".

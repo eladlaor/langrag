@@ -39,6 +39,7 @@ independently, which is then aggregated in Node 3.
 
 import os
 import logging
+import asyncio
 import json
 import re
 from typing import Any
@@ -57,6 +58,7 @@ from utils.llm.json_parser import parse_json_response
 from custom_types.newsletter_formats import format_handles_links_internally
 from custom_types.field_keys import DiscussionKeys, DbFieldKeys, NewsletterStructureKeys
 from observability import langfuse_span, extract_trace_context
+from utils.async_json_io import load_json_async
 from utils.run_diagnostics import get_diagnostics
 from constants import NodeNames, MessageRole, OUTPUT_FILENAME_AGGREGATED_LINKS, DIAGNOSTIC_CATEGORY_LINK_ENRICHMENT, NO_CONTENT_FOR_SECTION
 
@@ -542,7 +544,7 @@ async def search_web_for_topics(state: LinkEnricherState, config: RunnableConfig
         mongodb_run_id = state.get(EnricherKeys.MONGODB_RUN_ID)
 
         try:
-            discussions = load_discussions(discussions_file)
+            discussions = await asyncio.to_thread(load_discussions, discussions_file)
 
             # Initialize WebSearchAgent (wraps GoogleSearcher + ReAct agent)
             try:
@@ -723,8 +725,8 @@ async def insert_links_into_content(state: LinkEnricherState, config: RunnableCo
         if format_handles_links_internally(summary_format):
             logger.info(f"Format '{summary_format}' handles links internally - copying newsletter as-is")
             try:
-                newsletter_data = load_newsletter(newsletter_json_path)
-                save_newsletter_to_file(newsletter_data, expected_enriched_json, expected_enriched_md)
+                newsletter_data = await asyncio.to_thread(load_newsletter, newsletter_json_path)
+                await asyncio.to_thread(save_newsletter_to_file, newsletter_data, expected_enriched_json, expected_enriched_md)
                 if span:
                     span.update(output={"skipped": True, "reason": "format_handles_links_internally", "enriched_json": expected_enriched_json, "enriched_md": expected_enriched_md})
                 return {
@@ -742,8 +744,7 @@ async def insert_links_into_content(state: LinkEnricherState, config: RunnableCo
             if not os.path.exists(aggregated_links_file):
                 raise FileNotFoundError(f"Aggregated links file not found: {aggregated_links_file}")
 
-            with open(aggregated_links_file, encoding="utf-8") as f:
-                links_data = json.load(f)
+            links_data = await load_json_async(aggregated_links_file)
 
             available_links = links_data.get("links", [])
 
@@ -756,14 +757,14 @@ async def insert_links_into_content(state: LinkEnricherState, config: RunnableCo
                     diagnostics.info(category=DIAGNOSTIC_CATEGORY_LINK_ENRICHMENT, message="No links available for insertion - newsletter published without link enrichment", node_name="insert_links_into_content", details={"reason": "no_links_available"})
 
                 # Copy original newsletter to enriched output
-                newsletter_data = load_newsletter(newsletter_json_path)
-                save_newsletter_to_file(newsletter_data, expected_enriched_json, expected_enriched_md)
+                newsletter_data = await asyncio.to_thread(load_newsletter, newsletter_json_path)
+                await asyncio.to_thread(save_newsletter_to_file, newsletter_data, expected_enriched_json, expected_enriched_md)
                 if span:
                     span.update(output={"num_links_inserted": 0, "reason": "no_links_available", "enriched_json": expected_enriched_json})
                 return {EnricherKeys.ENRICHED_NEWSLETTER_JSON_PATH: expected_enriched_json, EnricherKeys.ENRICHED_NEWSLETTER_MD_PATH: expected_enriched_md, EnricherKeys.NUM_LINKS_INSERTED: 0}
 
             # Load newsletter content
-            newsletter_data = load_newsletter(newsletter_json_path)
+            newsletter_data = await asyncio.to_thread(load_newsletter, newsletter_json_path)
 
             # Prepare data for LLM
             available_links_json = json.dumps(available_links, indent=2, ensure_ascii=False)
@@ -829,7 +830,7 @@ async def insert_links_into_content(state: LinkEnricherState, config: RunnableCo
                 final_newsletter[NewsletterStructureKeys.LINK_ENRICHMENT_METADATA] = {"total_links_available": len(available_links), "total_links_inserted": num_links_inserted, "insertion_strategy": metadata.get("insertion_strategy", ""), "enriched_at": newsletter_data.get("updated_at", 0)}
 
                 # Save enriched newsletter
-                save_newsletter_to_file(final_newsletter, expected_enriched_json, expected_enriched_md)
+                await asyncio.to_thread(save_newsletter_to_file, final_newsletter, expected_enriched_json, expected_enriched_md)
 
                 logger.info(f"Successfully enriched newsletter with {num_links_inserted} links")
 

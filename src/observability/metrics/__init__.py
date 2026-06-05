@@ -33,9 +33,15 @@ from observability.metrics.prometheus_client import (
     get_metrics_client,
     with_metrics,
 )
+from observability.metrics.mongo_pool_listener import (
+    MongoPoolMetricsListener,
+    PoolClientLabel,
+)
 
 __all__ = [
     "PrometheusMetricsClient",
     "get_metrics_client",
     "with_metrics",
+    "MongoPoolMetricsListener",
+    "PoolClientLabel",
 ]

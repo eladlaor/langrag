@@ -282,6 +282,7 @@ class RAGConversationKeys:
     """Keys for RAG conversation documents in rag_conversations collection."""
 
     SESSION_ID = "session_id"
+    OWNER = "owner"
     TITLE = "title"
     CONTENT_SOURCES = "content_sources"
     MESSAGES = "messages"
@@ -299,6 +300,25 @@ class RAGConversationKeys:
     CITATION_SOURCE_TITLE = "source_title"
     CITATION_SNIPPET = "snippet"
     CITATION_METADATA = "metadata"
+
+
+class RAGMessageKeys:
+    """Keys for RAG message documents in the rag_messages collection.
+
+    One document per conversation turn. Split out of the embedded
+    ``rag_conversations.messages`` array so a long-lived session can never
+    breach the 16MB BSON document-size limit. Referenced back to its session
+    by ``session_id``; the session document is owner-scoped, so messages are
+    only ever reachable through an already-authorized session.
+    """
+
+    MESSAGE_ID = "message_id"
+    SESSION_ID = "session_id"
+    ROLE = "role"
+    CONTENT = "content"
+    CITATIONS = "citations"
+    EVALUATION_ID = "evaluation_id"
+    CREATED_AT = "created_at"
 
 
 class RAGApiKeyKeys:
@@ -407,6 +427,9 @@ class UserKeys:
     USER_ID = "user_id"
     EMAIL = "email"
     ROLE = "role"
+    PASSWORD_HASH = "password_hash"
+    SESSION_EPOCH = "session_epoch"
+    DISABLED = "disabled"
     COMMUNITIES = "communities"
     PREFERENCES = "preferences"
     QUOTAS = "quotas"

@@ -287,7 +287,8 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             replies_to_older_messages = [msg for msg in all_parsed_messages if msg.get("replies_to") and msg["replies_to"] not in valid_message_ids]
 
             if replies_to_older_messages:
-                logging.info(f"Found {len(replies_to_older_messages)} messages referencing messages not in the current dataset")
+                broken_thread_refs = {msg["replies_to"] for msg in replies_to_older_messages}
+                logging.info(f"Replaced out-of-window reply references with a placeholder: {len(replies_to_older_messages)} message(s) across {len(broken_thread_refs)} unique broken thread reference(s)")
                 for msg in replies_to_older_messages:
                     original_reference = msg["replies_to"]
                     msg["replies_to"] = older_message_placeholder
@@ -983,6 +984,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
             structured_messages = []
             extracted_polls = []
+            skipped_poll_responses = 0
 
             for msg in raw_messages:
                 # Skip if not a valid message
@@ -998,6 +1000,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
                 # Skip poll response events (votes are aggregated into the parent poll message)
                 if msg_id in poll_response_event_ids:
+                    skipped_poll_responses += 1
                     continue
 
                 # Extract timestamp
@@ -1045,6 +1048,9 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 structured_msg = {DiscussionKeys.ID: msg_id, "timestamp": timestamp, "sender_id": sender_id, "replies_to": replies_to, "content": body}
 
                 structured_messages.append(structured_msg)
+
+            if skipped_poll_responses:
+                logging.info(f"Filtered {skipped_poll_responses} poll-response event(s) from the message stream (aggregated into parent poll messages)")
 
             return {DiscussionKeys.MESSAGES: structured_messages, "sender_map": sender_map, "polls": extracted_polls}
 

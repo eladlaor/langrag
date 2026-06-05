@@ -128,6 +128,20 @@ def count_unique_participants(discussion: dict[str, Any]) -> int:
         raise RuntimeError(f"Failed to count unique participants: {e}") from e
 
 
+def _first_last_sample(messages: list[dict[str, Any]]) -> list[str]:
+    """Return [first_content] for a single message, [first_content, last_content] for many.
+
+    Empty input yields []. Guards against the prior asymmetric slicing that dropped a
+    single-message discussion's content from the last-sample slot.
+    """
+    if not messages:
+        return []
+    first = messages[0].get("content", "")
+    if len(messages) == 1:
+        return [first]
+    return [first, messages[-1].get("content", "")]
+
+
 def prepare_discussions_for_llm(discussions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Prepare discussions for LLM analysis by extracting key fields.
@@ -154,8 +168,9 @@ def prepare_discussions_for_llm(discussions: list[dict[str, Any]]) -> list[dict[
                 DiscussionKeys.NUM_MESSAGES: disc.get(DiscussionKeys.NUM_MESSAGES),
                 DiscussionKeys.NUM_UNIQUE_PARTICIPANTS: count_unique_participants(disc),
                 DiscussionKeys.FIRST_MESSAGE_TIMESTAMP: disc.get(DiscussionKeys.FIRST_MESSAGE_IN_DISCUSSION_TIMESTAMP),
-                # Include first and last message content for context
-                DiscussionKeys.SAMPLE_MESSAGES: [disc[DiscussionKeys.MESSAGES][0].get("content", "") if disc.get(DiscussionKeys.MESSAGES) else "", disc[DiscussionKeys.MESSAGES][-1].get("content", "") if disc.get(DiscussionKeys.MESSAGES) and len(disc[DiscussionKeys.MESSAGES]) > 1 else ""],
+                # Include first and last message content for context. For a single-message
+                # discussion this is just [content]; for multi-message, [first, last].
+                DiscussionKeys.SAMPLE_MESSAGES: _first_last_sample(disc.get(DiscussionKeys.MESSAGES) or []),
             }
 
             # Add merged discussion metadata if present

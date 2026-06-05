@@ -21,6 +21,19 @@ from db.repositories.base import BaseRepository
 logger = logging.getLogger(__name__)
 
 
+def normalize_email(email: str) -> str:
+    """Canonicalize an email for storage and lookup.
+
+    Email is a case-insensitive identity for our purposes, so we lowercase and
+    strip it at the repository boundary. Without this, `Alice@x.com` and
+    `alice@x.com` would be two distinct accounts under the case-sensitive unique
+    index, which both duplicates identities and lets a disabled account be
+    reached under a different casing. Normalizing in the single chokepoint that
+    every caller (login, admin-create, bootstrap) passes through closes that.
+    """
+    return email.strip().lower()
+
+
 class UsersRepository(BaseRepository):
     """Repository for community-admin user records."""
 
@@ -34,6 +47,7 @@ class UsersRepository(BaseRepository):
         role: UserRole = UserRole.ADMIN,
         preferences: dict[str, Any] | None = None,
         quotas: UserQuotas | None = None,
+        password_hash: str | None = None,
     ) -> str:
         """Create a new user. Returns the new user_id (uuid4 string).
 
@@ -41,11 +55,15 @@ class UsersRepository(BaseRepository):
         """
         user_id = str(uuid.uuid4())
         now = datetime.now(UTC)
+        email = normalize_email(email)
         document = {
             SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_USER,
             Keys.USER_ID: user_id,
             Keys.EMAIL: email,
             Keys.ROLE: str(role),
+            Keys.PASSWORD_HASH: password_hash,
+            Keys.SESSION_EPOCH: 0,
+            Keys.DISABLED: False,
             Keys.COMMUNITIES: list(communities),
             Keys.PREFERENCES: preferences or {},
             Keys.QUOTAS: (quotas or UserQuotas()).model_dump(),
@@ -61,13 +79,104 @@ class UsersRepository(BaseRepository):
         logger.info(f"Created user: user_id={user_id} email={email} communities={communities}")
         return user_id
 
+    async def set_password(self, user_id: str, password_hash: str) -> bool:
+        """Set a new password hash and bump the session epoch.
+
+        Bumping the epoch revokes every live session for the user, so a password
+        reset forces re-login everywhere.
+        """
+        try:
+            return await self.update_one(
+                {Keys.USER_ID: user_id},
+                {"$set": {Keys.PASSWORD_HASH: password_hash}, "$inc": {Keys.SESSION_EPOCH: 1}},
+            )
+        except Exception as e:
+            logger.error(
+                "set_password failed",
+                extra={"event": "set_password_failed", "function": "set_password", "user_id": user_id, "error": str(e)},
+            )
+            raise
+
+    async def bump_session_epoch(self, user_id: str) -> int:
+        """Increment the user's session epoch and return the new value.
+
+        Used to revoke all live sessions (e.g., on disable or forced logout).
+        """
+        try:
+            updated = await self.collection.find_one_and_update(
+                {Keys.USER_ID: user_id},
+                {"$inc": {Keys.SESSION_EPOCH: 1}},
+                return_document=True,
+            )
+            if updated is None:
+                raise ValueError(f"bump_session_epoch: user not found: user_id={user_id}")
+            return int(updated[Keys.SESSION_EPOCH])
+        except Exception as e:
+            logger.error(
+                "bump_session_epoch failed",
+                extra={"event": "bump_session_epoch_failed", "function": "bump_session_epoch", "user_id": user_id, "error": str(e)},
+            )
+            raise
+
+    async def set_disabled(self, user_id: str, disabled: bool) -> bool:
+        """Enable or disable an account. Disabling also revokes live sessions."""
+        try:
+            update: dict[str, Any] = {"$set": {Keys.DISABLED: disabled}}
+            if disabled:
+                update["$inc"] = {Keys.SESSION_EPOCH: 1}
+            return await self.update_one({Keys.USER_ID: user_id}, update)
+        except Exception as e:
+            logger.error(
+                "set_disabled failed",
+                extra={"event": "set_disabled_failed", "function": "set_disabled", "user_id": user_id, "disabled": disabled, "error": str(e)},
+            )
+            raise
+
+    async def list_users(self, limit: int = 200, skip: int = 0) -> list[dict[str, Any]]:
+        """List users newest-first for admin browsing."""
+        try:
+            return await self.find_many(
+                {},
+                sort=[(Keys.CREATED_AT, -1)],
+                limit=limit,
+                skip=skip,
+            )
+        except Exception as e:
+            logger.error(
+                "list_users failed",
+                extra={"event": "list_users_failed", "function": "list_users", "error": str(e)},
+            )
+            raise
+
+    async def count_users(self) -> int:
+        """Return the total number of user documents."""
+        try:
+            return await self.count({})
+        except Exception as e:
+            logger.error(
+                "count_users failed",
+                extra={"event": "count_users_failed", "function": "count_users", "error": str(e)},
+            )
+            raise
+
+    async def delete_user(self, user_id: str) -> bool:
+        """Delete a user document. Returns True if a document was removed."""
+        try:
+            return await self.delete_one({Keys.USER_ID: user_id})
+        except Exception as e:
+            logger.error(
+                "delete_user failed",
+                extra={"event": "delete_user_failed", "function": "delete_user", "user_id": user_id, "error": str(e)},
+            )
+            raise
+
     async def find_by_user_id(self, user_id: str) -> dict[str, Any] | None:
         """Fetch a user by user_id."""
         return await self.find_one({Keys.USER_ID: user_id})
 
     async def find_by_email(self, email: str) -> dict[str, Any] | None:
-        """Fetch a user by email."""
-        return await self.find_one({Keys.EMAIL: email})
+        """Fetch a user by email (normalized: case-insensitive, trimmed)."""
+        return await self.find_one({Keys.EMAIL: normalize_email(email)})
 
     async def touch_last_seen(self, user_id: str) -> None:
         """Best-effort update of last_seen_at."""

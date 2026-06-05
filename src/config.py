@@ -26,7 +26,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from constants import APP_VERSION, SimilarityThreshold, VisionDescribeScope
+from constants import APP_VERSION, CookieSameSite, ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD, SimilarityThreshold, VisionDescribeScope
 
 
 # ============================================================================
@@ -307,6 +307,7 @@ class AgentSettings(BaseSettings):
     summarize_keep_recent: int = Field(default=12, description="How many recent messages to keep verbatim after summarization.")
     importance_threshold: float = Field(default=0.4, description="Memories below this extractor-assigned importance are dropped.")
     memory_top_k: int = Field(default=6, description="Top-K memories injected into the agent prompt per turn.")
+    memory_search_num_candidates_multiplier: int = Field(default=15, ge=1, description="Multiplier applied to top_k to derive $vectorSearch numCandidates for the hybrid ($rankFusion) agent-memory retrieval path. Mirrors the RAG retrieval knob (default 15) to widen the HNSW candidate pool for recall.")
 
     model_config = SettingsConfigDict(env_prefix="AGENT_")
 
@@ -489,7 +490,7 @@ class RAGSettings(BaseSettings):
 
     # Retrieval
     vector_search_top_k: int = Field(default=20, description="Top-K candidates from vector search before reranking")
-    vector_search_num_candidates_multiplier: int = Field(default=15, ge=1, description="Multiplier applied to top_k to derive $vectorSearch numCandidates for the vector-only retrieval path. Bumped from 10 -> 15 to widen the HNSW candidate pool and improve recall at the cost of a small extra mongot scan.")
+    vector_search_num_candidates_multiplier: int = Field(default=15, ge=1, description="Multiplier applied to top_k to derive $vectorSearch numCandidates for both the vector-only and hybrid ($rankFusion) RAG retrieval paths. Bumped from 10 -> 15 to widen the HNSW candidate pool and improve recall at the cost of a small extra mongot scan.")
     rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
     hybrid_enabled: bool = Field(default=True, description="When true, retrieve via MongoDB 8.1+ $rankFusion (server-side RRF over vector + lexical) instead of vector-only search. Requires the lexical Atlas Search index 'rag_chunks_lexical' to be built (created automatically on startup by ensure_indexes()).")
     min_similarity_score: float = Field(default=0.5, description="Minimum cosine similarity score for vector search results. With text-embedding-3-small, question->passage cosine scores cluster in the 0.5-0.75 range; values >=0.7 starve retrieval. Override per deployment.")
@@ -576,6 +577,31 @@ class DeepEvalSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DEEPEVAL_")
 
 
+class LoginSettings(BaseSettings):
+    """
+    Shared-password UI login gate.
+
+    Gates the entire UI behind a single shared password. The password is
+    compared in constant time at login; a Fernet-encrypted session cookie is
+    then issued. Both the password and the Fernet key are required when
+    `enabled` is true (fail-fast at startup, see main.py lifespan).
+
+    Env names resolve via the LANGRAG_LOGIN_ prefix, e.g.
+    LANGRAG_LOGIN_PASSWORD and LANGRAG_LOGIN_SESSION_KEY.
+    """
+
+    enabled: bool = Field(default=True, description="Gate the entire UI behind login. MUST stay true in production.")
+    password: str = Field(default="", description="DEPRECATED. The single shared password is no longer used by the login path now that individual email+password accounts exist. Retained only so old deployments that still set LANGRAG_LOGIN_PASSWORD do not fail validation. Safe to remove from the environment.")
+    session_key: str = Field(default="", description="urlsafe-base64 32-byte Fernet key signing+encrypting session cookies. Generate with Fernet.generate_key(). Required when enabled. Must stay stable across deploys; rotating it revokes every live session.")
+    bootstrap_admin_email: str = Field(default="", validation_alias=ENV_BOOTSTRAP_ADMIN_EMAIL, description="Email of the first admin, seeded on startup only when the users collection is empty. Read from LANGRAG_BOOTSTRAP_ADMIN_EMAIL.")
+    bootstrap_admin_password: str = Field(default="", validation_alias=ENV_BOOTSTRAP_ADMIN_PASSWORD, description="Plaintext password for the bootstrap admin, hashed (argon2id) at seed time. Read from LANGRAG_BOOTSTRAP_ADMIN_PASSWORD. Unset it after first login.")
+    session_ttl_minutes: int = Field(default=720, description="Session cookie lifetime in minutes (default 12h).")
+    cookie_secure: bool = Field(default=True, description="Set the Secure flag on the session cookie. Correct behind Cloudflare Flexible SSL since the browser sees HTTPS.")
+    cookie_samesite: CookieSameSite = Field(default=CookieSameSite.LAX, description="SameSite policy for the session cookie (CSRF mitigation).")
+
+    model_config = SettingsConfigDict(env_prefix="LANGRAG_LOGIN_")
+
+
 # ============================================================================
 # MAIN SETTINGS CLASS
 # ============================================================================
@@ -611,6 +637,7 @@ class Settings(BaseSettings):
     deepeval: DeepEvalSettings = Field(default_factory=DeepEvalSettings)
     checkpointer: CheckpointerSettings = Field(default_factory=CheckpointerSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    login: LoginSettings = Field(default_factory=LoginSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

@@ -34,13 +34,15 @@ class ConversationManager:
     async def create_session(
         self,
         content_sources: list[str],
+        owner: str,
         title: str | None = None,
     ) -> str:
         """
-        Create a new conversation session.
+        Create a new conversation session owned by ``owner``.
 
         Args:
             content_sources: Content source types to search
+            owner: API-key owner identity that will own this session
             title: Optional title (auto-generated from first query if None)
 
         Returns:
@@ -48,23 +50,34 @@ class ConversationManager:
         """
         repo = await self._get_repo()
         session_id = str(uuid.uuid4())
-        await repo.create_session(session_id, content_sources, title)
+        await repo.create_session(session_id, content_sources, owner=owner, title=title)
         return session_id
 
-    async def get_session(self, session_id: str) -> dict[str, Any] | None:
-        """Get a session with full message history."""
-        repo = await self._get_repo()
-        return await repo.get_session(session_id)
+    async def get_session(
+        self,
+        session_id: str,
+        owner: str | None = None,
+        include_messages: bool = False,
+    ) -> dict[str, Any] | None:
+        """Get a session scoped to ``owner`` when provided.
 
-    async def list_sessions(self, limit: int = 20, skip: int = 0) -> list[dict[str, Any]]:
-        """List sessions (metadata only, no full history)."""
+        Pass ``include_messages=True`` to hydrate the full message history under
+        the ``messages`` key (used by the GET-session endpoint, which returns the
+        history to the client). The chat hot paths leave it False and read history
+        via ``get_conversation_history`` instead.
+        """
         repo = await self._get_repo()
-        return await repo.list_sessions(limit=limit, skip=skip)
+        return await repo.get_session(session_id, owner=owner, include_messages=include_messages)
 
-    async def delete_session(self, session_id: str) -> bool:
-        """Delete a session."""
+    async def list_sessions(self, owner: str, limit: int = 20, skip: int = 0) -> list[dict[str, Any]]:
+        """List the owner's sessions (metadata only, no full history)."""
         repo = await self._get_repo()
-        return await repo.delete_session(session_id)
+        return await repo.list_sessions(owner=owner, limit=limit, skip=skip)
+
+    async def delete_session(self, session_id: str, owner: str | None = None) -> bool:
+        """Delete a session, scoped to ``owner`` when provided."""
+        repo = await self._get_repo()
+        return await repo.delete_session(session_id, owner=owner)
 
     async def add_user_message(self, session_id: str, content: str) -> str:
         """
@@ -87,9 +100,11 @@ class ConversationManager:
         }
         await repo.append_message(session_id, message)
 
-        # Auto-generate title from first query
+        # Auto-generate title from first query. The first-message check now counts
+        # rag_messages (one doc per turn) instead of measuring an embedded array.
         session = await repo.get_session(session_id)
-        if session and not session.get(Keys.TITLE) and len(session.get(Keys.MESSAGES, [])) <= 1:
+        message_count = await repo.count_messages(session_id)
+        if session and not session.get(Keys.TITLE) and message_count <= 1:
             try:
                 title = await generate_session_title(content)
                 await repo.update_title(session_id, title)

@@ -111,3 +111,35 @@ export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
 // HTTP Constants
 export const HEADER_CONTENT_TYPE = "Content-Type";
 export const CONTENT_TYPE_JSON = "application/json";
+
+// Auth / login-gate constants
+export const AUTH_ROUTES = {
+  LOGIN: "/api/auth/login",
+  LOGOUT: "/api/auth/logout",
+  SESSION: "/api/auth/session",
+  USERS: "/api/auth/users",
+} as const;
+
+// Parameterized admin user-management route builders (single source of truth).
+export const authUserById = (userId: string): string =>
+  `${AUTH_ROUTES.USERS}/${encodeURIComponent(userId)}`;
+export const authUserPassword = (userId: string): string =>
+  `${authUserById(userId)}/password`;
+export const authUserDisable = (userId: string): string =>
+  `${authUserById(userId)}/disable`;
+
+// User roles (must match backend string values).
+export const ROLE_ADMIN = "admin";
+export const ROLE_VIEWER = "viewer";
+
+// Distinguishable error code thrown by createUser on a 409 duplicate email.
+export const ERROR_DUPLICATE_EMAIL = "duplicate_email";
+
+// Always attach the HttpOnly session cookie on same-origin API calls (via nginx)
+export const FETCH_CREDENTIALS: RequestCredentials = "same-origin";
+
+// Branding for the login card heading (single source of truth, matches App header h1)
+export const LOGIN_BRANDING_TITLE = "LangTalks Newsletter Generator";
+
+// Global event dispatched when a 401 is observed mid-session so the gate can re-show
+export const SESSION_EXPIRED_EVENT = "langrag:session-expired";

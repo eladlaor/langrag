@@ -77,11 +77,14 @@ async def get_database() -> AsyncIOMotorDatabase:
             url = get_mongodb_url()
             db_name = get_database_name()
 
+            from observability.metrics import MongoPoolMetricsListener, PoolClientLabel
+
             _client = AsyncIOMotorClient(
                 url,
                 maxPoolSize=settings.database.max_pool_size,
                 minPoolSize=settings.database.min_pool_size,
                 serverSelectionTimeoutMS=settings.database.server_selection_timeout_ms,
+                event_listeners=[MongoPoolMetricsListener(PoolClientLabel.ASYNC)],
             )
 
             # Verify connection
@@ -100,6 +103,27 @@ async def get_database() -> AsyncIOMotorDatabase:
             raise RuntimeError(f"MongoDB connection failed: {e}") from e
 
     return _database
+
+
+async def get_client() -> AsyncIOMotorClient:
+    """Return the shared async MongoDB client (for multi-document transactions).
+
+    Ensures the connection pool is initialized first via get_database(), then
+    returns the underlying client. Callers use this to open a session and run a
+    transaction across collections, e.g.::
+
+        client = await get_client()
+        async with await client.start_session() as session:
+            async with session.start_transaction():
+                ...
+
+    Raises:
+        RuntimeError: if the client failed to initialize.
+    """
+    await get_database()
+    if _client is None:
+        raise RuntimeError("MongoDB client is not initialized after get_database()")
+    return _client
 
 
 async def close_connection() -> None:
@@ -125,6 +149,8 @@ def get_sync_database():
     if _sync_database is None:
         from pymongo import MongoClient
 
+        from observability.metrics import MongoPoolMetricsListener, PoolClientLabel
+
         settings = get_settings()
         url = get_mongodb_url()
         db_name = get_database_name()
@@ -134,6 +160,7 @@ def get_sync_database():
             maxPoolSize=settings.database.max_pool_size,
             minPoolSize=settings.database.min_pool_size,
             serverSelectionTimeoutMS=settings.database.server_selection_timeout_ms,
+            event_listeners=[MongoPoolMetricsListener(PoolClientLabel.SYNC)],
         )
         _sync_database = _sync_client[db_name]
 

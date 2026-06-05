@@ -32,6 +32,9 @@ from observability.llm import (
     is_langfuse_enabled,
 )
 from utils.observability import safe_flush_langfuse
+from utils.output_paths import build_run_output_dir
+from utils.validation import resolve_path_within_base
+from custom_types.exceptions import PathContainmentError
 
 from custom_types.api_schemas import (
     PeriodicNewsletterRequest,
@@ -45,8 +48,6 @@ from custom_types.api_schemas import (
     Phase2GenerationRequest,
     Phase2GenerationResponse,
     BatchJobQueuedResponse,
-    BatchJobStatusResponse,
-    BatchJobListResponse,
 )
 from custom_types.field_keys import RankingResultKeys, DiscussionKeys, WorkerResultKeys
 from db.batch_jobs import BatchJobManager, BatchJobStatus
@@ -59,7 +60,7 @@ from graphs.state_keys import (
 from graphs.subgraphs.link_enricher import link_enricher_graph
 from graphs.subgraphs.state import LinkEnricherState
 from api.sse import get_progress_queue, remove_progress_queue, ProgressQueue
-from api.rate_limiting import limiter, RATE_NEWSLETTER_GENERATION, RATE_BATCH_JOB_QUERY
+from api.rate_limiting import limiter, RATE_NEWSLETTER_GENERATION
 from config import get_settings
 from constants import (
     KNOWN_WHATSAPP_CHAT_NAMES,
@@ -70,8 +71,6 @@ from constants import (
     ROUTE_GENERATE_NEWSLETTER_PHASE2,
     ROUTE_NEWSLETTER_FILE_CONTENT,
     ROUTE_NEWSLETTER_HTML_VIEWER,
-    ROUTE_BATCH_JOBS_BY_ID,
-    ROUTE_BATCH_JOBS,
     DataSources,
     ContentGenerationOperations,
     OutputAction,
@@ -108,6 +107,7 @@ from constants import (
     OUTPUT_FILENAME_SELECTED_DISCUSSIONS,
     OUTPUT_BASE_DIR_NAME,
     CONTENT_TYPE_EVENT_STREAM,
+    FILE_EXT_HTML,
 )
 from core.generation.generators.factory import ContentGeneratorFactory
 from custom_types.newsletter_formats import list_formats
@@ -245,24 +245,31 @@ def build_orchestrator_state(
     *,
     progress_thread_id: str | None = None,
     hitl_timeout: int | None = None,
+    workflow_name: str = WorkflowNames.PERIODIC_NEWSLETTER,
+    use_batch_api: bool = False,
 ) -> dict:
     """
     Build the ParallelOrchestratorState dict from a request.
 
     Single source of truth for state construction — eliminates duplication
-    between the sync and streaming endpoints.
+    between the sync endpoint, the streaming endpoint, and the batch worker.
 
     Args:
         request: Validated newsletter generation request
         run_output_dir: Output directory path for this run
         progress_thread_id: Thread ID for SSE progress tracking (streaming only)
         hitl_timeout: HITL selection timeout in minutes (streaming only)
+        workflow_name: Workflow identifier written to the state (batch worker
+            overrides this with its batch-specific value)
+        use_batch_api: When True, sets the use_batch_api state flag so the
+            preprocessing nodes route translation through the Batch API
+            (batch worker only)
 
     Returns:
         State dict ready for graph.ainvoke()
     """
     state = {
-        OrchestratorKeys.WORKFLOW_NAME: WorkflowNames.PERIODIC_NEWSLETTER,
+        OrchestratorKeys.WORKFLOW_NAME: workflow_name,
         OrchestratorKeys.DATA_SOURCE_NAME: request.data_source_name,
         OrchestratorKeys.CHAT_NAMES: request.whatsapp_chat_names_to_include,
         OrchestratorKeys.START_DATE: request.start_date,
@@ -309,6 +316,9 @@ def build_orchestrator_state(
     if progress_thread_id is not None:
         state[OrchestratorKeys.PROGRESS_THREAD_ID] = progress_thread_id
 
+    if use_batch_api:
+        state[OrchestratorKeys.USE_BATCH_API] = True
+
     return state
 
 
@@ -329,7 +339,7 @@ def setup_output_directory(request: PeriodicNewsletterRequest) -> str:
         HTTPException: If directory setup fails (HTTP 400)
     """
     base_output_dir = request.output_dir or os.path.join("output", OUTPUT_DIR_PERIODIC_NEWSLETTER)
-    run_output_dir = os.path.join(base_output_dir, f"{request.data_source_name}_{request.start_date}_to_{request.end_date}")
+    run_output_dir = build_run_output_dir(base_output_dir, request.data_source_name, request.start_date, request.end_date)
 
     try:
         os.makedirs(run_output_dir, exist_ok=True)
@@ -945,8 +955,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=404, detail=f"User selections not found at {selections_file}. " "Please save selections first using /api/save_discussion_selections")
 
     try:
-        with open(selections_file, encoding="utf-8") as f:
-            selections_data = json.load(f)
+        selections_data = await asyncio.to_thread(_read_json_file, selections_file)
         selected_ids = selections_data.get("selected_discussion_ids", [])
     except Exception as e:
         logger.error(f"Failed to load selections: {e}")
@@ -959,8 +968,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=404, detail=f"Aggregated discussions not found at {aggregated_file}. " "Please run Phase 1 first.")
 
     try:
-        with open(aggregated_file, encoding="utf-8") as f:
-            aggregated_data = json.load(f)
+        aggregated_data = await asyncio.to_thread(_read_json_file, aggregated_file)
         all_discussions = aggregated_data.get(DiscussionKeys.DISCUSSIONS, [])
     except Exception as e:
         logger.error(f"Failed to load aggregated discussions: {e}")
@@ -982,8 +990,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=404, detail=f"Ranking file not found at {ranking_file}. Please run Phase 1 first.")
 
     try:
-        with open(ranking_file, encoding="utf-8") as f:
-            ranking_data = json.load(f)
+        ranking_data = await asyncio.to_thread(_read_json_file, ranking_file)
         brief_mention_items = ranking_data.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])
     except Exception as e:
         logger.error(f"Failed to load ranking data: {e}")
@@ -993,8 +1000,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     ranked_discussions_file = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
 
     try:
-        with open(ranked_discussions_file, encoding="utf-8") as f:
-            ranked_data = json.load(f)
+        ranked_data = await asyncio.to_thread(_read_json_file, ranked_discussions_file)
         summary_format = ranked_data.get("summary_format") or ranked_data.get("format_type", SummaryFormats.LANGTALKS_FORMAT)
         data_source_name = ranked_data.get("data_source_name", "unknown")
         date_range = ranked_data.get("date_range", "unknown")
@@ -1012,8 +1018,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     # Saving selected discussions to temporary file (required by ContentGenerator)
     selected_discussions_file = os.path.join(phase2_output_dir, OUTPUT_FILENAME_SELECTED_DISCUSSIONS)
     try:
-        with open(selected_discussions_file, "w", encoding="utf-8") as f:
-            json.dump({DiscussionKeys.DISCUSSIONS: selected_discussions}, f, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(_write_json_file, selected_discussions_file, {DiscussionKeys.DISCUSSIONS: selected_discussions})
         logger.info(f"Saved selected discussions to: {selected_discussions_file}")
     except Exception as e:
         logger.error(f"Failed to save selected discussions: {e}")
@@ -1059,9 +1064,8 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         logger.info(f"  HTML: {newsletter_html_path}")
 
         # Calculating content length from JSON
-        with open(newsletter_json_path, encoding="utf-8") as f:
-            newsletter_content = json.load(f)
-            content_length = len(json.dumps(newsletter_content))
+        newsletter_content = await asyncio.to_thread(_read_json_file, newsletter_json_path)
+        content_length = len(json.dumps(newsletter_content))
 
         # Step 2: Link Enrichment (invoke link_enricher_graph)
         logger.info("Starting link enrichment...")
@@ -1109,8 +1113,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
                 logger.info(f"  Enriched MD: {enriched_md_path}")
 
                 # Generating HTML from enriched JSON
-                with open(enriched_json_path, encoding="utf-8") as f:
-                    enriched_content = json.load(f)
+                enriched_content = await asyncio.to_thread(_read_json_file, enriched_json_path)
 
                 # Using format plugin to render HTML from enriched content
                 from custom_types.newsletter_formats import get_format
@@ -1119,8 +1122,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
                 enriched_html_content = newsletter_format.render_html(enriched_content)
 
                 enriched_html_path = os.path.join(link_enrichment_dir, OUTPUT_FILENAME_ENRICHED_HTML)
-                with open(enriched_html_path, "w", encoding="utf-8") as f:
-                    f.write(enriched_html_content)
+                await asyncio.to_thread(_write_text_file, enriched_html_path, enriched_html_content)
 
                 logger.info(f"  Enriched HTML: {enriched_html_path}")
 
@@ -1195,14 +1197,12 @@ async def get_newsletter_file_content(file_path: str):
         - Resolves symlinks and validates path containment
     """
     try:
-        # Getting absolute path to output directory
-        output_base = os.path.abspath(OUTPUT_BASE_DIR_NAME)
-
-        # Resolving the requested file path
-        requested_file = os.path.abspath(file_path)
-
-        # Security check: Ensuring file is within output directory
-        if not requested_file.startswith(output_base):
+        # Resolving the requested file path and enforcing containment within the output
+        # directory (realpath + commonpath, resolves symlinks, not a string prefix check).
+        try:
+            requested_file = resolve_path_within_base(OUTPUT_BASE_DIR_NAME, file_path)
+        except PathContainmentError as containment_error:
+            logger.warning("Path traversal attempt blocked", extra={"requested_path": file_path, "error": str(containment_error)})
             raise HTTPException(status_code=403, detail="Access denied: File must be within output directory")
 
         # Checking if file exists
@@ -1213,9 +1213,8 @@ async def get_newsletter_file_content(file_path: str):
         if not os.path.isfile(requested_file):
             raise HTTPException(status_code=400, detail=f"Not a file: {file_path}")
 
-        # Reading and returning file content
-        with open(requested_file, encoding="utf-8") as f:
-            content = f.read()
+        # Reading and returning file content (offloaded off the event loop)
+        content = await asyncio.to_thread(_read_text_file, requested_file)
 
         return {"content": content, "file_path": file_path}
 
@@ -1246,19 +1245,16 @@ async def newsletter_html_viewer(path: str):
         - Resolves symlinks and validates path containment
     """
     try:
-        # Getting absolute path to output directory
-        output_base = os.path.abspath(OUTPUT_BASE_DIR_NAME)
-
-        # Resolving the requested file path
-        requested_file = os.path.abspath(path)
-
-        # Security check: Ensuring file is within output directory
-        if not requested_file.startswith(output_base):
-            logger.warning(f"Path traversal attempt blocked: {path}")
+        # Resolving the requested file path and enforcing containment within the output
+        # directory (realpath + commonpath, resolves symlinks, not a string prefix check).
+        try:
+            requested_file = resolve_path_within_base(OUTPUT_BASE_DIR_NAME, path)
+        except PathContainmentError as containment_error:
+            logger.warning("Path traversal attempt blocked", extra={"requested_path": path, "error": str(containment_error)})
             raise HTTPException(status_code=403, detail="Access denied: File must be within output directory")
 
-        # Security check: Only allow HTML files
-        if not requested_file.endswith(".html"):
+        # Security check: Only allow HTML files (checked on the resolved path)
+        if not requested_file.endswith(FILE_EXT_HTML):
             raise HTTPException(status_code=400, detail="Only HTML files are allowed")
 
         # Checking if file exists
@@ -1269,9 +1265,8 @@ async def newsletter_html_viewer(path: str):
         if not os.path.isfile(requested_file):
             raise HTTPException(status_code=400, detail=f"Not a file: {path}")
 
-        # Reading and returning HTML content
-        with open(requested_file, encoding="utf-8") as f:
-            content = f.read()
+        # Reading and returning HTML content (offloaded off the event loop)
+        content = await asyncio.to_thread(_read_text_file, requested_file)
 
         logger.info(f"Serving newsletter HTML: {path}")
         return HTMLResponse(content=content)
@@ -1284,150 +1279,29 @@ async def newsletter_html_viewer(path: str):
 
 
 # ============================================================================
-# BATCH JOB ENDPOINTS
+# BLOCKING FILE I/O HELPERS (offloaded via asyncio.to_thread by callers)
 # ============================================================================
 
 
-def _format_datetime(dt) -> str:
-    """Formatting datetime to ISO string, handling None values."""
-    if dt is None:
-        return None
-    if hasattr(dt, "isoformat"):
-        return dt.isoformat()
-    return str(dt)
+def _read_text_file(file_path: str) -> str:
+    """Read a UTF-8 text file. Blocking; callers offload via asyncio.to_thread."""
+    with open(file_path, encoding="utf-8") as f:
+        return f.read()
 
 
-def _job_to_response(job: dict) -> BatchJobStatusResponse:
-    """Converting MongoDB job document to response model."""
-    request = job.get("request", {})
-    return BatchJobStatusResponse(
-        job_id=job.get("job_id"),
-        status=job.get("status"),
-        created_at=_format_datetime(job.get("created_at")),
-        updated_at=_format_datetime(job.get("updated_at")),
-        started_at=_format_datetime(job.get("started_at")),
-        completed_at=_format_datetime(job.get("completed_at")),
-        data_source_name=request.get("data_source_name"),
-        start_date=request.get("start_date"),
-        end_date=request.get("end_date"),
-        output_dir=job.get("output_dir"),
-        error_message=job.get("error_message"),
-        openai_batch_id=job.get("openai_batch_id"),
-    )
+def _write_text_file(file_path: str, content: str) -> None:
+    """Write a UTF-8 text file. Blocking; callers offload via asyncio.to_thread."""
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
 
 
-@router.get(ROUTE_BATCH_JOBS_BY_ID, response_model=BatchJobStatusResponse)
-@limiter.limit(RATE_BATCH_JOB_QUERY)
-async def get_batch_job_status(request: Request, job_id: str):
-    """
-    Getting the status of a batch job.
-
-    Using this endpoint to check the status of a job submitted with use_batch_api=True.
-
-    Args:
-        job_id: The job UUID returned when the batch job was created
-
-    Returns:
-        BatchJobStatusResponse with current job status and details
-
-    Raises:
-        HTTPException 404: If job not found
-        HTTPException 500: If database error occurs
-    """
-    logger.info(f"Getting batch job status: {job_id}")
-
-    try:
-        batch_manager = BatchJobManager()
-        job = await batch_manager.get_job(job_id)
-
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Batch job not found: {job_id}")
-
-        return _job_to_response(job)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get batch job status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get batch job status: {e}")
+def _read_json_file(file_path: str):
+    """Load JSON from a UTF-8 file. Blocking; callers offload via asyncio.to_thread."""
+    with open(file_path, encoding="utf-8") as f:
+        return json.load(f)
 
 
-@router.get(ROUTE_BATCH_JOBS, response_model=BatchJobListResponse)
-@limiter.limit(RATE_BATCH_JOB_QUERY)
-async def list_batch_jobs(request: Request, status: str = None, limit: int = 50, offset: int = 0):
-    """
-    Listing batch jobs with optional status filter.
-
-    Args:
-        status: Filter by status (queued, processing, completed, failed, cancelled)
-        limit: Maximum number of jobs to return (default: 50)
-        offset: Number of jobs to skip for pagination (default: 0)
-
-    Returns:
-        BatchJobListResponse with list of jobs
-    """
-    logger.info(f"Listing batch jobs: status={status}, limit={limit}, offset={offset}")
-
-    # Validating status if provided
-    if status:
-        valid_statuses = [BatchJobStatus.QUEUED, BatchJobStatus.PROCESSING, BatchJobStatus.COMPLETED, BatchJobStatus.FAILED, BatchJobStatus.CANCELLED]
-        if status not in valid_statuses:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status}. Must be one of: {', '.join(valid_statuses)}")
-
-    try:
-        batch_manager = BatchJobManager()
-        jobs = await batch_manager.list_jobs(status=status, limit=limit, offset=offset)
-
-        return BatchJobListResponse(
-            jobs=[_job_to_response(job) for job in jobs],
-            total=len(jobs),  # Note: For true pagination, we'd need a count query
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to list batch jobs: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to list batch jobs: {e}")
-
-
-@router.delete(ROUTE_BATCH_JOBS_BY_ID)
-async def cancel_batch_job(job_id: str):
-    """
-    Cancelling a pending or processing batch job.
-
-    Only jobs with status 'queued' or 'processing' can be cancelled.
-    Completed or failed jobs cannot be cancelled.
-
-    Args:
-        job_id: The job UUID to cancel
-
-    Returns:
-        Success message
-
-    Raises:
-        HTTPException 404: If job not found
-        HTTPException 400: If job cannot be cancelled (already completed/failed)
-        HTTPException 500: If database error occurs
-    """
-    logger.info(f"Cancelling batch job: {job_id}")
-
-    try:
-        batch_manager = BatchJobManager()
-        job = await batch_manager.get_job(job_id)
-
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Batch job not found: {job_id}")
-
-        # Checking if job can be cancelled
-        if job.get("status") in (BatchJobStatus.COMPLETED, BatchJobStatus.FAILED, BatchJobStatus.CANCELLED):
-            raise HTTPException(status_code=400, detail=f"Cannot cancel job with status: {job.get('status')}")
-
-        # Updating status to cancelled
-        await batch_manager.update_status(job_id, BatchJobStatus.CANCELLED)
-
-        logger.info(f"Batch job cancelled: {job_id}")
-        return {"message": f"Batch job {job_id} cancelled successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to cancel batch job: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to cancel batch job: {e}")
+def _write_json_file(file_path: str, data) -> None:
+    """Dump JSON to a UTF-8 file. Blocking; callers offload via asyncio.to_thread."""
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
