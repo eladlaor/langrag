@@ -802,10 +802,18 @@ async def insert_links_into_content(state: LinkEnricherState, config: RunnableCo
                 # Preserve all original fields (timestamps, ids, etc.) but update content
                 final_newsletter = newsletter_data.copy()
 
-                # Update primary discussion bullet points
+                # Update primary discussion bullet points.
+                # Bullets are merged POSITIONALLY (the schema carries no per-bullet
+                # id; it mandates an exact, ordered bullet count and the enricher
+                # only inserts links into existing content). If the LLM ever
+                # returns a different bullet count, positional merge would
+                # silently mis-assign content — warn loudly so it's not invisible.
                 if NewsletterStructureKeys.PRIMARY_DISCUSSION in enriched_newsletter:
                     enriched_primary = enriched_newsletter[NewsletterStructureKeys.PRIMARY_DISCUSSION]
                     if NewsletterStructureKeys.BULLET_POINTS in enriched_primary:
+                        orig_primary_bullets = final_newsletter.get(NewsletterStructureKeys.PRIMARY_DISCUSSION, {}).get(NewsletterStructureKeys.BULLET_POINTS, [])
+                        if len(enriched_primary[NewsletterStructureKeys.BULLET_POINTS]) != len(orig_primary_bullets):
+                            logger.warning(f"Link-enricher bullet-count mismatch in primary discussion (enriched={len(enriched_primary[NewsletterStructureKeys.BULLET_POINTS])}, original={len(orig_primary_bullets)}); positional merge may mis-assign content")
                         for i, enriched_bullet in enumerate(enriched_primary[NewsletterStructureKeys.BULLET_POINTS]):
                             if i < len(final_newsletter[NewsletterStructureKeys.PRIMARY_DISCUSSION][NewsletterStructureKeys.BULLET_POINTS]):
                                 final_newsletter[NewsletterStructureKeys.PRIMARY_DISCUSSION][NewsletterStructureKeys.BULLET_POINTS][i][NewsletterStructureKeys.CONTENT] = enriched_bullet.get(NewsletterStructureKeys.CONTENT, "")

@@ -11,6 +11,7 @@ Node position in graph:
 Fail-soft: any failure logs and returns None without breaking the pipeline.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -62,7 +63,8 @@ async def associate_images_node(state: SingleChatState, config: RunnableConfig |
         return {Keys.IMAGE_DISCUSSION_MAP: None}
 
     try:
-        image_discussion_map = _build_image_discussion_map(manifest_path, discussions_path)
+        # Offload the blocking file I/O in _build_image_discussion_map off the event loop
+        image_discussion_map = await asyncio.to_thread(_build_image_discussion_map, manifest_path, discussions_path)
         if image_discussion_map:
             logger.info(f"Associated images with {len(image_discussion_map)} discussions, " f"{sum(len(imgs) for imgs in image_discussion_map.values())} total image descriptions")
             await _update_mongodb_discussion_ids(manifest_path, image_discussion_map)

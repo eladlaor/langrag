@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-06-06
+
+### Fixed
+- **Beeper extraction timezone bug (data loss):** `_parse_timestamp` in `src/core/ingestion/extractors/beeper.py` called `.timestamp()` on a naive `datetime`, which Python interprets in the host's local timezone. Under `TZ=Asia/Jerusalem` every extraction window was silently shifted by the UTC offset while the boundaries were *displayed* in UTC, so messages near midnight on the first/last day were wrongly included or dropped on every run. Boundaries are now made UTC-aware before conversion, matching the display. Regression test asserts the epoch is timezone-independent.
+- **Beeper extraction cache key omitted `end_date` (silent under-extraction):** the local `encrypted_*`/`decrypted_*` working-file names were keyed only by `start_date`, so a narrow-range run's file satisfied a later wider-range request and returned a subset of the window with no error. Both start and end dates are now part of the filename.
+- **Hybrid RAG retrieval applied no relevance floor (silent wrong output):** the default `$rankFusion` path returned `top_k` chunks regardless of relevance — `$rankFusion` fuses ranks, not scores, so a junk top hit still ranks #1 and the empty-context refusal almost never fired. The vector-leg cosine is now captured inside the vector sub-pipeline (`$meta:"vectorSearchScore"`) and a configurable floor (`min_vector_score`, wired to `RAG_min_similarity_score`) drops below-threshold chunks after fusion, so an out-of-corpus query returns `[]` and the date-aware refusal path triggers.
+- **Decryption failures were swallowed (silent data loss):** `HybridDecryptionManager` logged all-strategies-failed events at DEBUG with a permanently-empty `strategy_failures` counter, and the WhatsApp preprocessor's `should_filter_decryption_errors` flag was a no-op ("not implemented yet"). Failures now log at WARNING with event/room context and populate the per-strategy failure counter; undecryptable events are tagged at parse time and, when filtering is enabled, excluded from the corpus instead of passing ciphertext downstream as if it were message text.
+- **`slm_prefilter` / `slm_enrichment` overwrote upstream node outputs in place (corruption on retry):** both nodes rewrote the previous node's output file, so a partial re-run (upstream cache hit, node re-executes) double-filtered / double-enriched. They now write to distinct files (`filtered_messages.json`, `enriched_discussions.json`) and update the corresponding path in state; the upstream output is left intact, making re-runs idempotent.
+- **Low-activity date range crashed the chat worker:** the ranker emitted an empty `featured_discussion_ids` as a valid result, but `load_ranking_data` raised on empty, killing the worker. An empty (but present) list is now treated as a valid quiet-window result and the generator emits its existing empty "no activity" newsletter; only a *missing* field still fails fast.
+- **Consolidated-newsletter persistence failures reported as success:** a MongoDB repository-init failure during consolidated generation was logged at WARNING and the node silently continued file-only, diverging DB from disk; it now fails fast when a `run_id` (i.e. persistence is expected) is present. The additive enriched-version save logs FS/DB divergence at ERROR (non-fatal, base newsletter already persisted).
+- **Silent partial-write loss in `run_tracker`:** per-item discussion/poll/raw-message store failures were logged at DEBUG and the returned `stored` count was never compared to the input length. Per-item failures now log at WARNING and a summary WARNING fires whenever `stored < expected`.
+- **OpenAI provider robustness:** `call_simple` now guards against `None`/empty content (typed as `str`) instead of letting a `None` propagate; `model`/`temperature` parameter annotations corrected from `str = None`/`float = None` to `str | None`/`float | None`.
+- **Link-enricher positional bullet merge:** the enricher re-aligns enriched bullets by position (the schema carries no per-bullet id); it now warns loudly on a bullet-count mismatch that would silently mis-assign content.
+- **`search_similar_newsletters` ignored its date parameters:** the method accepted `start_date`/`end_date` but never used them; it now filters to newsletters whose own date range overlaps the requested window.
+- **MCP Israel renderer emoji collision:** `ISSUES_CHALLENGES` and `TOOLS_MENTIONED` both rendered 🧰; the former is now ⚠️.
+
+### Security
+- Internal exception text is no longer leaked in HTTP 5xx response bodies. The RAG conversation, schedules, and newsletter-generation routers returned raw `str(e)` (internal paths, driver errors) to clients; they now return a generic `HTTP_DETAIL_INTERNAL_ERROR` detail while logging the full error server-side.
+- Added path-traversal containment to the HITL `run_directory`-taking endpoints (`get_discussion_selection`, `save_discussion_selections`, `generate_newsletter_phase2`). A free-form `run_directory` was fed to `os.path.join`/`os.makedirs`/`open` with no containment; all three now resolve it through `resolve_path_within_base(OUTPUT_BASE_DIR_NAME, ...)` and return 403 on escape, matching the file-serving endpoints.
+
+### Changed
+- Explicit LLM client timeouts: the `AsyncOpenAI` and `AsyncAnthropic` clients are now constructed with `timeout=LLM_request_timeout_seconds` (default 120s) instead of the SDKs' up-to-10-minute default, so a hung upstream call can no longer block a request slot for minutes on the interactive RAG/agent paths.
+- HITL format support is now derived solely from the newsletter-format registry's `supports_hitl` capability flag (`format_supports_hitl`); the parallel hardcoded `HITL_SUPPORTED_FORMATS` constant that could drift from the registry was removed.
+- Deduplicated the byte-for-byte-identical `_build_featured_topics_exclusion` from the LangTalks and WhatsApp formats up to `NewsletterFormatBase`; replaced the remaining hardcoded JSON keys in the LangTalks format's empty-response/exclusion builders with the existing `DiscussionKeys`/`NewsletterStructureKeys` constants (the LangTalks copy was the violating one); gave `custom_types/llm_schemas.py` a real purpose as the domain-named re-export home for the `LlmResponse*` models (previously a 0-byte file).
+- Re-raise chains: `discussion_ranker` now uses `raise ... from e` consistently on its `RuntimeError` re-raises.
+- Renamed two misleadingly-named MongoDB collections to match this codebase's `<domain>_cache` / data-lifecycle conventions: `cache` → `llm_response_cache` (the collection holds LLM responses keyed by operation type + input hash; the old name described the mechanism, not the contents) and `room_id_cache` → `room_id_map` (it is a persistent Matrix room-id ↔ chat-name lookup table with no TTL by design, so "cache" misrepresented its lifecycle). The `COLLECTION_CACHE`/`COLLECTION_ROOM_ID_CACHE` constants become `COLLECTION_LLM_RESPONSE_CACHE`/`COLLECTION_ROOM_ID_MAP`, and the `INDEXES` keys are repointed so `ensure_indexes()` targets the renamed collections (the LLM cache keeps its TTL index; the room-id map keeps its unique `chat_name` index and stays TTL-free). One-time migration `scripts/migrate_cache_collection_renames.py` (dry-run/apply, idempotent) performs the physical `renameCollection` (indexes carry over) and verifies document counts; it fails fast if both old and new names coexist rather than risk clobbering data. The unrelated on-disk `chat_name_to_room_id_cache.json` file cache is untouched.
+
 ## [1.15.0] - 2026-06-05
 
 ### Added
@@ -218,7 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.15.1...HEAD
+[1.15.1]: https://github.com/eladlaor/langrag/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/eladlaor/langrag/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/eladlaor/langrag/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/eladlaor/langrag/compare/v1.12.0...v1.13.0

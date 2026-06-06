@@ -141,7 +141,9 @@ class AnthropicProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 api_key = os.getenv("ANTHROPIC_API_KEY")
                 if not api_key:
                     raise ConfigurationError("ANTHROPIC_API_KEY not found in environment variables. " "Set it in .env or as an environment variable.")
-                self.anthropic_client = AsyncAnthropic(api_key=api_key)
+                # Explicit timeout: the SDK default is up to ~10 min, far too
+                # long for interactive RAG/agent paths; bound it from config.
+                self.anthropic_client = AsyncAnthropic(api_key=api_key, timeout=get_settings().llm.request_timeout_seconds)
             return self.anthropic_client
         except ConfigurationError:
             raise

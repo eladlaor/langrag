@@ -16,6 +16,7 @@ Configuration:
 - SLM_CONFIDENCE_THRESHOLD: Minimum confidence for classification
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -72,6 +73,12 @@ async def _persist_raw_messages_to_mongodb(
         logger.info(f"Persisted {count}/{len(messages)} raw messages to MongoDB for chat {chat_name}")
     except Exception as e:
         logger.warning(f"Failed to persist raw messages to MongoDB: {e}")
+
+
+def _read_json_file(file_path: str) -> Any:
+    """Load JSON from a file (sync; the thread target for offloaded reads)."""
+    with open(file_path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _atomic_json_write(file_path: str, data: Any) -> None:
@@ -136,8 +143,8 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
         extracted_file_path = state.get(Keys.EXTRACTED_FILE_PATH)
         if mongodb_run_id and extracted_file_path and os.path.exists(extracted_file_path):
             try:
-                with open(extracted_file_path, encoding="utf-8") as f:
-                    messages = json.load(f)
+                # Offload blocking read to a thread so concurrent chat workers aren't stalled
+                messages = await asyncio.to_thread(_read_json_file, extracted_file_path)
                 if isinstance(messages, list):
                     await _persist_raw_messages_to_mongodb(
                         mongodb_run_id=mongodb_run_id,
@@ -179,9 +186,8 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
     ctx = extract_trace_context(config)
     with langfuse_span(name="slm_prefilter", trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data={"chat_name": chat_name, "file_path": extracted_file_path}, metadata={"model": settings.slm.model}) as span:
         try:
-            # Load extracted messages
-            with open(extracted_file_path, encoding="utf-8") as f:
-                messages = json.load(f)
+            # Load extracted messages (offload blocking read off the event loop)
+            messages = await asyncio.to_thread(_read_json_file, extracted_file_path)
 
             if not isinstance(messages, list):
                 logger.warning(f"Extracted messages not a list (got {type(messages).__name__}), " "skipping SLM filter")
@@ -276,10 +282,17 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
                 classification_map=classification_map,
             )
 
-            # Write filtered messages atomically (pipeline still needs filtered file)
-            _atomic_json_write(extracted_file_path, filtered_messages)
+            # Write filtered messages to a DISTINCT file rather than overwriting
+            # the upstream extract node's output. Overwriting in place is
+            # non-idempotent: on a partial re-run where extract is a cache hit but
+            # this node re-executes, it would re-filter an already-filtered file.
+            # Downstream nodes pick up the new path via the EXTRACTED_FILE_PATH
+            # state update returned below.
+            filtered_file_path = os.path.join(os.path.dirname(extracted_file_path), "filtered_messages.json")
+            # Offload blocking atomic write off the event loop
+            await asyncio.to_thread(_atomic_json_write, filtered_file_path, filtered_messages)
 
-            logger.info(f"SLM filter for chat_name={chat_name}: " f"{original_count} → {len(filtered_messages)} messages " f"({stats.filter_rate:.1f}% filtered, model={stats.model_used})")
+            logger.info(f"SLM filter for chat_name={chat_name}: " f"{original_count} → {len(filtered_messages)} messages " f"({stats.filter_rate:.1f}% filtered, model={stats.model_used}); wrote {filtered_file_path}")
 
             # Emit diagnostic if significant filtering occurred
             if mongodb_run_id and stats.filter_rate > 20:
@@ -311,6 +324,9 @@ async def slm_prefilter_node(state: SingleChatState, config: RunnableConfig | No
             return {
                 Keys.SLM_FILTER_STATS: stats.model_dump(),
                 Keys.MESSAGE_COUNT: len(filtered_messages),
+                # Point downstream nodes at the filtered file. The original
+                # extract output is left intact so a re-run is idempotent.
+                Keys.EXTRACTED_FILE_PATH: filtered_file_path,
             }
 
         except json.JSONDecodeError as e:

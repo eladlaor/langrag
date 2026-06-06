@@ -48,21 +48,59 @@ class TestBeeperExtractorConstants:
 # that depends on Beeper credentials and Matrix client setup.
 # They are documented here to show expected behavior.
 
-@pytest.mark.skip(reason="Requires Beeper credentials and complex Matrix client mocking")
 class TestTimestampParsing:
-    """Test timestamp parsing functionality (skipped - requires class instance)."""
+    """Test _parse_timestamp directly.
+
+    _parse_timestamp does not touch instance state, so we invoke it against a
+    throwaway object rather than a fully-initialized extractor (which would need
+    Beeper credentials). This lets us assert the UTC-boundary contract.
+    """
+
+    @staticmethod
+    def _parse(ts_str, day_boundary="start"):
+        from core.ingestion.extractors.beeper import RawDataExtractorBeeper
+
+        class _Dummy:
+            pass
+
+        return RawDataExtractorBeeper._parse_timestamp(_Dummy(), ts_str, day_boundary=day_boundary)
 
     def test_parse_timestamp_with_milliseconds(self):
-        """Test parsing timestamp that's already in milliseconds."""
-        pass
+        """A pure millisecond string passes through unchanged."""
+        assert self._parse("1704067200000") == 1704067200000
 
-    def test_parse_timestamp_with_date_string_start_boundary(self):
-        """Test parsing date string with start of day boundary."""
-        pass
+    def test_parse_timestamp_start_boundary_is_utc_midnight(self):
+        """Start boundary maps to 00:00:00 UTC of the given date."""
+        # 2025-10-01 00:00:00 UTC
+        assert self._parse("2025-10-01", day_boundary="start") == 1759276800000
 
-    def test_parse_timestamp_with_date_string_end_boundary(self):
-        """Test parsing date string with end of day boundary."""
-        pass
+    def test_parse_timestamp_end_boundary_is_utc_end_of_day(self):
+        """End boundary maps to 23:59:59 UTC of the given date."""
+        # 2025-10-01 23:59:59 UTC
+        assert self._parse("2025-10-01", day_boundary="end") == 1759276800000 + (86400 - 1) * 1000
+
+    @pytest.mark.parametrize("tz", ["UTC", "Asia/Jerusalem", "America/Los_Angeles"])
+    def test_parse_timestamp_is_timezone_independent(self, tz, monkeypatch):
+        """The epoch must not depend on the host timezone.
+
+        Regression guard for the naive-datetime bug: .timestamp() on a naive
+        datetime would use the host local TZ, shifting every extraction window
+        by the UTC offset.
+        """
+        import importlib
+        import time
+
+        monkeypatch.setenv("TZ", tz)
+        if hasattr(time, "tzset"):
+            time.tzset()
+        try:
+            start = self._parse("2025-10-01", day_boundary="start")
+            assert start == 1759276800000, f"TZ={tz} shifted the start boundary"
+        finally:
+            monkeypatch.delenv("TZ", raising=False)
+            if hasattr(time, "tzset"):
+                time.tzset()
+            importlib  # keep import referenced for readability
 
 
 @pytest.mark.skip(reason="Requires Beeper credentials and complex Matrix client mocking")

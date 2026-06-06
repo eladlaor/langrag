@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from custom_types.newsletter_formats.base import NewsletterFormatBase
 from custom_types.newsletter_formats.image_context import build_image_context_text
 from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys, LlmInputKeys
-from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, HEBREW_LANGUAGE_CODES, MessageRole, SummaryFormats, LANGTALKS_DISPLAY_NAME
+from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, HEBREW_LANGUAGE_CODES, MessageRole, SummaryFormats, LANGTALKS_DISPLAY_NAME, LANGTALKS_CHAT_NAME_DEFAULT
 from .schema import LlmResponseLangTalksNewsletterContent
 from .prompt import (
     LANGTALKS_NEWSLETTER_PROMPT,
@@ -114,25 +114,6 @@ class LangTalksFormat(NewsletterFormatBase):
 
         return LANGTALKS_NEWSLETTER_PROMPT.format(worth_mentioning_guidance=worth_mentioning_guidance, desired_language=desired_language)
 
-    @staticmethod
-    def _build_featured_topics_exclusion(featured_discussions: list | None) -> str:
-        """Extract titles from featured discussions and format as a numbered exclusion list."""
-        if not featured_discussions:
-            return "(No featured discussions provided)"
-
-        entries = []
-        for disc in featured_discussions:
-            title = disc.get(NewsletterStructureKeys.TITLE) or disc.get("discussion_title", "")
-            if title:
-                nutshell = disc.get(DiscussionKeys.NUTSHELL, "")
-                entry = f"{title} — {nutshell}" if nutshell else title
-                entries.append(entry)
-
-        if not entries:
-            return "(No featured discussion titles found)"
-
-        return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, 1))
-
     def get_examples(self) -> list[str]:
         """Return list of example newsletter outputs."""
         return self._examples
@@ -223,11 +204,11 @@ class LangTalksFormat(NewsletterFormatBase):
                     }
                 ],
                 NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP: 0,
-                "last_message_timestamp": 0,
-                "ranking_of_relevance_to_gen_ai_engineering": 1,
-                "number_of_messages": 0,
-                "number_of_unique_participants": 0,
-                NewsletterStructureKeys.CHAT_NAME: "LangTalks Community",
+                NewsletterStructureKeys.LAST_MESSAGE_TIMESTAMP: 0,
+                NewsletterStructureKeys.RANKING_OF_RELEVANCE: 1,
+                NewsletterStructureKeys.NUMBER_OF_MESSAGES: 0,
+                NewsletterStructureKeys.NUMBER_OF_UNIQUE_PARTICIPANTS: 0,
+                NewsletterStructureKeys.CHAT_NAME: LANGTALKS_CHAT_NAME_DEFAULT,
             },
             NewsletterStructureKeys.SECONDARY_DISCUSSIONS: [],
             NewsletterStructureKeys.WORTH_MENTIONING: ["No activity to report for this period"],

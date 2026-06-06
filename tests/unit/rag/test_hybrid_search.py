@@ -13,6 +13,7 @@ from bson.binary import Binary
 
 from constants import (
     RAG_HYBRID_LEXICAL_WEIGHT,
+    RAG_HYBRID_VECTOR_COSINE_FIELD,
     RAG_HYBRID_VECTOR_WEIGHT,
     RAG_LEXICAL_INDEX_NAME,
     RAG_SEARCH_SCORE_FIELD,
@@ -218,6 +219,68 @@ class _RaisingCollection:
 
     def aggregate(self, pipeline):
         raise self._exc
+
+
+@pytest.mark.asyncio
+async def test_vector_leg_captures_cosine_for_relevance_floor():
+    """The vector leg must capture $meta:vectorSearchScore right after
+    $vectorSearch so the cosine survives $rankFusion and a relevance floor can
+    be applied. $rankFusion fuses ranks, so the fused score alone cannot express
+    'everything is irrelevant'."""
+    spy = _SpyCollection()
+    await hybrid_search_chunks(
+        spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=0.5
+    )
+    vector_leg = spy.last_pipeline[0]["$rankFusion"]["input"]["pipelines"]["vector"]
+    # [$vectorSearch, $addFields(cosine)]
+    assert "$vectorSearch" in vector_leg[0]
+    add_fields = vector_leg[1]["$addFields"]
+    assert add_fields[RAG_HYBRID_VECTOR_COSINE_FIELD] == {"$meta": "vectorSearchScore"}
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_drops_low_cosine_chunks():
+    """Chunks below the cosine floor (and lexical-only chunks with no cosine)
+    must be dropped so the empty-context refusal can fire on junk queries."""
+    fake_results = [
+        {"chunk_id": "hit", RAG_HYBRID_VECTOR_COSINE_FIELD: 0.62, RRF_RAW_SCORE_FIELD: 0.03},
+        {"chunk_id": "weak", RAG_HYBRID_VECTOR_COSINE_FIELD: 0.31, RRF_RAW_SCORE_FIELD: 0.02},
+        {"chunk_id": "lexical_only", RRF_RAW_SCORE_FIELD: 0.015},  # no cosine
+    ]
+    spy = _SpyCollection(results=fake_results)
+    out = await hybrid_search_chunks(
+        spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=0.5
+    )
+    assert [r["chunk_id"] for r in out] == ["hit"]
+
+
+@pytest.mark.asyncio
+async def test_relevance_floor_returns_empty_on_all_irrelevant():
+    """An out-of-corpus query where every chunk is below the floor must return
+    [] so the caller's refusal path triggers."""
+    fake_results = [
+        {"chunk_id": "a", RAG_HYBRID_VECTOR_COSINE_FIELD: 0.10, RRF_RAW_SCORE_FIELD: 0.03},
+        {"chunk_id": "b", RAG_HYBRID_VECTOR_COSINE_FIELD: 0.20, RRF_RAW_SCORE_FIELD: 0.02},
+    ]
+    spy = _SpyCollection(results=fake_results)
+    out = await hybrid_search_chunks(
+        spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=0.5
+    )
+    assert out == []
+
+
+@pytest.mark.asyncio
+async def test_no_floor_when_min_vector_score_is_none():
+    """With no floor configured, every fused chunk is returned (legacy behavior)."""
+    fake_results = [
+        {"chunk_id": "a", RAG_HYBRID_VECTOR_COSINE_FIELD: 0.10, RRF_RAW_SCORE_FIELD: 0.03},
+        {"chunk_id": "b", RRF_RAW_SCORE_FIELD: 0.02},
+    ]
+    spy = _SpyCollection(results=fake_results)
+    out = await hybrid_search_chunks(
+        spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=None
+    )
+    assert [r["chunk_id"] for r in out] == ["a", "b"]
 
 
 @pytest.mark.asyncio

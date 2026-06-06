@@ -51,6 +51,7 @@ from custom_types.api_schemas import (
 )
 from custom_types.field_keys import RankingResultKeys, DiscussionKeys, WorkerResultKeys
 from db.batch_jobs import BatchJobManager, BatchJobStatus
+from graphs.checkpointer import log_checkpoint_stats
 from graphs.multi_chat_consolidator.graph import get_parallel_orchestrator_graph
 from graphs.state_keys import (
     ParallelOrchestratorStateKeys as OrchestratorKeys,
@@ -108,6 +109,7 @@ from constants import (
     OUTPUT_BASE_DIR_NAME,
     CONTENT_TYPE_EVENT_STREAM,
     FILE_EXT_HTML,
+    HTTP_DETAIL_INTERNAL_ERROR,
 )
 from core.generation.generators.factory import ContentGeneratorFactory
 from custom_types.newsletter_formats import list_formats
@@ -322,6 +324,23 @@ def build_orchestrator_state(
     return state
 
 
+def _validate_run_directory(run_directory: str) -> str:
+    """Enforce that a client-supplied ``run_directory`` stays inside the output base.
+
+    The HITL endpoints take a free-form ``run_directory`` and feed it to
+    os.path.join / os.makedirs / open. Without containment a caller could read
+    ranking/aggregated JSON from, or write user_selections.json into, arbitrary
+    writable directories — the file-SERVING endpoints already guard this way.
+
+    Returns the resolved, contained absolute path. Raises HTTP 403 on escape.
+    """
+    try:
+        return resolve_path_within_base(OUTPUT_BASE_DIR_NAME, run_directory)
+    except PathContainmentError as containment_error:
+        logger.warning("Path traversal attempt blocked", extra={"requested_path": run_directory, "error": str(containment_error)})
+        raise HTTPException(status_code=403, detail="Access denied: run_directory must be within the output directory")
+
+
 def setup_output_directory(request: PeriodicNewsletterRequest) -> str:
     """
     Setting up and validating the output directory for a newsletter generation run.
@@ -403,8 +422,9 @@ async def generate_periodic_newsletter(request: Request, payload: PeriodicNewsle
                 logger.error(f"Failed to create batch job: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Failed to queue batch job: {e}")
 
-        # Setting up and validating output directory (single source of truth)
-        run_output_dir = setup_output_directory(request)
+        # Setting up and validating output directory (single source of truth).
+        # Offload the blocking makedirs + write-test off the event loop.
+        run_output_dir = await asyncio.to_thread(setup_output_directory, request)
         logger.info(f"Output directory: {run_output_dir}")
 
         # Creating Langfuse trace for this workflow
@@ -449,6 +469,7 @@ async def generate_periodic_newsletter(request: Request, payload: PeriodicNewsle
 
         graph = await get_parallel_orchestrator_graph()
         result = await graph.ainvoke(state, config)
+        log_checkpoint_stats(thread_id)
 
         logger.info(f"Workflow completed: {result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0)}/{result.get(OrchestratorKeys.TOTAL_CHATS, 0)} successful")
 
@@ -590,8 +611,9 @@ async def generate_periodic_newsletter_stream(request: Request, payload: Periodi
     # Comprehensive validation (single source of truth)
     validate_newsletter_request(request)
 
-    # Setting up and validating output directory (single source of truth)
-    run_output_dir = setup_output_directory(request)
+    # Setting up and validating output directory (single source of truth).
+    # Offload the blocking makedirs + write-test off the event loop.
+    run_output_dir = await asyncio.to_thread(setup_output_directory, request)
 
     # Generating thread ID
     thread_id = f"periodic_newsletter_{request.data_source_name}_{request.start_date}_{request.end_date}_{uuid.uuid4().hex[:8]}"
@@ -791,6 +813,7 @@ async def run_workflow_with_progress(request: PeriodicNewsletterRequest, run_out
     # Native async graph invocation (LangGraph 1.0+)
     graph = await get_parallel_orchestrator_graph()
     result = await graph.ainvoke(state, config)
+    log_checkpoint_stats(thread_id)
 
     logger.info(f"Workflow completed: {result.get(OrchestratorKeys.SUCCESSFUL_CHATS, 0)}/{result.get(OrchestratorKeys.TOTAL_CHATS, 0)} successful")
 
@@ -842,6 +865,9 @@ async def get_discussion_selection(run_directory: str):
     """
     logger.info(f"Loading discussion selection from: {run_directory}")
 
+    # Enforce path containment before using the client-supplied directory.
+    run_directory = _validate_run_directory(run_directory)
+
     # Building path to ranked_discussions.json
     ranked_discussions_path = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
 
@@ -849,10 +875,9 @@ async def get_discussion_selection(run_directory: str):
         logger.error(f"Ranked discussions file not found: {ranked_discussions_path}")
         raise HTTPException(status_code=404, detail=f"Ranked discussions not found at {ranked_discussions_path}. " "Please run Phase 1 first with a format that requires HITL selection.")
 
-    # Loading ranked discussions
+    # Loading ranked discussions (offload blocking read off the event loop)
     try:
-        with open(ranked_discussions_path, encoding="utf-8") as f:
-            data = json.load(f)
+        data = await asyncio.to_thread(_read_json_file, ranked_discussions_path)
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse ranked discussions JSON: {e}")
         raise HTTPException(status_code=500, detail=f"Invalid JSON in ranked discussions file: {e}")
@@ -894,22 +919,25 @@ async def save_discussion_selections(request: DiscussionSelectionsSaveRequest):
     if not request.selected_discussion_ids:
         raise HTTPException(status_code=400, detail="No discussions selected. Please select at least one discussion.")
 
-    if not os.path.exists(request.run_directory):
+    # Enforce path containment before writing into the client-supplied directory.
+    run_directory = _validate_run_directory(request.run_directory)
+
+    if not os.path.exists(run_directory):
         raise HTTPException(status_code=404, detail=f"Run directory not found: {request.run_directory}")
 
     # Building path for user_selections.json
-    selections_dir = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION)
+    selections_dir = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION)
     selections_file = os.path.join(selections_dir, OUTPUT_FILENAME_USER_SELECTIONS)
 
-    # Ensuring directory exists
-    os.makedirs(selections_dir, exist_ok=True)
+    # Ensuring directory exists (offload blocking makedirs off the event loop)
+    await asyncio.to_thread(os.makedirs, selections_dir, exist_ok=True)
 
     # Saving selections
     try:
         selections_data = {"selected_discussion_ids": request.selected_discussion_ids, "selection_timestamp": datetime.now(UTC).isoformat(), "num_selected": len(request.selected_discussion_ids)}
 
-        with open(selections_file, "w", encoding="utf-8") as f:
-            json.dump(selections_data, f, indent=2, ensure_ascii=False)
+        # Offload blocking write off the event loop
+        await asyncio.to_thread(_write_json_file, selections_file, selections_data)
 
         logger.info(f"Saved selections to: {selections_file}")
 
@@ -948,8 +976,11 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     """
     logger.info(f"Starting Phase 2 newsletter generation for: {request.run_directory}")
 
+    # Enforce path containment before reading from / writing into the directory.
+    run_directory = _validate_run_directory(request.run_directory)
+
     # Loading user selections
-    selections_file = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_USER_SELECTIONS)
+    selections_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_USER_SELECTIONS)
 
     if not os.path.exists(selections_file):
         raise HTTPException(status_code=404, detail=f"User selections not found at {selections_file}. " "Please save selections first using /api/save_discussion_selections")
@@ -962,7 +993,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=500, detail=f"Failed to load selections: {e}")
 
     # Loading aggregated discussions (full content)
-    aggregated_file = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
+    aggregated_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
 
     if not os.path.exists(aggregated_file):
         raise HTTPException(status_code=404, detail=f"Aggregated discussions not found at {aggregated_file}. " "Please run Phase 1 first.")
@@ -984,7 +1015,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
 
     # Loading ranking file to get brief_mention_items and format metadata
     # This follows the same pattern as generate_consolidated_newsletter node
-    ranking_file = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
+    ranking_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
 
     if not os.path.exists(ranking_file):
         raise HTTPException(status_code=404, detail=f"Ranking file not found at {ranking_file}. Please run Phase 1 first.")
@@ -997,7 +1028,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=500, detail=f"Failed to load ranking data: {e}")
 
     # Loading ranked_discussions.json to get format_type
-    ranked_discussions_file = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
+    ranked_discussions_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_RANKED_DISCUSSIONS)
 
     try:
         ranked_data = await asyncio.to_thread(_read_json_file, ranked_discussions_file)
@@ -1012,7 +1043,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     logger.info(f"Loaded {len(brief_mention_items)} brief mention items from ranking")
 
     # Creating output directory for Phase 2
-    phase2_output_dir = os.path.join(request.run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AFTER_SELECTION)
+    phase2_output_dir = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AFTER_SELECTION)
     os.makedirs(phase2_output_dir, exist_ok=True)
 
     # Saving selected discussions to temporary file (required by ContentGenerator)
@@ -1178,7 +1209,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
 
     except Exception as e:
         logger.error(f"Phase 2 generation failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Newsletter generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get(ROUTE_NEWSLETTER_FILE_CONTENT)
@@ -1222,7 +1253,7 @@ async def get_newsletter_file_content(file_path: str):
         raise
     except Exception as e:
         logger.error(f"Failed to read file {file_path}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get(ROUTE_NEWSLETTER_HTML_VIEWER, response_class=HTMLResponse)
@@ -1275,7 +1306,7 @@ async def newsletter_html_viewer(path: str):
         raise
     except Exception as e:
         logger.error(f"Failed to serve HTML {path}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to serve newsletter: {str(e)}")
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 # ============================================================================

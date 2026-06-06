@@ -24,6 +24,7 @@ Architecture:
 - enrich_with_links node invoking link_enricher subgraph
 """
 
+import asyncio
 import os
 import logging
 import re
@@ -599,14 +600,22 @@ async def generate_content(state: SingleChatState, config: RunnableConfig | None
         validate_ranking_file(ranking_file, chat_name)
         validate_discussions_file(data_source_path)
 
-        # Step 2: Loading and validating ranking data
-        featured_discussion_ids, brief_mention_items = load_ranking_data(ranking_file, chat_name)
+        # Step 2: Loading and validating ranking data (offload blocking JSON read off the event loop)
+        featured_discussion_ids, brief_mention_items = await asyncio.to_thread(load_ranking_data, ranking_file, chat_name)
 
-        # Step 3: Loading and filtering discussions
-        featured_discussions = load_featured_discussions(data_source_path, featured_discussion_ids, chat_name)
-
-        # Step 3b: Load non-featured discussions as fallback for worth_mentioning
-        non_featured_discussions = load_non_featured_discussions(data_source_path, featured_discussion_ids) if not brief_mention_items else []
+        # Step 3: Loading and filtering discussions. An empty featured_discussion_ids
+        # is a valid low-activity result — skip the per-ID load (which would raise
+        # on "no matching discussions") and let the generator emit an empty
+        # newsletter from featured_discussions=[].
+        if featured_discussion_ids:
+            # Offload blocking JSON reads off the event loop
+            featured_discussions = await asyncio.to_thread(load_featured_discussions, data_source_path, featured_discussion_ids, chat_name)
+            # Step 3b: Load non-featured discussions as fallback for worth_mentioning
+            non_featured_discussions = await asyncio.to_thread(load_non_featured_discussions, data_source_path, featured_discussion_ids) if not brief_mention_items else []
+        else:
+            logger.warning(f"No featured discussions for chat '{chat_name}'; generating an empty (no-activity) newsletter.")
+            featured_discussions = []
+            non_featured_discussions = []
 
         # Step 4: Extracting state values for content generation
         data_source_name = state[Keys.DATA_SOURCE_NAME]

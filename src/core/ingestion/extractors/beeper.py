@@ -757,7 +757,8 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
                     safe_room_name = room_name.replace(" ", "_").replace("/", "_")
                     start_date_formatted = start_date_str.replace("-", "")
-                    decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}.json")
+                    end_date_formatted = end_date_str.replace("-", "")
+                    decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}_{end_date_formatted}.json")
 
                     output_dir = os.path.dirname(decrypted_messages_file_path)
                     if output_dir:
@@ -796,7 +797,8 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
 
                             safe_room_name = room_name.replace(" ", "_").replace("/", "_")
                             start_date_formatted = start_date_str.replace("-", "")
-                            decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}.json")
+                            end_date_formatted = end_date_str.replace("-", "")
+                            decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}_{end_date_formatted}.json")
 
                             output_dir = os.path.dirname(decrypted_messages_file_path)
                             if output_dir:
@@ -844,13 +846,17 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
             room_id = await self._get_room_id_with_cache(room_name)
 
             safe_room_name = room_name.replace(" ", "_").replace("/", "_")
-            # Using date format instead of timestamp for consistency
+            # Using date format instead of timestamp for consistency. Both start
+            # AND end date are part of the cache filename — omitting end_date lets
+            # a narrow-range cache file satisfy a later wider-range request,
+            # silently under-extracting the window.
             start_date_formatted = start_date_str.replace("-", "")
+            end_date_formatted = end_date_str.replace("-", "")
 
             # Initializing persistent client (keys auto-loaded)
             await self._init_persistent_client()
 
-            encrypted_messages_file_path = os.path.join(encrypted_messages_dir_path, f"encrypted_{safe_room_name}_{start_date_formatted}.json")
+            encrypted_messages_file_path = os.path.join(encrypted_messages_dir_path, f"encrypted_{safe_room_name}_{start_date_formatted}_{end_date_formatted}.json")
             logging.info(f"Saving encrypted messages to: {encrypted_messages_file_path}")
 
             # Fetching messages using async client
@@ -871,7 +877,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                     encrypted_messages = json.load(f)
                 logging.info(f"Loaded {len(encrypted_messages)} encrypted messages from cache")
 
-            decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}.json")
+            decrypted_messages_file_path = os.path.join(decrypted_messages_dir_path, f"decrypted_{safe_room_name}_{start_date_formatted}_{end_date_formatted}.json")
 
             logging.info("Decrypting messages using persistent session keys...")
             logging.info(f"Will save decrypted messages to: {decrypted_messages_file_path}")
@@ -1357,6 +1363,14 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
                         else:
                             # Setting to start of day (00:00:00) - this is the default behavior
                             dt = dt.replace(hour=0, minute=0, second=0)
+
+                    # Interpret all parsed boundaries as UTC, matching how the
+                    # date range is displayed (see the UTC log line at extraction
+                    # time). A naive datetime's .timestamp() would otherwise use
+                    # the host's local timezone, shifting every window by the UTC
+                    # offset and silently including/dropping boundary-day messages.
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
 
                     return int(dt.timestamp() * 1000)  # Converting to milliseconds
                 except ValueError:

@@ -74,16 +74,19 @@ class TestLoadRankingData:
         with pytest.raises(RuntimeError, match="missing 'featured_discussion_ids'"):
             load_ranking_data(str(ranking_file), "Test Chat")
 
-    def test_raises_when_featured_ids_empty(self, tmp_path):
-        """RuntimeError when featured_discussion_ids is empty list."""
+    def test_empty_featured_ids_returns_gracefully(self, tmp_path):
+        """An EMPTY featured_discussion_ids list is a valid low-activity result,
+        NOT an error: the generator emits an empty newsletter from it. Raising
+        here would kill the chat worker on a legitimately quiet date range."""
         ranking_file = tmp_path / "ranking.json"
         ranking_file.write_text(json.dumps({
             "featured_discussion_ids": [],
             "brief_mention_items": []
         }))
 
-        with pytest.raises(RuntimeError, match="No featured_discussion_ids"):
-            load_ranking_data(str(ranking_file), "Test Chat")
+        ids, briefs = load_ranking_data(str(ranking_file), "Test Chat")
+        assert ids == []
+        assert briefs == []
 
     def test_returns_ids_and_brief_mentions(self, tmp_path):
         """Returns featured IDs and brief mention items."""

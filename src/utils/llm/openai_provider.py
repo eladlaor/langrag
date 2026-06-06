@@ -121,7 +121,9 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 if not openai_api_key:
                     raise ConfigurationError("OPENAI_API_KEY not found in environment variables. " "Set it in .env or as an environment variable.")
 
-                self.openai_client = AsyncOpenAI(api_key=openai_api_key)
+                # Explicit timeout: the SDK default is up to ~10 min, far too
+                # long for interactive RAG/agent paths; bound it from config.
+                self.openai_client = AsyncOpenAI(api_key=openai_api_key, timeout=get_settings().llm.request_timeout_seconds)
 
             return self.openai_client
 
@@ -321,7 +323,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
     @with_retry(max_retries=3, base_delay=1.0)
     @observe(as_type="generation", name="openai_json_output")
-    async def call_with_json_output(self, purpose: str, prompt: str, model: str = None, temperature: float = None, **kwargs) -> dict:
+    async def call_with_json_output(self, purpose: str, prompt: str, model: str | None = None, temperature: float | None = None, **kwargs) -> dict:
         """
         Generic method for LLM calls expecting JSON output.
 
@@ -383,7 +385,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
     @with_retry(max_retries=3, base_delay=1.0)
     @observe(as_type="generation", name="openai_simple")
-    async def call_simple(self, purpose: str, prompt: str, model: str = None, temperature: float = None, **kwargs) -> str:
+    async def call_simple(self, purpose: str, prompt: str, model: str | None = None, temperature: float | None = None, **kwargs) -> str:
         """
         Generic method for simple text LLM calls.
 
@@ -417,7 +419,13 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 temperature=temperature,
             )
 
+            if not response.choices:
+                raise LLMResponseError(f"Simple call returned no choices for purpose={purpose}")
             content = response.choices[0].message.content
+            # Guard against None/empty content typed as str — surface it here
+            # rather than letting a None propagate and blow up far from the cause.
+            if not content:
+                raise LLMResponseError(f"Simple call returned empty content for purpose={purpose}")
             logging.debug(f"[{purpose}] Response: {content[:200]}...")
 
             self._update_langfuse_output(content, response.usage)

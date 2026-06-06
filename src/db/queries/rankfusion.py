@@ -47,6 +47,7 @@ def build_rankfusion_pipeline(
     top_k: int,
     score_details: bool = False,
     drop_id: bool = True,
+    vector_extra_stages: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build a `$rankFusion` aggregation pipeline.
 
@@ -67,15 +68,24 @@ def build_rankfusion_pipeline(
         drop_id: When True, the trailing `$project` strips `_id`. Set to
             False if the caller needs the document `_id` to survive (e.g.,
             for downstream `update_one` / `delete_one` on the same doc).
+        vector_extra_stages: Optional stages appended to the vector leg right
+            after `$vectorSearch` — e.g. an `$addFields` that captures
+            `$meta:"vectorSearchScore"` so the cosine survives fusion (used by
+            the RAG relevance floor). `$meta` for the vector score is only valid
+            immediately after `$vectorSearch`, hence it must live in the leg.
 
     Returns:
         A list of aggregation stages: [$rankFusion, $addFields, $limit, $project].
     """
+    vector_pipeline: list[dict[str, Any]] = [vector_stage]
+    if vector_extra_stages:
+        vector_pipeline.extend(vector_extra_stages)
+
     rank_fusion_stage: dict[str, Any] = {
         "$rankFusion": {
             "input": {
                 "pipelines": {
-                    "vector": [vector_stage],
+                    "vector": vector_pipeline,
                     "lexical": list(lexical_pipeline),
                 }
             },

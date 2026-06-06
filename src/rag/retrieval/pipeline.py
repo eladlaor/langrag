@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from config import get_settings
-from constants import COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_SEARCH_SCORE_FIELD
+from constants import COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_HYBRID_VECTOR_COSINE_FIELD, RAG_SEARCH_SCORE_FIELD
 from custom_types.field_keys import RAGChunkKeys as Keys
 from db.connection import get_database
 from observability.llm.langfuse_client import langfuse_span
@@ -116,6 +116,7 @@ class RetrievalPipeline:
                     date_start=date_start,
                     date_end=date_end,
                     top_k=search_top_k,
+                    min_vector_score=self._settings.min_similarity_score,
                 )
             else:
                 retrieved = await vector_search_chunks(
@@ -170,11 +171,14 @@ class RetrievalPipeline:
             f"freshness_warning={freshness_warning}"
         )
 
-        # Strip embedding vectors from results (large, not needed downstream)
+        # Strip embedding vectors (large) and the internal hybrid relevance-floor
+        # cosine field (an implementation detail) from results before returning.
         for chunk in retrieved:
             chunk.pop(Keys.EMBEDDING, None)
+            chunk.pop(RAG_HYBRID_VECTOR_COSINE_FIELD, None)
         for chunk in reranked:
             chunk.pop(Keys.EMBEDDING, None)
+            chunk.pop(RAG_HYBRID_VECTOR_COSINE_FIELD, None)
 
         return {
             "retrieved_chunks": retrieved,

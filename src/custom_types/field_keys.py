@@ -58,6 +58,11 @@ class DiscussionKeys:
     METADATA = "metadata"
     EMBEDDING = "embedding"
     DISCUSSIONS = "discussions"
+    # Transient marker set on a parsed message whose source event was still
+    # encrypted (decryption failed). Used to filter undecryptable ciphertext out
+    # of the corpus when should_filter_decryption_errors is set; stripped before
+    # the message reaches downstream stages.
+    DECRYPTION_FAILED = "_decryption_failed"
 
 
 class RankingResultKeys:

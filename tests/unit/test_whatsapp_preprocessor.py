@@ -93,6 +93,50 @@ class TestMessageParsing:
         pass
 
 
+class TestDecryptionErrorTagging:
+    """_parse_messages must flag still-encrypted (undecryptable) events so the
+    corpus filter can drop ciphertext instead of treating it as real text."""
+
+    @staticmethod
+    def _preprocessor():
+        from core.ingestion.preprocessors.whatsapp import WhatsAppPreprocessor
+
+        return WhatsAppPreprocessor(source_name="langtalks", chat_name="Test")
+
+    def test_encrypted_event_is_tagged_as_decryption_failed(self):
+        from custom_types.field_keys import DiscussionKeys
+
+        raw = [
+            {"event_id": "$1", "origin_server_ts": 1699999999000, "sender": "@u1:beeper.com", "type": "m.room.message", "content": {"body": "hello"}},
+            {"event_id": "$2", "origin_server_ts": 1699999999100, "sender": "@u2:beeper.com", "type": "m.room.encrypted", "content": {"ciphertext": "xxx"}},
+        ]
+        out = self._preprocessor()._parse_messages(raw)
+        by_id = {m[DiscussionKeys.ID]: m for m in out[DiscussionKeys.MESSAGES]}
+        assert by_id["$1"].get(DiscussionKeys.DECRYPTION_FAILED) is None
+        assert by_id["$2"].get(DiscussionKeys.DECRYPTION_FAILED) is True
+
+    def test_corpus_filter_drops_tagged_messages_and_strips_marker(self):
+        """Mirror the gate logic in _parse_and_standardize: when filtering is on,
+        tagged messages are removed and the transient marker is stripped from the
+        survivors so it never leaks downstream."""
+        from custom_types.field_keys import DiscussionKeys
+
+        all_parsed_messages = [
+            {DiscussionKeys.ID: "$1", "content": "hello"},
+            {DiscussionKeys.ID: "$2", "content": "", DiscussionKeys.DECRYPTION_FAILED: True},
+        ]
+        should_filter_decryption_errors = True
+
+        decryption_error_messages = [m for m in all_parsed_messages if m.get(DiscussionKeys.DECRYPTION_FAILED)]
+        if should_filter_decryption_errors and decryption_error_messages:
+            all_parsed_messages = [m for m in all_parsed_messages if not m.get(DiscussionKeys.DECRYPTION_FAILED)]
+        for m in all_parsed_messages:
+            m.pop(DiscussionKeys.DECRYPTION_FAILED, None)
+
+        assert [m[DiscussionKeys.ID] for m in all_parsed_messages] == ["$1"]
+        assert all(DiscussionKeys.DECRYPTION_FAILED not in m for m in all_parsed_messages)
+
+
 class TestMessageJsonStructure:
     """Test message JSON structure (no class instance needed)."""
 

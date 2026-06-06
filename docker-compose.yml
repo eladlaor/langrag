@@ -49,6 +49,10 @@ services:
       MONGODB_URI: mongodb://mongodb:27017/?replicaSet=langrag-mongodb
       MONGODB_DATABASE: ${MONGODB_DATABASE:-langrag}
 
+      # LangGraph checkpointer TTL (seconds). Bounds checkpoints + checkpoint_writes growth.
+      # Default 7 days. MUST exceed the longest paused HITL run (>> hitl_selection_timeout).
+      CHECKPOINTER_TTL_SECONDS: ${CHECKPOINTER_TTL_SECONDS:-604800}
+
       # MongoDB feature flags
       MONGODB_ENABLE_FILE_OUTPUTS: "true"  # Required for link enrichment stage
 
@@ -239,6 +243,10 @@ services:
       # MongoDB connection
       MONGODB_URI: mongodb://mongodb:27017/?replicaSet=langrag-mongodb
       MONGODB_DATABASE: ${MONGODB_DATABASE:-langrag}
+
+      # LangGraph checkpointer TTL (seconds). Bounds checkpoints + checkpoint_writes growth.
+      # Default 7 days. MUST exceed the longest paused HITL run (>> hitl_selection_timeout).
+      CHECKPOINTER_TTL_SECONDS: ${CHECKPOINTER_TTL_SECONDS:-604800}
 
       # Batch worker settings
       BATCH_WORKER_POLL_INTERVAL: ${BATCH_WORKER_POLL_INTERVAL:-10}

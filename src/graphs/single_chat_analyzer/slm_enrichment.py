@@ -289,12 +289,18 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
                     total_messages += len(messages)
                     total_enriched += sum(1 for m in messages if m.get("slm_active_labels"))
 
-            # Write enriched discussions back atomically
-            await asyncio.to_thread(_atomic_json_write, discussions_file, data)
+            # Write enriched discussions to a DISTINCT file rather than
+            # overwriting separate_discussions' output in place. In-place
+            # overwrite is non-idempotent: a partial re-run where the upstream
+            # node is a cache hit but this node re-executes would re-enrich
+            # already-enriched messages. Downstream nodes pick up the new path
+            # via the SEPARATE_DISCUSSIONS_FILE_PATH state update returned below.
+            enriched_file_path = os.path.join(os.path.dirname(discussions_file), "enriched_discussions.json")
+            await asyncio.to_thread(_atomic_json_write, enriched_file_path, data)
 
             logger.info(
-                "SLM enrichment for chat_name=%s: %d messages enriched (%d with active labels)",
-                chat_name, total_messages, total_enriched,
+                "SLM enrichment for chat_name=%s: %d messages enriched (%d with active labels); wrote %s",
+                chat_name, total_messages, total_enriched, enriched_file_path,
             )
 
             if span:
@@ -304,7 +310,11 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
                     "model": model_name,
                 })
 
-            return {}
+            return {
+                # Point downstream nodes at the enriched file; the upstream
+                # separate_discussions output is left intact for idempotency.
+                Keys.SEPARATE_DISCUSSIONS_FILE_PATH: enriched_file_path,
+            }
 
         except Exception as e:
             logger.error(

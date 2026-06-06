@@ -129,7 +129,7 @@ INDEXES = {
         # Query by sender
         {"keys": [("sender", ASCENDING), ("timestamp", DESCENDING)]},
     ],
-    "cache": [
+    "llm_response_cache": [
         # Primary lookup for cache hits
         {"keys": [("cache_key", ASCENDING)], "unique": True},
         # TTL index for automatic expiration
@@ -257,7 +257,7 @@ INDEXES = {
         # TTL index for automatic cleanup (90 days)
         {"keys": [("created_at", ASCENDING)], "expireAfterSeconds": 7776000},
     ],
-    "room_id_cache": [
+    "room_id_map": [
         # Primary lookup - UNIQUE constraint prevents duplicates
         {"keys": [("chat_name", ASCENDING)], "unique": True},
         # Reverse lookup (room_id -> chat_name)

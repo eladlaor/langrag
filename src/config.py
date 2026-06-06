@@ -128,6 +128,14 @@ class LLMSettings(BaseSettings):
     temperature_translation: float = Field(default=0.3, description="Temperature for translation tasks")
     temperature_discussion_separation: float = Field(default=0.2, description="Temperature for discussion separation")
 
+    # =========================================================================
+    # Client request timeout (provider-agnostic)
+    # =========================================================================
+    # The OpenAI/Anthropic SDKs default to a very long timeout (up to ~10 min),
+    # which lets a hung upstream call block a request slot far too long for the
+    # interactive RAG/agent paths. Cap it explicitly.
+    request_timeout_seconds: float = Field(default=120.0, description="HTTP request timeout (seconds) applied to the AsyncOpenAI and AsyncAnthropic clients. Bounds how long a hung upstream LLM call can block a request slot.")
+
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
     # =========================================================================
@@ -291,7 +299,15 @@ class CheckpointerSettings(BaseSettings):
     db_name: str | None = Field(default=None, description="MongoDB database name for checkpoints. None = use the main app database.")
     checkpoint_collection: str = Field(default="checkpoints", description="Collection name for checkpoint documents.")
     writes_collection: str = Field(default="checkpoint_writes", description="Collection name for intermediate writes.")
-    ttl_seconds: int | None = Field(default=None, description="Optional TTL for checkpoint documents in seconds. None = never expire.")
+    # TTL bounds the working set of the durable checkpoint collections (checkpoints +
+    # checkpoint_writes), which otherwise grow unbounded (one checkpoint per super-step,
+    # N pending-write docs per parallel fan-out). 7 days by default.
+    #
+    # SAFETY: TTL MUST stay well above the longest legitimate paused HITL run, or a
+    # human-in-the-loop run could have its checkpoint reaped mid-pause and become
+    # unresumable. Anchor: CHECKPOINTER_TTL_SECONDS >> hitl_selection_timeout_minutes * 60.
+    # If HITL can pause indefinitely, raise this generously rather than tighten it.
+    ttl_seconds: int | None = Field(default=604800, description="TTL for checkpoint documents in seconds (default 7 days). MUST exceed the longest paused HITL run. None = never expire.")
 
     model_config = SettingsConfigDict(env_prefix="CHECKPOINTER_")
 

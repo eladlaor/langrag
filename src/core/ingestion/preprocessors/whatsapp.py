@@ -296,10 +296,27 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
             logging.info("Reply references validation complete. Filtering out decryption error messages if requested...")
 
-            if should_filter_decryption_errors:
-                logging.warning("-" * 10)
-                logging.warning("Filtering out decryption error messages is not implemented yet!")
-                logging.warning("-" * 10)
+            # Count undecryptable messages (tagged during parsing) for observability.
+            decryption_error_messages = [msg for msg in all_parsed_messages if msg.get(DiscussionKeys.DECRYPTION_FAILED)]
+            if decryption_error_messages:
+                logging.warning(
+                    "Decryption errors detected in message stream",
+                    extra={
+                        "decryption_error_count": len(decryption_error_messages),
+                        "total_messages": len(all_parsed_messages),
+                        "should_filter": should_filter_decryption_errors,
+                    },
+                )
+
+            if should_filter_decryption_errors and decryption_error_messages:
+                # Drop ciphertext/empty undecryptable events so they never reach
+                # ranking, generation, or the final newsletter as fake "messages".
+                all_parsed_messages = [msg for msg in all_parsed_messages if not msg.get(DiscussionKeys.DECRYPTION_FAILED)]
+                logging.warning(f"Filtered out {len(decryption_error_messages)} undecryptable message(s) from the corpus")
+
+            # Strip the transient marker so it never leaks downstream.
+            for msg in all_parsed_messages:
+                msg.pop(DiscussionKeys.DECRYPTION_FAILED, None)
 
             final_messages = all_parsed_messages
             if should_clean_message_ids:
@@ -1046,6 +1063,12 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
                 # Create structured message
                 structured_msg = {DiscussionKeys.ID: msg_id, "timestamp": timestamp, "sender_id": sender_id, "replies_to": replies_to, "content": body}
+
+                # Flag messages that arrived still-encrypted (decryption failed
+                # upstream). Their "body" is empty or ciphertext, not real text;
+                # downstream filtering decides whether to drop them.
+                if msg.get(DecryptionResultKeys.TYPE) == MatrixEventType.ROOM_ENCRYPTED:
+                    structured_msg[DiscussionKeys.DECRYPTION_FAILED] = True
 
                 structured_messages.append(structured_msg)
 

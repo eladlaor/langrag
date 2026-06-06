@@ -345,6 +345,11 @@ HTTP_STATUS_CONFLICT = 409
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
 
+# Generic client-facing detail for 5xx responses. Internal exception text
+# (paths, driver errors, stack context) MUST be logged server-side, never
+# returned in the HTTP body where it leaks implementation detail to callers.
+HTTP_DETAIL_INTERNAL_ERROR = "Internal server error"
+
 
 # ============================================================================
 # MONGODB COLLECTION CONSTANTS
@@ -353,12 +358,12 @@ HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
 COLLECTION_RUNS = "runs"
 COLLECTION_MESSAGES = "messages"
 COLLECTION_DISCUSSIONS = "discussions"
-COLLECTION_CACHE = "cache"
+COLLECTION_LLM_RESPONSE_CACHE = "llm_response_cache"
 COLLECTION_BATCH_JOBS = "batch_jobs"
 COLLECTION_NEWSLETTERS = "newsletters"
 COLLECTION_SCHEDULED_NEWSLETTERS = "scheduled_newsletters"
 COLLECTION_EXTRACTION_CACHE = "extraction_cache"
-COLLECTION_ROOM_ID_CACHE = "room_id_cache"
+COLLECTION_ROOM_ID_MAP = "room_id_map"
 COLLECTION_IMAGES = "images"
 COLLECTION_TRANSLATION_CACHE = "translation_cache"
 COLLECTION_SENDER_MAPS = "sender_maps"
@@ -542,6 +547,13 @@ RAG_RATE_LIMIT_DEFAULT = "120/minute"
 
 # RAG vector search score field (added by $vectorSearch $meta)
 RAG_SEARCH_SCORE_FIELD = "search_score"
+
+# Per-chunk cosine similarity captured inside the hybrid retrieval vector leg
+# (via $meta:"vectorSearchScore"). $rankFusion fuses RANKS, not scores, so the
+# fused RRF value cannot express "everything is irrelevant" — a junk top hit
+# still ranks #1. The vector cosine is the only absolute relevance signal, so we
+# preserve it on each fused chunk to apply a relevance floor on the hybrid path.
+RAG_HYBRID_VECTOR_COSINE_FIELD = "_vector_cosine_score"
 
 
 # ============================================================================
@@ -1207,7 +1219,10 @@ class ChangeStreamOperation(StrEnum):
 HITL_KEY_PHASE_1_COMPLETE = "phase_1_complete"
 HITL_KEY_PHASE_2_READY = "phase_2_ready"
 HITL_KEY_TIMEOUT_DEADLINE = "timeout_deadline"
-HITL_SUPPORTED_FORMATS = [SummaryFormats.LANGTALKS_FORMAT, SummaryFormats.MCP_ISRAEL_FORMAT, SummaryFormats.WHATSAPP_FORMAT]
+# NOTE: Which formats support HITL is owned by the newsletter-format registry's
+# per-format `supports_hitl` capability flag (see
+# custom_types.newsletter_formats.format_supports_hitl). Do NOT reintroduce a
+# parallel hardcoded list here — it drifts from the registry.
 
 
 # ============================================================================

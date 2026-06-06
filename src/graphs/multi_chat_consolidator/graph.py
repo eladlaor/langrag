@@ -46,7 +46,6 @@ from constants import (
     NodeNames,
     HITL_KEY_PHASE_1_COMPLETE,
     HITL_KEY_TIMEOUT_DEADLINE,
-    HITL_SUPPORTED_FORMATS,
     DIR_NAME_PER_CHAT,
     DIR_NAME_CONSOLIDATED,
     DIR_NAME_DISCUSSIONS_RANKING,
@@ -888,10 +887,19 @@ def requires_hitl_selection(state: ParallelOrchestratorState) -> str:
     summary_format = state.get(OrchestratorKeys.SUMMARY_FORMAT, "")
     timeout_minutes = state.get(OrchestratorKeys.HITL_SELECTION_TIMEOUT_MINUTES, 0)  # Default: 0 (automatic selection)
 
-    hitl_formats = HITL_SUPPORTED_FORMATS
+    # Derive HITL support from the format registry's capability flag — the single
+    # source of truth — rather than a parallel hardcoded list that drifts.
+    # An unknown/unregistered format is treated as non-HITL (continue full flow),
+    # preserving the prior list-membership behavior instead of raising.
+    from custom_types.newsletter_formats import format_supports_hitl
+
+    try:
+        supports_hitl = format_supports_hitl(summary_format)
+    except KeyError:
+        supports_hitl = False
 
     # Check if format supports HITL
-    if summary_format not in hitl_formats:
+    if not supports_hitl:
         logger.info(f"Router: Format '{summary_format}' does not support HITL, continuing full flow")
         return "continue"
 

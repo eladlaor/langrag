@@ -96,6 +96,32 @@ class NewsletterFormatBase(ABC):
     supports_hitl: bool = True
     handles_links_internally: bool = False
 
+    @staticmethod
+    def _build_featured_topics_exclusion(featured_discussions: list | None) -> str:
+        """Extract titles from featured discussions and format as a numbered exclusion list.
+
+        Shared by all formats that build a "worth mentioning" section and need to
+        tell the LLM which topics are already featured (so it doesn't repeat them).
+        """
+        # Imported here to avoid a module-level import cycle through field_keys.
+        from custom_types.field_keys import DiscussionKeys, NewsletterStructureKeys
+
+        if not featured_discussions:
+            return "(No featured discussions provided)"
+
+        entries = []
+        for disc in featured_discussions:
+            title = disc.get(NewsletterStructureKeys.TITLE) or disc.get(DiscussionKeys.DISCUSSION_TITLE, "")
+            if title:
+                nutshell = disc.get(DiscussionKeys.NUTSHELL, "")
+                entry = f"{title} — {nutshell}" if nutshell else title
+                entries.append(entry)
+
+        if not entries:
+            return "(No featured discussion titles found)"
+
+        return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, 1))
+
     @abstractmethod
     def get_response_schema(self) -> type[BaseModel]:
         """

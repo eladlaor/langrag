@@ -14,7 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
 from custom_types.field_keys import DbFieldKeys
-from constants import COLLECTION_ROOM_ID_CACHE
+from constants import COLLECTION_ROOM_ID_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class RoomIdCacheRepository(BaseRepository):
     """
 
     def __init__(self, db: AsyncIOMotorDatabase):
-        super().__init__(db, COLLECTION_ROOM_ID_CACHE)
+        super().__init__(db, COLLECTION_ROOM_ID_MAP)
 
     async def get_room_id(self, chat_name: str) -> str | None:
         """

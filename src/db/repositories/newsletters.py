@@ -262,7 +262,17 @@ class NewslettersRepository(BaseRepository):
             List of similar newsletters (most recent first)
         """
         try:
-            query = {DbFieldKeys.DATA_SOURCE_NAME: data_source_name, DbFieldKeys.SUMMARY_FORMAT: summary_format, DbFieldKeys.STATUS: NewsletterStatus.COMPLETED}
+            query: dict[str, Any] = {DbFieldKeys.DATA_SOURCE_NAME: data_source_name, DbFieldKeys.SUMMARY_FORMAT: summary_format, DbFieldKeys.STATUS: NewsletterStatus.COMPLETED}
+
+            # Honor the date window: include newsletters whose own [start,end]
+            # range OVERLAPS the requested [start_date, end_date]. Dates are
+            # stored as lexicographically-comparable YYYY-MM-DD strings.
+            # Overlap <=> existing.start <= requested.end AND existing.end >= requested.start.
+            if start_date or end_date:
+                if end_date:
+                    query[DbFieldKeys.START_DATE] = {"$lte": end_date}
+                if start_date:
+                    query[DbFieldKeys.END_DATE] = {"$gte": start_date}
 
             return await self.find_many(query, sort=[("created_at", -1)], limit=limit)
         except Exception as e:

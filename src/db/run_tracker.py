@@ -205,7 +205,9 @@ class RunTracker:
                 )
                 stored += 1
             except Exception as e:
-                logger.debug(f"Failed to store discussion {idx}: {e}")
+                logger.warning(f"Failed to store discussion {idx}: {e}", extra={"run_id": run_id, "chat_name": chat_name})
+        if stored < len(discussions):
+            logger.warning(f"Partial discussion persistence: stored {stored}/{len(discussions)} discussions", extra={"run_id": run_id, "chat_name": chat_name, "stored": stored, "expected": len(discussions)})
         return stored
 
     async def store_polls(self, run_id: str, chat_name: str, data_source_name: str, polls: list[dict]) -> int:
@@ -234,7 +236,9 @@ class RunTracker:
                 )
                 stored += 1
             except Exception as e:
-                logger.debug(f"Failed to store poll {poll.get('matrix_event_id', '?')}: {e}")
+                logger.warning(f"Failed to store poll {poll.get('matrix_event_id', '?')}: {e}", extra={"run_id": run_id, "chat_name": chat_name})
+        if stored < len(polls):
+            logger.warning(f"Partial poll persistence: stored {stored}/{len(polls)} polls", extra={"run_id": run_id, "chat_name": chat_name, "stored": stored, "expected": len(polls)})
         return stored
 
     async def store_newsletter(self, newsletter_id: str, run_id: str, newsletter_type: str, data_source_name: str, chat_name: str | None, start_date: str, end_date: str, summary_format: str, desired_language: str, json_path: str, md_path: str, html_path: str | None = None, stats: dict | None = None, featured_discussion_ids: list[str] | None = None, version_type: str = NewsletterVersionType.ORIGINAL) -> bool:
@@ -489,9 +493,11 @@ class RunTracker:
 
             count = await self._messages_repo.insert_batch(docs)
             logger.info(f"Stored {count}/{len(messages)} raw messages for run {run_id}, chat {chat_name}")
+            if count < len(messages):
+                logger.warning(f"Partial raw-message persistence: stored {count}/{len(messages)} messages", extra={"run_id": run_id, "chat_name": chat_name, "stored": count, "expected": len(messages)})
             return count
         except Exception as e:
-            logger.warning(f"Failed to store raw messages: {e}")
+            logger.warning(f"Failed to store raw messages: {e}", extra={"run_id": run_id, "chat_name": chat_name})
             return 0
 
     async def store_messages(self, run_id: str, chat_name: str, data_source_name: str, messages: list[dict]) -> int:

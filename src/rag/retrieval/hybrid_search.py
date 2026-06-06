@@ -12,8 +12,15 @@ are NOT comparable to cosine similarity. To keep downstream code (MMR rerank,
 citation UI, eval gates) score-scale-compatible with vector_search, the raw
 fused score is min-max normalized into [0, 1] across the returned page and
 written to `search_score`. The raw RRF score is preserved under `rrf_score`
-for debugging. Score-threshold gating (min_score) is not applied here; use
-top_k bounding instead.
+for debugging.
+
+Relevance floor: $rankFusion fuses RANKS, not scores, so the fused value cannot
+express "everything is irrelevant" — an out-of-corpus query still produces a
+#1-ranked junk chunk with a high fused score. We therefore capture each chunk's
+raw vector cosine inside the vector leg (`$meta:"vectorSearchScore"`) and, when
+`min_vector_score` is set, drop fused chunks whose cosine is below it. This lets
+the empty-context refusal path fire on irrelevant queries instead of handing the
+model junk context.
 """
 
 import logging
@@ -26,6 +33,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from config import get_settings
 from constants import (
     RAG_HYBRID_LEXICAL_WEIGHT,
+    RAG_HYBRID_VECTOR_COSINE_FIELD,
     RAG_HYBRID_VECTOR_WEIGHT,
     RAG_LEXICAL_INDEX_NAME,
     RAG_SEARCH_SCORE_FIELD,
@@ -72,6 +80,7 @@ async def hybrid_search_chunks(
     top_k: int = 20,
     vector_weight: float = RAG_HYBRID_VECTOR_WEIGHT,
     lexical_weight: float = RAG_HYBRID_LEXICAL_WEIGHT,
+    min_vector_score: float | None = None,
     debug_score_details: bool = False,
 ) -> list[dict[str, Any]]:
     """
@@ -87,6 +96,9 @@ async def hybrid_search_chunks(
         top_k: Final number of fused results to return
         vector_weight: Weight of the vector leg in RRF combination
         lexical_weight: Weight of the lexical leg in RRF combination
+        min_vector_score: Optional cosine-similarity floor. Fused chunks whose
+            vector-leg cosine is below this are dropped (the relevance floor that
+            lets the empty-context refusal fire). None disables the floor.
 
     Returns:
         List of fused chunk documents with `search_score` (fused RRF score),
@@ -135,6 +147,13 @@ async def hybrid_search_chunks(
     # UI) see it under the shared search_score key. We deliberately do NOT
     # emit the un-normalized RRF score under search_score: it would silently
     # break MMR (lambda * relevance collapses to ~0 when relevance is RRF).
+    # Capture the vector-leg cosine on each candidate so we can apply a relevance
+    # floor after fusion. $meta:"vectorSearchScore" is only valid in the stage
+    # immediately following $vectorSearch, so it must live inside the vector leg.
+    vector_extra_stages = [
+        {"$addFields": {RAG_HYBRID_VECTOR_COSINE_FIELD: {"$meta": "vectorSearchScore"}}}
+    ]
+
     pipeline = build_rankfusion_pipeline(
         vector_stage=vector_stage,
         lexical_pipeline=lexical_pipeline,
@@ -142,15 +161,28 @@ async def hybrid_search_chunks(
         lexical_weight=lexical_weight,
         top_k=top_k,
         score_details=debug_score_details,
+        vector_extra_stages=vector_extra_stages,
     )
 
     try:
         results = await collection.aggregate(pipeline).to_list(length=None)
+
+        if min_vector_score is not None:
+            before = len(results)
+            # A chunk that only surfaced via the lexical leg has no vector cosine;
+            # treat a missing cosine as failing the floor so purely-lexical junk
+            # on an out-of-corpus query cannot keep the refusal path from firing.
+            results = [r for r in results if r.get(RAG_HYBRID_VECTOR_COSINE_FIELD, 0.0) >= min_vector_score]
+            dropped = before - len(results)
+            if dropped:
+                logger.info(f"Hybrid relevance floor (min_vector_score={min_vector_score}) dropped {dropped}/{before} chunks")
+
         normalize_rrf_scores(results, score_field=RAG_SEARCH_SCORE_FIELD)
         logger.info(
             f"Hybrid $rankFusion returned {len(results)} chunks "
             f"(top_k={top_k}, num_candidates={num_candidates}, "
             f"vector_weight={vector_weight}, lexical_weight={lexical_weight}, "
+            f"min_vector_score={min_vector_score}, "
             f"date_filter={'yes' if (date_start or date_end) else 'no'})"
         )
         return results

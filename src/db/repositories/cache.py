@@ -12,7 +12,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_CACHE
+from constants import COLLECTION_LLM_RESPONSE_CACHE
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class CacheRepository(BaseRepository):
     DEFAULT_TTL_HOURS = 24 * 7  # 7 days
 
     def __init__(self, db: AsyncIOMotorDatabase):
-        super().__init__(db, COLLECTION_CACHE)
+        super().__init__(db, COLLECTION_LLM_RESPONSE_CACHE)
 
     @staticmethod
     def generate_cache_key(

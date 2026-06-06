@@ -229,6 +229,12 @@ def _save_json_file(file_path: str, data: Any) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _read_text_file(file_path: str) -> str:
+    """Read a UTF-8 text file (sync, for use with asyncio.to_thread)."""
+    with open(file_path, encoding="utf-8") as f:
+        return f.read()
+
+
 # ============================================================================
 # NODE 2: CONSOLIDATE DISCUSSIONS
 # ============================================================================
@@ -470,10 +476,9 @@ async def merge_similar_discussions(state: ParallelOrchestratorState, config: Ru
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
-    # Load aggregated discussions
+    # Load aggregated discussions (offload blocking read off the event loop)
     try:
-        with open(aggregated_path, encoding="utf-8") as f:
-            aggregated_data = json.load(f)
+        aggregated_data = await asyncio.to_thread(_load_json_file, aggregated_path)
     except Exception as e:
         error_msg = f"Failed to load aggregated discussions: {e}"
         logger.error(error_msg)
@@ -540,8 +545,8 @@ async def merge_similar_discussions(state: ParallelOrchestratorState, config: Ru
     merged_file_path = os.path.join(merged_dir, OUTPUT_FILENAME_MERGED_DISCUSSIONS)
 
     try:
-        with open(merged_file_path, "w", encoding="utf-8") as f:
-            json.dump(merged_data, f, indent=2, ensure_ascii=False)
+        # Offload blocking write off the event loop
+        await asyncio.to_thread(_save_json_file, merged_file_path, merged_data)
         logger.info(f"Saved merged discussions to: {merged_file_path}")
     except Exception as e:
         error_msg = f"Failed to save merged discussions: {e}"
@@ -760,7 +765,12 @@ async def _generate_newsletter_from_discussions(
                 newsletters_repo = NewslettersRepository(db)
                 logger.info(f"MongoDB persistence enabled for consolidated newsletter: {newsletter_id}")
             except Exception as e:
-                logger.warning(f"Failed to initialize MongoDB repository: {e}")
+                # Fail-fast: a run_id means MongoDB persistence is EXPECTED.
+                # Silently degrading to file-only would write the newsletter to
+                # disk while leaving the DB without it — a divergence reported as
+                # success. Surface it instead.
+                logger.error(f"Failed to initialize MongoDB repository for run {run_id}: {e}", exc_info=True)
+                raise RuntimeError(f"MongoDB persistence required (run_id={run_id}) but repository init failed: {e}") from e
 
         # Get content generator for format
         content_generator = ContentGeneratorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, summary_format=summary_format, newsletters_repo=newsletters_repo)
@@ -926,8 +936,8 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
         raise FileNotFoundError(f"Consolidated ranking file not found: {ranking_path}. " "Ensure the rank_consolidated_discussions node completed successfully.")
 
     try:
-        with open(ranking_path, encoding="utf-8") as f:
-            ranking_data = json.load(f)
+        # Offload blocking read off the event loop
+        ranking_data = await asyncio.to_thread(_load_json_file, ranking_path)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Invalid JSON in consolidated ranking file {ranking_path}: {e}. " "The ranking file is corrupted or malformed.")
     except Exception as e:
@@ -945,8 +955,8 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
         raise RuntimeError("No featured_discussion_ids found in consolidated ranking. " "The ranking file exists but contains no featured discussions. " "This may indicate all discussions were marked as 'skip'.")
 
     try:
-        with open(discussions_path, encoding="utf-8") as f:
-            all_discussions_data = json.load(f)
+        # Offload blocking read off the event loop
+        all_discussions_data = await asyncio.to_thread(_load_json_file, discussions_path)
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Invalid JSON in discussions file {discussions_path}: {e}")
     except Exception as e:
@@ -1015,8 +1025,8 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
         newsletter_data = None
         if newsletter_json_path and os.path.exists(newsletter_json_path):
             try:
-                with open(newsletter_json_path, encoding="utf-8") as f:
-                    newsletter_data = json.load(f)
+                # Offload blocking read off the event loop
+                newsletter_data = await asyncio.to_thread(_load_json_file, newsletter_json_path)
 
                 # Add consolidated metadata
                 if DiscussionKeys.METADATA not in newsletter_data:
@@ -1026,9 +1036,8 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
                 newsletter_data[DiscussionKeys.METADATA]["total_chats_consolidated"] = len(source_chats)
                 newsletter_data[DiscussionKeys.METADATA]["is_consolidated"] = True
 
-                # Save updated newsletter
-                with open(newsletter_json_path, "w", encoding="utf-8") as f:
-                    json.dump(newsletter_data, f, indent=2, ensure_ascii=False)
+                # Save updated newsletter (offload blocking write off the event loop)
+                await asyncio.to_thread(_save_json_file, newsletter_json_path, newsletter_data)
 
                 logger.info(f"Added consolidated metadata to file: {len(source_chats)} source chats")
             except Exception as e:
@@ -1233,13 +1242,12 @@ async def enrich_consolidated_newsletter(state: ParallelOrchestratorState, confi
                 enriched_json = None
                 enriched_markdown = None
 
+                # Offload blocking reads off the event loop
                 if enriched_json_path and os.path.exists(enriched_json_path):
-                    with open(enriched_json_path, encoding="utf-8") as f:
-                        enriched_json = json.load(f)
+                    enriched_json = await asyncio.to_thread(_load_json_file, enriched_json_path)
 
                 if enriched_md_path and os.path.exists(enriched_md_path):
-                    with open(enriched_md_path, encoding="utf-8") as f:
-                        enriched_markdown = f.read()
+                    enriched_markdown = await asyncio.to_thread(_read_text_file, enriched_md_path)
 
                 # Update enriched version in MongoDB
                 await repo.add_enriched_version(
@@ -1254,7 +1262,12 @@ async def enrich_consolidated_newsletter(state: ParallelOrchestratorState, confi
                 logger.info(f"Enriched version saved to MongoDB: {consolidated_newsletter_id} (links_added={links_added})")
 
             except Exception as e:
-                logger.warning(f"Failed to save enriched version to MongoDB: {e}")
+                # The enriched files were already written to disk above; a Mongo
+                # failure here means FS has the enriched version but the DB does
+                # not (divergence). Log at ERROR so it is operator-visible rather
+                # than buried at warning. Non-fatal: the base newsletter is
+                # already persisted and the enrichment layer is additive.
+                logger.error(f"Failed to save enriched version to MongoDB (FS/DB divergence for {consolidated_newsletter_id}): {e}", exc_info=True)
 
         # Build return dict with both MongoDB ID (primary) and file paths (backward compat)
         return_dict = {}

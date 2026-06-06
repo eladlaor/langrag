@@ -62,7 +62,7 @@ class McpIsraelRenderer:
                 NewsletterStructureKeys.VALUABLE_POSTS: "📎",
                 NewsletterStructureKeys.OPEN_QUESTIONS: "💭",
                 NewsletterStructureKeys.CONCEPTUAL_DISCUSSIONS: "🧠",
-                NewsletterStructureKeys.ISSUES_CHALLENGES: "🧰",
+                NewsletterStructureKeys.ISSUES_CHALLENGES: "⚠️",
             }
 
             section_titles = {

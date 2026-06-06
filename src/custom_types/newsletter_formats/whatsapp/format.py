@@ -93,25 +93,6 @@ class WhatsAppFormat(NewsletterFormatBase):
 
         return WHATSAPP_NEWSLETTER_PROMPT.format(worth_mentioning_guidance=worth_mentioning_guidance)
 
-    @staticmethod
-    def _build_featured_topics_exclusion(featured_discussions: list | None) -> str:
-        """Extract titles from featured discussions and format as a numbered exclusion list."""
-        if not featured_discussions:
-            return "(No featured discussions provided)"
-
-        entries = []
-        for disc in featured_discussions:
-            title = disc.get(NewsletterStructureKeys.TITLE) or disc.get(DiscussionKeys.DISCUSSION_TITLE, "")
-            if title:
-                nutshell = disc.get(DiscussionKeys.NUTSHELL, "")
-                entry = f"{title} — {nutshell}" if nutshell else title
-                entries.append(entry)
-
-        if not entries:
-            return "(No featured discussion titles found)"
-
-        return "\n".join(f"{i}. {entry}" for i, entry in enumerate(entries, 1))
-
     def get_examples(self) -> list[str]:
         """Return list of example newsletter outputs (none for WhatsApp format initially)."""
         return []

@@ -99,9 +99,9 @@ def load_discussions(discussions_file: str) -> list[dict[str, Any]]:
         with open(discussions_file, encoding="utf-8") as f:
             discussions_data = json.load(f)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse discussions JSON: {e}")
+        raise RuntimeError(f"Failed to parse discussions JSON: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"Failed to read discussions file: {e}")
+        raise RuntimeError(f"Failed to read discussions file: {e}") from e
 
     return discussions_data.get(DiscussionKeys.DISCUSSIONS, [])
 
@@ -263,7 +263,7 @@ async def rank_with_llm(
         settings = get_settings()
         llm = create_chat_model(model=settings.llm.ranking_model, temperature=settings.llm.temperature_ranking, model_kwargs={"response_format": {"type": "json_object"}})
     except Exception as e:
-        raise RuntimeError(f"Failed to initialize LLM client: {e}")
+        raise RuntimeError(f"Failed to initialize LLM client: {e}") from e
 
     # Create prompt chain
     chain = DISCUSSION_RANKING_PROMPT | llm
@@ -313,9 +313,9 @@ async def rank_with_llm(
         return ranking_result
 
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}")
+        raise RuntimeError(f"Failed to parse LLM response as JSON: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"LLM analysis failed: {e}")
+        raise RuntimeError(f"LLM analysis failed: {e}") from e
 
 
 def enrich_ranking_with_metadata(ranking_result: dict[str, Any], original_discussions: list[dict[str, Any]]) -> dict[str, Any]:

@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from constants import (
     CONTENT_TYPE_EVENT_STREAM,
     HTTP_STATUS_BAD_REQUEST,
+    HTTP_DETAIL_INTERNAL_ERROR,
     HTTP_STATUS_INTERNAL_SERVER_ERROR,
     HTTP_STATUS_NOT_FOUND,
     RAGEventType,
@@ -302,7 +303,7 @@ async def ingest_podcast(
         return result
     except Exception as e:
         logger.error(f"Podcast ingestion failed: {e}", extra={"filename": file.filename})
-        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.post(ROUTE_RAG_INGEST_PODCASTS_SCAN, dependencies=[Depends(require_api_key)])
@@ -411,7 +412,7 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
         raise
     except Exception as e:
         logger.error(f"RAG chat error: {e}", extra={"session_id": session_id})
-        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 # ============================================================================
@@ -464,7 +465,7 @@ async def ingest_newsletters(request: Request, body: RAGNewsletterIngestRequest)
 
     except Exception as e:
         logger.error(f"Newsletter ingestion failed: {e}")
-        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get(ROUTE_RAG_SOURCES_NEWSLETTERS, dependencies=[Depends(require_api_key)])
@@ -478,7 +479,7 @@ async def list_newsletter_sources(request: Request):
         return ingested
     except Exception as e:
         logger.error(f"Failed to list newsletter sources: {e}")
-        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=str(e))
+        raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 # ============================================================================

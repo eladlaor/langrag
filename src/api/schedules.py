@@ -23,7 +23,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from constants import SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME, ScheduleRunStatus, DEFAULT_LANGUAGE, SummaryFormats
+from constants import HTTP_DETAIL_INTERNAL_ERROR, SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME, ScheduleRunStatus, DEFAULT_LANGUAGE, SummaryFormats
 from db.scheduled_newsletters import _get_schedule_manager
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ async def trigger_schedule_check():
         return {"message": "Schedule check completed"}
     except Exception as e:
         logger.error(f"Manual schedule check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.post("", response_model=dict, status_code=201)
@@ -258,7 +258,7 @@ async def create_schedule(request: ScheduleCreateRequest):
         return {"id": schedule_id, "message": f"Schedule '{request.name}' created successfully"}
     except Exception as e:
         logger.error(f"Failed to create schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get("", response_model=ScheduleListResponse)
@@ -275,7 +275,7 @@ async def list_schedules():
         return ScheduleListResponse(schedules=[ScheduleResponse.from_db(s) for s in schedules], total=len(schedules))
     except Exception as e:
         logger.error(f"Failed to list schedules: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get("/due", response_model=DueSchedulesResponse)
@@ -299,7 +299,7 @@ async def get_due_schedules():
         return DueSchedulesResponse(schedules=schedules, count=len(schedules))
     except Exception as e:
         logger.error(f"Failed to get due schedules: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
@@ -317,7 +317,7 @@ async def get_schedule(schedule_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get schedule {schedule_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.patch("/{schedule_id}", response_model=ScheduleResponse)
@@ -345,7 +345,7 @@ async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to update schedule {schedule_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.delete("/{schedule_id}")
@@ -364,7 +364,7 @@ async def delete_schedule(schedule_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to delete schedule {schedule_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.patch("/{schedule_id}/toggle", response_model=ScheduleResponse)
@@ -387,7 +387,7 @@ async def toggle_schedule(schedule_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to toggle schedule {schedule_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
 @router.post("/{schedule_id}/mark_complete")
@@ -418,4 +418,4 @@ async def mark_schedule_complete(schedule_id: str, request: MarkCompleteRequest 
         return {"message": f"Schedule {schedule_id} marked complete", "status": status}
     except Exception as e:
         logger.error(f"Failed to mark schedule {schedule_id} complete: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e

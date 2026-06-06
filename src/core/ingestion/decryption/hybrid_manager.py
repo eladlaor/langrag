@@ -40,10 +40,18 @@ class DecryptionStatistics:
         self.total_successes += 1
         self.strategy_successes[strategy_name] = self.strategy_successes.get(strategy_name, 0) + 1
 
-    def record_failure(self) -> None:
-        """Record a failed decryption (all strategies failed)."""
+    def record_failure(self, strategy_name: str | None = None) -> None:
+        """Record a failed decryption (all strategies failed).
+
+        Args:
+            strategy_name: When provided, increments the per-strategy failure
+                counter so `strategy_failures` is actually populated for
+                observability (previously it stayed permanently empty).
+        """
         self.total_attempts += 1
         self.total_failures += 1
+        if strategy_name is not None:
+            self.strategy_failures[strategy_name] = self.strategy_failures.get(strategy_name, 0) + 1
 
     def get_success_rate(self) -> float:
         """Calculate overall success rate."""
@@ -149,6 +157,7 @@ class HybridDecryptionManager:
             return None
 
         event_id = encrypted_event.get(DecryptionResultKeys.EVENT_ID, "unknown")
+        last_failed_strategy: str | None = None
 
         # Try each strategy in order
         for strategy in self.strategies:
@@ -165,16 +174,29 @@ class HybridDecryptionManager:
                     return result
                 else:
                     # Strategy couldn't decrypt - try next one
+                    last_failed_strategy = strategy_name
                     logger.debug(f"Strategy {strategy_name} could not decrypt {event_id}")
 
             except Exception as e:
                 strategy_name = strategy.get_strategy_name()
+                last_failed_strategy = strategy_name
                 logger.debug(f"Strategy {strategy_name} failed for {event_id}: {e}")
                 # Continue to next strategy
 
-        # All strategies failed
-        self.stats.record_failure()
-        logger.debug(f"Failed to decrypt {event_id} with any strategy " f"(success rate: {self.stats.get_success_rate():.1%})")
+        # All strategies failed. Log at WARNING (not debug): an undecryptable event
+        # is silent data loss — the ciphertext otherwise masquerades as a real
+        # message downstream. Populate the per-strategy failure counter so the
+        # failure surface is visible in get_statistics().
+        self.stats.record_failure(last_failed_strategy)
+        logger.warning(
+            "Failed to decrypt event with any strategy",
+            extra={
+                "event_id": event_id,
+                "room_id": room_id,
+                "success_rate": round(self.stats.get_success_rate(), 4),
+                "total_failures": self.stats.total_failures,
+            },
+        )
         return None
 
     async def cleanup(self) -> None:

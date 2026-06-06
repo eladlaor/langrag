@@ -82,10 +82,13 @@ def load_ranking_data(ranking_file: str, chat_name: str) -> tuple[list[str], lis
         chat_name: Name of the chat (for error messages)
 
     Returns:
-        Tuple of (featured_discussion_ids, brief_mention_items)
+        Tuple of (featured_discussion_ids, brief_mention_items). An EMPTY
+        featured_discussion_ids list is a valid result for a low-activity date
+        range; the downstream generator emits a "no activity" empty newsletter
+        rather than crashing. Only a MISSING field signals a corrupt ranking file.
 
     Raises:
-        RuntimeError: If featured_discussion_ids is missing or empty
+        RuntimeError: If the featured_discussion_ids field is absent (corrupt file).
     """
     try:
         with open(ranking_file, encoding="utf-8") as f:
@@ -95,7 +98,11 @@ def load_ranking_data(ranking_file: str, chat_name: str) -> tuple[list[str], lis
         if featured_discussion_ids is None:
             raise RuntimeError(f"Ranking file {ranking_file} missing '{RankingResultKeys.FEATURED_DISCUSSION_IDS}' field. " "Please re-run with force_refresh_discussions_ranking=true.")
         if not featured_discussion_ids:
-            raise RuntimeError(f"No featured_discussion_ids found in ranking for chat '{chat_name}'.")
+            # Valid empty case: the ranker produced no featured discussions for a
+            # quiet window. The generator handles len()==0 by writing an empty
+            # newsletter, so we must NOT raise here — that would kill the worker
+            # on a legitimate low-activity range.
+            logger.info(f"Ranking for chat '{chat_name}' has no featured discussions (low-activity window); emitting empty newsletter downstream.")
 
         brief_mention_items = ranking_data.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])
 
