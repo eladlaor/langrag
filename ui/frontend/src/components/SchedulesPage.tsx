@@ -351,7 +351,7 @@ export const SchedulesPage: React.FC = () => {
                   <Form.Control
                     type="text"
                     {...register("name", { required: "Name is required" })}
-                    placeholder="e.g., Weekly LangTalks Newsletter"
+                    placeholder="e.g., Weekly Community Newsletter"
                     isInvalid={!!errors.name}
                   />
                   <Form.Control.Feedback type="invalid">

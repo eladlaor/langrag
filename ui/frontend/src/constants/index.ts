@@ -138,8 +138,8 @@ export const ERROR_DUPLICATE_EMAIL = "duplicate_email";
 // Always attach the HttpOnly session cookie on same-origin API calls (via nginx)
 export const FETCH_CREDENTIALS: RequestCredentials = "same-origin";
 
-// Branding for the login card heading (single source of truth, matches App header h1)
-export const LOGIN_BRANDING_TITLE = "LangTalks Newsletter Generator";
+// Product name (single source of truth, matches App header h1). Kept community-neutral.
+export const LOGIN_BRANDING_TITLE = "LangRAG";
 
 // Global event dispatched when a 401 is observed mid-session so the gate can re-show
 export const SESSION_EXPIRED_EVENT = "langrag:session-expired";

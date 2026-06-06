@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-06-06
+
+### Added
+- App-wide green design system for the web UI: a single design-token sheet in `index.css` (forest-green `#1f7a3d` dominant palette, green-washed paper backgrounds, Bricolage Grotesque + Plus Jakarta Sans typography) mapped onto Bootstrap's CSS custom properties so the entire component library is rethemed without per-component rewrites. The app header becomes a deep-green band with a "LangRAG" brand mark; the layout shifts to a left-aligned editorial style.
+
 ## [1.15.1] - 2026-06-06
 
 ### Fixed
@@ -245,7 +250,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.15.1...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/eladlaor/langrag/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/eladlaor/langrag/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/eladlaor/langrag/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/eladlaor/langrag/compare/v1.13.0...v1.14.0

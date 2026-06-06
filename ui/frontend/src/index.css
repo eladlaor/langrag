@@ -1,13 +1,468 @@
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+/* ============================================================================
+   LangRAG — Design System
+   "Warm editorial" : off-white paper, near-black ink, one deep-teal accent.
+   Serif display (Fraunces) + humanist body (IBM Plex Sans).
+
+   Strategy: define design tokens once, then map them onto the Bootstrap 5.3
+   CSS custom properties Bootstrap reads at runtime. This retheme the entire
+   component library without rewriting components. Targeted class overrides
+   follow where Bootstrap exposes no variable.
+   ========================================================================== */
+
+:root {
+  /* ---- Palette ---------------------------------------------------------- */
+  --paper:        #f2f6ef;  /* page background — pale green wash */
+  --paper-raised: #fbfdf9;  /* cards, panels — near-white with green cast */
+  --paper-sunk:   #e6efe1;  /* inset wells, table stripes */
+  --ink:          #16241a;  /* primary text — near-black green */
+  --ink-soft:     #38483a;  /* secondary text */
+  --ink-faint:    #6f8273;  /* tertiary / muted text — green-grey */
+  --rule:         #d3e1cf;  /* hairline borders */
+  --rule-strong:  #b9ccb3;
+
+  --accent:        #1f7a3d;  /* dominant forest green */
+  --accent-hover:  #155c2c;
+  --accent-soft:   #dcebd9;  /* green tint background */
+  --accent-ink:    #134d25;  /* deep green text on tint */
+
+  --success:  #1f7a3d;
+  --warning:  #9a6b16;
+  --danger:   #a83232;
+  --info:     #2c6d5d;
+
+  --success-soft: #dcebd9;
+  --warning-soft: #f4ecd6;
+  --danger-soft:  #f4e3e0;
+  --info-soft:    #dceae6;
+
+  /* ---- Typography ------------------------------------------------------- */
+  --font-display: "Bricolage Grotesque", "Plus Jakarta Sans", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  /* ---- Geometry --------------------------------------------------------- */
+  --radius-sm: 4px;
+  --radius:    8px;
+  --radius-lg: 14px;
+
+  --shadow-xs: 0 1px 2px rgba(22, 40, 26, 0.05);
+  --shadow-sm: 0 1px 3px rgba(22, 40, 26, 0.07), 0 1px 2px rgba(22, 40, 26, 0.05);
+  --shadow-md: 0 6px 22px -10px rgba(22, 40, 26, 0.20);
+  --shadow-lg: 0 24px 60px -22px rgba(22, 40, 26, 0.30);
+
+  /* ---- Bootstrap token overrides (read at runtime by BS 5.3) ------------ */
+  --bs-body-bg: var(--paper);
+  --bs-body-color: var(--ink);
+  --bs-body-font-family: var(--font-body);
+  --bs-body-font-size: 0.975rem;
+  --bs-body-font-weight: 400;
+  --bs-body-line-height: 1.6;
+  --bs-emphasis-color: var(--ink);
+  --bs-secondary-color: var(--ink-soft);
+  --bs-tertiary-color: var(--ink-faint);
+  --bs-border-color: var(--rule);
+  --bs-border-radius: var(--radius);
+  --bs-border-radius-sm: var(--radius-sm);
+  --bs-border-radius-lg: var(--radius-lg);
+
+  --bs-primary: var(--accent);
+  --bs-primary-rgb: 31, 122, 61;
+  --bs-link-color: var(--accent);
+  --bs-link-color-rgb: 31, 122, 61;
+  --bs-link-hover-color: var(--accent-hover);
+
+  --bs-heading-color: var(--ink);
+  --bs-font-sans-serif: var(--font-body);
+  --bs-font-monospace: var(--font-mono);
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+   ------------------------------------------------------------------------- */
+* {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--bs-body-font-size);
+  line-height: 1.6;
+  /* Green atmosphere: a soft top-down green wash + faint green grain.
+     Keeps green present across the whole canvas, not just on components. */
+  background-image:
+    radial-gradient(rgba(31, 122, 61, 0.05) 1px, transparent 1px),
+    linear-gradient(180deg, #e7f0e2 0%, var(--paper) 38%);
+  background-size: 22px 22px, 100% 100%;
+  background-repeat: repeat, no-repeat;
+  background-attachment: scroll, fixed;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+/* ---------------------------------------------------------------------------
+   Typography — friendly grotesque display, easy rhythm
+   ------------------------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6 {
+  font-family: var(--font-display);
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+h1, .h1 { font-weight: 700; letter-spacing: -0.02em; }
+
+/* Body copy and form controls stay in the humanist sans */
+p, label, input, select, textarea, button, .btn,
+.form-control, .form-select, .nav, .dropdown-menu, table, .badge {
+  font-family: var(--font-body);
+}
+
+a {
+  text-decoration: none;
+  color: var(--accent);
+  transition: color 0.15s ease;
+}
+a:hover { color: var(--accent-hover); }
+
+.text-muted { color: var(--ink-faint) !important; }
+.text-primary { color: var(--accent) !important; }
+
+/* A small reusable eyebrow / kicker label */
+.eyebrow {
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   App shell
+   ------------------------------------------------------------------------- */
+.App { text-align: left; }
+
+.app-header {
+  /* deep-green band — green leads from the very top of the app */
+  background: linear-gradient(120deg, #134d25 0%, #1f7a3d 100%);
+  border-bottom: 1px solid #0e3a1c;
+  color: #eaf3e6;
+}
+.app-header .brand-mark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.6rem;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  line-height: 1.1;
+  margin: 0;
+}
+/* "RAG" pops in a bright leaf green against the deep band */
+.app-header .brand-mark .brand-accent { color: #9fe6ad; }
+.app-header .brand-sub {
+  font-size: 0.82rem;
+  color: rgba(234, 243, 230, 0.78);
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+.app-userline {
+  font-size: 0.8rem;
+  color: rgba(234, 243, 230, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+/* Log-out button reads as a light outline on the green band */
+.app-header .btn-outline-light {
+  --bs-btn-color: #eaf3e6;
+  --bs-btn-border-color: rgba(234, 243, 230, 0.45);
+  --bs-btn-hover-bg: rgba(255, 255, 255, 0.12);
+  --bs-btn-hover-border-color: rgba(234, 243, 230, 0.7);
+  --bs-btn-hover-color: #ffffff;
+}
+
+/* ---------------------------------------------------------------------------
+   Tabs — understated editorial underline, not pill buttons
+   ------------------------------------------------------------------------- */
+.nav-tabs {
+  border-bottom: 1px solid var(--rule);
+  gap: 0.25rem;
+}
+.nav-tabs .nav-link {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--ink-faint);
+  font-weight: 500;
+  font-size: 0.92rem;
+  padding: 0.65rem 0.95rem;
+  margin-bottom: -1px;
+  background: transparent;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.nav-tabs .nav-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--rule-strong);
+  isolation: isolate;
+}
+.nav-tabs .nav-link.active {
+  color: var(--ink);
+  background: transparent;
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Cards & panels
+   ------------------------------------------------------------------------- */
+.card {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+.card .card-header {
+  background: transparent;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  padding: 1rem 1.25rem;
+}
+.card .card-body { padding: 1.25rem; }
+.shadow-sm { box-shadow: var(--shadow-sm) !important; }
+.shadow, .shadow-lg { box-shadow: var(--shadow-md) !important; }
+
+/* ---------------------------------------------------------------------------
+   Buttons — flat, confident, no gradients
+   ------------------------------------------------------------------------- */
+.btn {
+  --bs-btn-border-radius: var(--radius);
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  padding: 0.5rem 1.1rem;
+  border-radius: var(--radius);
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease;
+}
+.btn:active { transform: translateY(0.5px); }
+
+.btn-primary {
+  --bs-btn-bg: var(--accent);
+  --bs-btn-border-color: var(--accent);
+  --bs-btn-hover-bg: var(--accent-hover);
+  --bs-btn-hover-border-color: var(--accent-hover);
+  --bs-btn-active-bg: var(--accent-hover);
+  --bs-btn-active-border-color: var(--accent-hover);
+  --bs-btn-disabled-bg: var(--accent);
+  --bs-btn-disabled-border-color: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-xs);
+}
+.btn-primary:hover { box-shadow: var(--shadow-sm); }
+
+.btn-outline-primary {
+  --bs-btn-color: var(--accent);
+  --bs-btn-border-color: var(--accent);
+  --bs-btn-hover-bg: var(--accent);
+  --bs-btn-hover-border-color: var(--accent);
+  --bs-btn-hover-color: #fff;
+  --bs-btn-active-bg: var(--accent-hover);
+}
+
+.btn-outline-light {
+  --bs-btn-color: var(--ink-soft);
+  --bs-btn-border-color: var(--rule-strong);
+  --bs-btn-hover-bg: var(--paper-sunk);
+  --bs-btn-hover-border-color: var(--rule-strong);
+  --bs-btn-hover-color: var(--ink);
+}
+
+.btn-secondary {
+  --bs-btn-bg: var(--paper-sunk);
+  --bs-btn-border-color: var(--rule-strong);
+  --bs-btn-color: var(--ink);
+  --bs-btn-hover-bg: var(--rule);
+  --bs-btn-hover-border-color: var(--rule-strong);
+  --bs-btn-hover-color: var(--ink);
+}
+
+.btn-link { color: var(--accent); font-weight: 500; }
+
+/* ---------------------------------------------------------------------------
+   Forms — calm, clear focus, no heavy chrome
+   ------------------------------------------------------------------------- */
+.form-label {
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.35rem;
+  letter-spacing: 0.005em;
+}
+.form-control,
+.form-select {
+  background-color: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--ink);
+  padding: 0.5rem 0.75rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.form-control::placeholder { color: var(--ink-faint); }
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--paper-raised);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  color: var(--ink);
+}
+.form-control:disabled,
+.form-select:disabled {
+  background-color: var(--paper-sunk);
+  color: var(--ink-faint);
+}
+.form-check-input { border-color: var(--rule-strong); }
+.form-check-input:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+.form-check-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.form-text { color: var(--ink-faint); }
+.is-invalid, .form-control.is-invalid, .form-select.is-invalid {
+  border-color: var(--danger) !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Alerts — soft tints, left accent rule
+   ------------------------------------------------------------------------- */
+.alert {
+  border: 1px solid var(--rule);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+}
+.alert-primary   { background: var(--accent-soft);  border-color: var(--accent);  color: var(--accent-ink); }
+.alert-success   { background: var(--success-soft);  border-color: var(--success);  color: var(--success); }
+.alert-warning   { background: var(--warning-soft);  border-color: var(--warning);  color: var(--warning); }
+.alert-danger    { background: var(--danger-soft);   border-color: var(--danger);   color: var(--danger); }
+.alert-info      { background: var(--info-soft);     border-color: var(--info);     color: var(--info); }
+
+/* ---------------------------------------------------------------------------
+   Badges
+   ------------------------------------------------------------------------- */
+.badge {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 0.32em 0.7em;
+}
+.badge.bg-primary   { background: var(--accent) !important; }
+.badge.bg-secondary { background: var(--ink-faint) !important; }
+.badge.bg-success   { background: var(--success) !important; }
+.badge.bg-warning   { background: var(--warning) !important; color: #fff !important; }
+.badge.bg-danger    { background: var(--danger) !important; }
+.badge.bg-info      { background: var(--info) !important; }
+.badge.bg-light     { background: var(--paper-sunk) !important; color: var(--ink-soft) !important; }
+
+/* ---------------------------------------------------------------------------
+   Tables
+   ------------------------------------------------------------------------- */
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--ink);
+  --bs-table-border-color: var(--rule);
+  --bs-table-striped-bg: var(--paper-sunk);
+  --bs-table-hover-bg: var(--accent-soft);
+}
+.table > thead {
+  border-bottom: 2px solid var(--rule-strong);
+}
+.table > thead th {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   Misc surfaces (utility-class background overrides used across components)
+   ------------------------------------------------------------------------- */
+.bg-light { background-color: var(--paper-sunk) !important; }
+.bg-white { background-color: var(--paper-raised) !important; }
+.bg-primary { background-color: var(--accent) !important; }
+.border { border-color: var(--rule) !important; }
+hr { border-color: var(--rule); opacity: 1; }
+
+.list-group-item {
+  background: var(--paper-raised);
+  border-color: var(--rule);
+  color: var(--ink);
+}
+
+.modal-content {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.modal-header, .modal-footer { border-color: var(--rule); }
+
+.dropdown-menu {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+}
+.dropdown-item { color: var(--ink); }
+.dropdown-item:hover, .dropdown-item:focus {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* Spinner inherits accent */
+.spinner-border.text-primary,
+.spinner-border:not([class*="text-"]) { color: var(--accent); }
+
+/* Selection */
+::selection { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* Focus-visible for keyboard users on interactive non-form elements */
+a:focus-visible,
+button:focus-visible,
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Staggered entrance for the main content — calm, single orchestrated reveal */
+@keyframes lr-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lr-rise { animation: lr-rise 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
 }

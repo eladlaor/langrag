@@ -1,5 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+// Bootstrap first, then our design system so our token overrides win.
+import 'bootstrap/dist/css/bootstrap.min.css';
 import './index.css';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';

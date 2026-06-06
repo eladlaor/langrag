@@ -15,7 +15,6 @@ import { RAGChatPage } from "./components/rag/RAGChatPage";
 import { UsersAdmin } from "./components/admin/UsersAdmin";
 import { ExtractedImagesGallery } from "./components/admin/ExtractedImagesGallery";
 import { PeriodicNewsletterResponse } from "./types";
-import "bootstrap/dist/css/bootstrap.min.css";
 import "./App.css";
 
 function App() {
@@ -30,17 +29,19 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="App">
-        <header className="bg-primary text-white py-4 mb-4">
+        <header className="app-header py-3 mb-4">
           <Container className="d-flex justify-content-between align-items-center">
             <div>
-              <h1 className="mb-0">LangTalks Newsletter Generator</h1>
-              <p className="mb-0 mt-2">Generate automated newsletters from WhatsApp group chats</p>
+              <h1 className="brand-mark">
+                Lang<span className="brand-accent">RAG</span>
+              </h1>
+              <p className="brand-sub">Newsletter intelligence from community conversations</p>
             </div>
             <div className="d-flex align-items-center gap-3">
               {currentUser && (
-                <small className="text-white-50" data-testid="current-user">
-                  {currentUser.email} ({currentUser.role})
-                </small>
+                <span className="app-userline" data-testid="current-user">
+                  {currentUser.email} · {currentUser.role}
+                </span>
               )}
               <Button
                 variant="outline-light"
@@ -55,7 +56,7 @@ function App() {
           </Container>
         </header>
 
-        <Container>
+        <Container className="lr-rise">
           <Tabs
             activeKey={activeTab}
             onSelect={(k) => setActiveTab(k || "periodic")}
@@ -94,20 +95,19 @@ function App() {
           </Tabs>
         </Container>
 
-        <footer className="bg-light py-3 mt-5">
-          <Container>
-            <p className="text-center text-muted mb-0">
-              <small>
-                Powered by FastAPI + LangGraph |{" "}
-                <a
-                  href={`${API_BASE_URL || ""}/docs`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  API Documentation
-                </a>
-              </small>
-            </p>
+        <footer className="py-4 mt-5" style={{ borderTop: "1px solid var(--rule)" }}>
+          <Container className="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span className="eyebrow">LangRAG</span>
+            <small className="text-muted">
+              FastAPI + LangGraph ·{" "}
+              <a
+                href={`${API_BASE_URL || ""}/docs`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                API Documentation
+              </a>
+            </small>
           </Container>
         </footer>
       </div>
