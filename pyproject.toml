@@ -101,6 +101,13 @@ slm-enrichment = [
     "sentencepiece>=0.2.0",
     "huggingface-hub>=0.20.0",
 ]
+# SE-shadow hallucination scoring (default off, gated by RUNTIME_EVAL_SE_SHADOW_ENABLED).
+# The library distribution name is taste-llm-evals; its import name is taste.
+taste-llm-evals = [
+    "taste-llm-evals>=0.1.0",
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+]
 
 [tool.ruff]
 line-length = 500

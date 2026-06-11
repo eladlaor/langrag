@@ -567,6 +567,11 @@ class RuntimeEvalSettings(BaseSettings):
     hallucination_threshold: float = Field(default=0.5, description="Maximum hallucination score to pass (lower is better)")
     eval_model: str = Field(default="gpt-4.1-mini", description="LLM model used by the judge")
     judge_timeout_seconds: int = Field(default=30, description="Per-metric judge call timeout")
+    se_shadow_enabled: bool = Field(default=False, description="Enable SE-only shadow scoring (taste) alongside the LLM judge; sink-only, never alters the answer")
+    se_shadow_sample_n: int = Field(default=10, ge=2, le=50, description="Number of independent answer samples generated for SE diversity scoring")
+    se_shadow_temperature: float = Field(default=1.0, gt=0.0, le=2.0, description="Sampling temperature for SE shadow samples (must be > 0 for diversity)")
+    se_shadow_threshold: float = Field(default=1.0, description="SE score above which the SingleDetector shadow policy reports escalation (recorded only, never acted on)")
+    se_shadow_sampling_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Fraction of already-scored responses to additionally SE-shadow-score")
 
     model_config = SettingsConfigDict(env_prefix="RUNTIME_EVAL_")
 

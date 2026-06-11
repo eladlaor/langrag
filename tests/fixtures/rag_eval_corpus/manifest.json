@@ -1,0 +1,75 @@
+{
+  "_comment": "RAG eval fixture corpus manifest. This is the CONTRACT for the golden datasets (tests/golden_datasets/{newsletters_v2,podcasts_v1}.json): every golden expected_topic must be answerable from these files and every date_filter window must overlap a source here, EXCEPT the must_refuse windows (2030, 1990, 1995) which deliberately have no coverage. Keep this file and the golden datasets mutually consistent. Seeded by scripts/seed_rag_eval_corpus.py.",
+  "newsletters": [
+    {
+      "source_id": "eval_nl_2026_01_jan",
+      "title": "LangTalks Newsletter: 2026-01-01 to 2026-01-14",
+      "file": "2026-01_langtalks.md",
+      "date_start": "2026-01-01",
+      "date_end": "2026-01-14",
+      "data_source_name": "langtalks"
+    },
+    {
+      "source_id": "eval_nl_2026_01b_late_jan",
+      "title": "LangTalks Newsletter: 2026-01-15 to 2026-01-31",
+      "file": "2026-01b_langtalks.md",
+      "date_start": "2026-01-15",
+      "date_end": "2026-01-31",
+      "data_source_name": "langtalks"
+    },
+    {
+      "source_id": "eval_nl_2026_02_feb",
+      "title": "LangTalks Newsletter: 2026-02-01 to 2026-02-28",
+      "file": "2026-02_langtalks.md",
+      "date_start": "2026-02-01",
+      "date_end": "2026-02-28",
+      "data_source_name": "langtalks"
+    },
+    {
+      "source_id": "eval_nl_2026_03a_early_mar",
+      "title": "MCP Israel Newsletter: 2026-03-01 to 2026-03-14",
+      "file": "2026-03a_mcp_israel.md",
+      "date_start": "2026-03-01",
+      "date_end": "2026-03-14",
+      "data_source_name": "mcp_israel"
+    },
+    {
+      "source_id": "eval_nl_2026_03b_late_mar",
+      "title": "LangTalks Newsletter: 2026-03-15 to 2026-03-31",
+      "file": "2026-03b_langtalks.md",
+      "date_start": "2026-03-15",
+      "date_end": "2026-03-31",
+      "data_source_name": "langtalks"
+    }
+  ],
+  "podcasts": [
+    {
+      "source_id": "eval_pod_2026_01",
+      "title": "LangTalks Podcast: January 2026 Episode",
+      "file": "2026-01-10-episode.txt",
+      "date_start": "2026-01-10",
+      "date_end": "2026-01-10"
+    },
+    {
+      "source_id": "eval_pod_2026_02",
+      "title": "LangTalks Podcast: February 2026 Episode",
+      "file": "2026-02-12-episode.txt",
+      "date_start": "2026-02-12",
+      "date_end": "2026-02-12"
+    },
+    {
+      "source_id": "eval_pod_2026_03",
+      "title": "LangTalks Podcast: March 2026 Episode",
+      "file": "2026-03-18-episode.txt",
+      "date_start": "2026-03-18",
+      "date_end": "2026-03-18"
+    },
+    {
+      "source_id": "eval_pod_2026_04",
+      "title": "LangTalks Podcast: April 2026 Episode",
+      "file": "2026-04-15-episode.txt",
+      "date_start": "2026-04-15",
+      "date_end": "2026-04-15"
+    }
+  ]
+}

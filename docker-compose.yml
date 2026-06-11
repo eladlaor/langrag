@@ -158,7 +158,7 @@ services:
     env_file:
       - .env
     environment:
-      MONGODB_URL: ${MONGODB_URL:-mongodb://mongodb:27017}
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/?replicaSet=langrag-mongodb}
       DATABASE_NAME: ${DATABASE_NAME:-langrag}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       RAG_MCP_API_KEY: ${RAG_MCP_API_KEY:-}

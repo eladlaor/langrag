@@ -1,0 +1,48 @@
+LangTalks Podcast — Episode recorded April 15, 2026
+Host: Maya Cohen. Guests: Noa Bar-On, observability engineer; and Yusuf Demir, RAG practitioner.
+
+MAYA: Welcome back. Today's theme is the unglamorous side of running AI systems well: observability and evaluation. Noa, you live in traces all day. Why does agent observability matter so much?
+
+NOA: Because an agent without tracing is undebuggable. When a multi-step agent goes wrong, you don't have a stack trace, you have a sequence of decisions. So you have to capture every step: each tool call, each model response, the state at every node, the latency and token cost of each hop. If you can replay a run, you can debug it. If you can't, you're doing archaeology with guesses.
+
+MAYA: What do you use?
+
+NOA: Langfuse is my default for tracing. Every model call and tool call becomes a span in a trace, with inputs, outputs, latency, and cost attached. So when someone says "the agent gave a weird answer," I pull up the trace and see exactly which retrieval returned junk or which tool call failed. It also aggregates cost and latency across runs, so I can spot the expensive path before it shows up on the bill.
+
+MAYA: How does observability connect to evaluation?
+
+NOA: They're two halves of the same loop. Tracing tells you what happened on one run. Evaluation tells you whether quality is trending up or down across many runs. The trace is where I find a failure; the eval set is where I make sure that failure never comes back. Every interesting failure I find in a trace becomes a new case in the golden dataset.
+
+MAYA: Yusuf, that's your world. Talk to me about evaluation methodology.
+
+YUSUF: It starts with a golden dataset. A curated set of question and answer pairs that represent the real query distribution. Not a hundred easy questions, a few dozen that actually exercise the edges. And it's a living asset. Every production failure that's worth anything gets distilled into a new golden case.
+
+MAYA: And the tooling?
+
+YUSUF: DeepEval for the scoring. I run the RAG pipeline against the golden set and get faithfulness, retrieval relevance, and answer relevance as numbers. Faithfulness is the one I guard hardest: is the answer actually grounded in the retrieved context, or did the model make it up. I put it in a CI gate, so a change that drops faithfulness fails the build before it ships.
+
+MAYA: Let's get into practical RAG lessons. What's something you only learned by running this for real?
+
+YUSUF: Two things. First, chunking is upstream of everything. If your chunks are bad, no amount of clever prompting saves you. I moved from fixed-size splits to structure-aware chunking, splitting on headers, keeping code blocks and transcripts intact, never cutting a sentence in half. Each chunk became a self-contained idea, and retrieval relevance jumped. Second, metadata filtering before vector search. Every chunk carries its source and its date. For a date-scoped question I filter first, then search. And if the question falls outside the corpus's date coverage, the system refuses cleanly instead of hallucinating an answer.
+
+MAYA: That refusal behavior is interesting. Say more.
+
+YUSUF: It's a faithfulness safeguard. If someone asks about something the corpus simply doesn't cover, the honest answer is "I don't have sources for that." A confident fabricated answer is the worst outcome in RAG. So I'd rather the system say nothing than say something ungrounded.
+
+MAYA: Let's talk about retrieval diversity, because I know you have opinions.
+
+YUSUF: I do. The trap with pure similarity search is redundancy. You ask a question, and your top five chunks are five near-identical paragraphs that all say the same thing. You've spent your context budget on one idea. RAG diversity is about making sure the retrieved set covers different facets of the answer, not five copies of the most similar one.
+
+MAYA: How do you get diversity?
+
+YUSUF: A few ways. Re-ranking with a penalty for redundancy, so once you've selected a chunk, near-duplicates get down-weighted. Pulling from multiple sources deliberately, a podcast transcript and a newsletter on the same topic rather than five chunks from one document. And metadata-aware selection, so you're not over-sampling a single date or a single source. The goal is a retrieved set where each chunk earns its place by adding something the others don't.
+
+NOA: And this is exactly where observability pays off. I can look at a trace and literally see the retrieved chunks. When they're all near-duplicates, that's visible, and it's a signal to tune the re-ranking. Diversity problems hide unless you're looking at the actual retrievals.
+
+MAYA: Last question to both of you. One habit you'd give someone starting out.
+
+NOA: Trace everything from day one. You cannot add observability after the fact and recover the runs you've already lost.
+
+YUSUF: Build the golden set before you build the system. It forces you to define what "good" even means, and everything downstream gets easier.
+
+MAYA: Noa Bar-On, Yusuf Demir, thank you both. That's the episode.

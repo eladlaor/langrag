@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from constants import RAG_REFUSAL_NO_CONTENT, RAG_REFUSAL_OUT_OF_RANGE
 from rag.evaluation.custom_metrics import (
     DateCitationComplianceMetric,
     DateFilterHonoredMetric,
@@ -96,4 +97,18 @@ class TestRefusalCompliance:
             actual_output="MCP usage grew steadily.",
             must_refuse=False,
         )
+        assert metric.measure(case) == 1.0
+
+    def test_canonical_out_of_range_constant_is_recognised(self):
+        """The metric must accept the exact out-of-range refusal string the
+        MCP tool and REST handlers emit. Locks the constant <-> pattern coupling
+        so the two can never drift apart silently."""
+        metric = RefusalComplianceMetric()
+        case = _make_case(actual_output=RAG_REFUSAL_OUT_OF_RANGE, must_refuse=True)
+        assert metric.measure(case) == 1.0
+
+    def test_canonical_no_content_constant_is_recognised(self):
+        """The metric must accept the exact no-content refusal string."""
+        metric = RefusalComplianceMetric()
+        case = _make_case(actual_output=RAG_REFUSAL_NO_CONTENT, must_refuse=True)
         assert metric.measure(case) == 1.0

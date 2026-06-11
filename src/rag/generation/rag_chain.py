@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import get_settings
+from constants import RAG_REFUSAL_NO_CONTENT, RAG_REFUSAL_OUT_OF_RANGE
 from custom_types.field_keys import RAGConversationKeys as ConvKeys
 from rag.generation.prompts import (
     RAG_DATE_FILTER_NOTE_TEMPLATE,
@@ -26,6 +27,18 @@ from rag.generation.prompts import (
 from utils.llm.chat_model_factory import create_chat_model
 
 logger = logging.getLogger(__name__)
+
+
+def refusal_for_empty_context(date_start: Any, date_end: Any) -> str:
+    """Return the canonical refusal text when retrieval produced no context.
+
+    Single source of truth for the empty-context refusal shared by the MCP tool
+    and the REST chat handlers: an out-of-range message when a date window was
+    requested, otherwise the generic no-content message.
+    """
+    if date_start or date_end:
+        return RAG_REFUSAL_OUT_OF_RANGE
+    return RAG_REFUSAL_NO_CONTENT
 
 
 async def generate_answer(

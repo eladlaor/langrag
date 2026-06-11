@@ -17,7 +17,7 @@ Three metrics specific to the langrag.ai date-aware contract:
     rather than fabricating an answer. Score is 1.0 on a clean refusal else 0.0.
 
 These metrics are deepeval-compatible (BaseMetric subclasses) so they slot into
-the existing run_evaluation pipeline alongside the LLM-judge metrics.
+the CI eval gate (src/rag/evaluation/gate.py) alongside the LLM-judge metrics.
 """
 
 from __future__ import annotations
@@ -27,13 +27,21 @@ import re
 from datetime import datetime
 from typing import Iterable
 
+from constants import RAG_REFUSAL_NO_CONTENT, RAG_REFUSAL_OUT_OF_RANGE
+
 logger = logging.getLogger(__name__)
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Zא-תא-ת])|\n+")
 _DATE_TAG = re.compile(r"\[\s*(?:date|dates)\s*:\s*\d{4}-\d{2}-\d{2}", re.IGNORECASE)
 _CITATION_MARKER = re.compile(r"\[\s*\d+\s*\]")
+# Canonical refusal strings are the single source of truth (src/constants.py); the
+# metric matches their lowercased full form so it can never stop recognising a real
+# refusal emitted by the MCP tool / REST handlers. The remaining lenient patterns
+# guard against LLM-phrased refusals and are intentionally broader.
 _REFUSAL_PATTERNS = (
+    RAG_REFUSAL_OUT_OF_RANGE.lower(),
+    RAG_REFUSAL_NO_CONTENT.lower(),
     "no content was found",
     "no in-range content",
     "no relevant content",

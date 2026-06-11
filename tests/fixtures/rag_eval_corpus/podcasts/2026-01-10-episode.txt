@@ -1,0 +1,44 @@
+LangTalks Podcast — Episode recorded January 10, 2026
+Host: Maya Cohen. Guest: Daniel Roth, staff engineer working on agent infrastructure.
+
+MAYA: Welcome back to the LangTalks podcast. It's the second week of January 2026, and the thing everyone in the community is talking about is the Model Context Protocol. Daniel, you've been shipping MCP servers for a few months now. What's the elevator pitch for someone who's still on the fence?
+
+DANIEL: The pitch is that MCP gives you one well-defined way to expose tools and data to a model, instead of writing custom function-calling glue for every integration. Once you've built your second MCP server, you stop reinventing the same plumbing. The protocol separates tools, which are actions, from resources, which are data the model reads, and that separation alone clarifies a lot of designs.
+
+MAYA: What's the most common mistake you see people make with MCP?
+
+DANIEL: Tools that are too big. People build one giant tool that does fifteen things with a mode flag. The model struggles to pick it correctly. The fix is small, single-purpose tools, each mapping to one verb, with a description written for the model to read, not for a human. And return structured errors back through the protocol. Don't throw. If the model gets a clear error string, it can recover or retry. If it gets a crash, the session's dead.
+
+MAYA: Let's talk about AI coding agents, because that's the other half of what people are doing all day. You use Claude Code and Cursor?
+
+DANIEL: Both, for different things. Cursor's strength is the in-editor loop. The agent proposes a multi-file change, I review the diff inline, I accept the hunks I want. Claude Code is terminal-native. I hand it a failing test and a one-line description of what I want, and it reads the files, runs the tests, looks at the output, and iterates until it's green. It's an agent loop in the truest sense: decide, act, observe, repeat.
+
+MAYA: How much do you trust it?
+
+DANIEL: I trust the loop, not the output. The agent is a fast junior engineer who never gets tired. I'm the senior reviewer. I scope its working directory, I pin which commands it's allowed to run, and I read every diff before it lands. The productivity comes from the review being cheap, not from skipping it. And honestly, the better these agents get, the more the bottleneck becomes your test suite. If your tests are fast and meaningful, the agent can close the loop itself. If they're slow and flaky, it flails.
+
+MAYA: Let's get into prompt engineering, because the agent loop is really a sequence of prompts under the hood. How do you think about system prompts?
+
+DANIEL: Short and declarative. The system prompt establishes the role, the hard constraints, and the output format. That's it. I do not stuff every edge case into it, because long brittle system prompts degrade as the conversation grows. Stable instructions go in the system prompt, volatile task context goes in the user turn.
+
+MAYA: And few-shot?
+
+DANIEL: Few-shot is the highest-leverage thing I do for output formatting. Two to four examples, chosen to be representative, not exotic. The examples should demonstrate the actual decision boundary I care about, not just the easy cases. If I want the model to refuse out-of-scope questions, one of my examples is a refusal. Show, don't tell.
+
+MAYA: I want to bring in something you mentioned before we started recording, about state management in agent workflows. You've been deep in LangGraph.
+
+DANIEL: Right. So once your agent is more than a single loop, once it has branches and parallel steps, you need to manage state explicitly, and LangGraph is what I reach for. It models the whole workflow as a graph of nodes and edges, so the control flow is something you read, not something hidden inside a prompt.
+
+MAYA: What's the key idea with state in LangGraph?
+
+DANIEL: Treat state as a typed schema with explicit reducers. Each field has a defined way of merging when nodes write to it. The failure mode is treating state as a junk drawer where every node reads and writes everything. Then the graph is unreadable. Keep the fields narrow. Let the reducers own the merge semantics instead of doing ad-hoc mutation inside nodes.
+
+MAYA: And it's native async, which matters for these tool-heavy pipelines.
+
+DANIEL: Hugely. When a node fires off several tool calls and model calls, you want them concurrent on a single event loop. Native async means a chat worker can fan out to multiple model calls and an aggregator collects them, all without blocking. For I/O-bound agent work, that's the whole game.
+
+MAYA: Last question. If someone's building their first real agent this month, what's your one piece of advice?
+
+DANIEL: Make the control flow explicit and make every step traceable. If you can read your graph and replay any run, you can debug it. If it's a black box of nested prompts, you can't. Start there, before you chase capability.
+
+MAYA: Daniel Roth, thank you. That's the show.

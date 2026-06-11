@@ -15,7 +15,7 @@ from constants import ContentSourceType
 from custom_types.field_keys import RAGChunkKeys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
-from rag.generation.rag_chain import generate_answer
+from rag.generation.rag_chain import generate_answer, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
 
 logger = logging.getLogger(__name__)
@@ -58,13 +58,7 @@ async def rag_query(
     )
 
     if not retrieval["context"]:
-        if ds or de:
-            answer = (
-                "No content was found within the requested date range. "
-                "Broaden the window or rephrase the question."
-            )
-        else:
-            answer = "No relevant content found in the indexed sources."
+        answer = refusal_for_empty_context(ds, de)
     else:
         answer = await generate_answer(
             query=query,

@@ -8,9 +8,9 @@
  * This is UX only; the real security boundary is the server-side
  * require_session dependency on every data router.
  *
- * Palette: green/teal, reusing the docs pipeline-animation brand colors
- * (GREEN #10b981, TEAL #06b6d4) over a dark slate backdrop, so the entry
- * screen matches the project's visual identity rather than stock Bootstrap blue.
+ * Palette: forest green, matching the app-wide design system (accent
+ * #1f7a3d) over a deep forest backdrop, so the entry screen is the same
+ * sharp, elegant identity carried through the rest of the product.
  */
 
 import React, { useState } from "react";
@@ -28,13 +28,13 @@ import { logger } from "../utils/logger";
 
 const LOG_COMPONENT = "LoginGate";
 
-// Brand palette (mirrors docs/figures/pipeline-animation COLORS).
+// Brand palette — forest green, matching the app-wide design system.
 const BRAND = {
-  GREEN: "#10b981",
-  GREEN_DARK: "#0d9668",
-  TEAL: "#06b6d4",
-  BG_TOP: "#0f172a",
-  BG_BOTTOM: "#0a0a1a",
+  GREEN: "#1f7a3d",
+  GREEN_DARK: "#155c2c",
+  GREEN_DEEP: "#0e3a1c",
+  BG_TOP: "#0d2e18",
+  BG_BOTTOM: "#08200f",
 } as const;
 
 const fullViewportCenter: React.CSSProperties = {
@@ -42,34 +42,37 @@ const fullViewportCenter: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  background: `radial-gradient(1200px 600px at 50% -10%, #13283a 0%, ${BRAND.BG_TOP} 45%, ${BRAND.BG_BOTTOM} 100%)`,
+  background: `radial-gradient(1100px 560px at 50% -8%, #164a27 0%, ${BRAND.BG_TOP} 48%, ${BRAND.BG_BOTTOM} 100%)`,
   padding: "1.5rem",
 };
 
 const cardStyle: React.CSSProperties = {
   maxWidth: "420px",
   width: "100%",
-  border: "1px solid rgba(16, 185, 129, 0.15)",
-  borderRadius: "16px",
+  border: "1px solid rgba(255, 255, 255, 0.08)",
+  borderRadius: "18px",
   overflow: "hidden",
   boxShadow:
-    "0 20px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(6, 182, 212, 0.08), 0 0 40px rgba(16, 185, 129, 0.12)",
+    "0 30px 70px -20px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(31, 122, 61, 0.12)",
   backgroundColor: "#ffffff",
 };
 
 const headerStyle: React.CSSProperties = {
-  background: `linear-gradient(135deg, ${BRAND.GREEN} 0%, ${BRAND.TEAL} 100%)`,
-  color: "#ffffff",
-  padding: "2rem 1.5rem",
+  background: "#ffffff",
+  color: "#11211a",
+  padding: "2.25rem 1.5rem 1.5rem",
   textAlign: "center",
+  borderBottom: "1px solid #e2e9dd",
+  borderTop: `3px solid ${BRAND.GREEN}`,
 };
 
 const submitButtonStyle: React.CSSProperties = {
-  background: `linear-gradient(135deg, ${BRAND.GREEN} 0%, ${BRAND.GREEN_DARK} 100%)`,
+  background: BRAND.GREEN,
   border: "none",
   fontWeight: 600,
-  letterSpacing: "0.02em",
-  boxShadow: "0 6px 16px rgba(16, 185, 129, 0.35)",
+  letterSpacing: "0.01em",
+  padding: "0.6rem",
+  boxShadow: "0 6px 16px -6px rgba(31, 122, 61, 0.45)",
 };
 
 // Inline styles cannot express :focus / :hover; inject a tiny scoped stylesheet
@@ -78,20 +81,30 @@ const SCOPED_STYLE_ID = "login-gate-brand-style";
 const scopedCss = `
   .login-gate-card .form-control:focus {
     border-color: ${BRAND.GREEN};
-    box-shadow: 0 0 0 0.2rem rgba(16, 185, 129, 0.25);
+    box-shadow: 0 0 0 3.5px rgba(31, 122, 61, 0.18);
   }
   .login-gate-card .login-submit-btn:hover:not(:disabled),
   .login-gate-card .login-submit-btn:focus-visible:not(:disabled) {
+    background: ${BRAND.GREEN_DARK} !important;
     transform: translateY(-1px);
-    box-shadow: 0 10px 22px rgba(16, 185, 129, 0.45);
-    filter: brightness(1.03);
+    box-shadow: 0 10px 22px -8px rgba(31, 122, 61, 0.5);
   }
   .login-gate-card .login-submit-btn {
-    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   }
   .login-gate-card .login-submit-btn:disabled {
-    opacity: 0.65;
+    opacity: 0.6;
   }
+  .login-gate-card .login-wordmark {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.9rem;
+    letter-spacing: -0.025em;
+    color: #11211a;
+    font-optical-sizing: auto;
+    margin: 0;
+  }
+  .login-gate-card .login-wordmark .accent { color: ${BRAND.GREEN}; }
 `;
 
 const useScopedBrandStyle = (): void => {
@@ -165,10 +178,15 @@ export const LoginGate: React.FC<{ children: React.ReactNode }> = ({
     <Container fluid style={fullViewportCenter}>
       <Card className="login-gate-card" style={cardStyle}>
         <div style={headerStyle}>
-          <h1 className="h4 mb-0 fw-semibold">{LOGIN_BRANDING_TITLE}</h1>
+          <h1 className="login-wordmark">
+            {LOGIN_BRANDING_TITLE.replace(/RAG$/, "")}
+            <span className="accent">RAG</span>
+          </h1>
         </div>
         <Card.Body className="p-4 p-sm-5">
-          <p className="text-muted text-center mb-4">Sign in to your account</p>
+          <p className="text-muted text-center mb-4" style={{ fontSize: "0.9rem" }}>
+            Newsletter intelligence — sign in to continue
+          </p>
 
           {error && (
             <Alert variant="danger" className="py-2">

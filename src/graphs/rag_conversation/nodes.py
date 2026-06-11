@@ -15,6 +15,7 @@ from custom_types.field_keys import RAGChunkKeys
 from graphs.rag_conversation.state import RAGConversationState
 from graphs.state_keys import RAGConversationStateKeys as Keys
 from rag.evaluation.runtime.scorer import score_response
+from rag.evaluation.runtime.se_shadow import shadow_score_se
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.generation.rag_chain import generate_answer
 
@@ -153,3 +154,18 @@ async def _run_background_scoring(
         )
     except Exception as e:
         logger.warning(f"Background runtime scoring failed (non-blocking): evaluation_id={evaluation_id}, error={e}")
+
+    # Independent SE shadow scoring. Returns None instantly when disabled, so
+    # this is effectively free (and imports no taste/torch) when off. A shadow
+    # failure cannot affect the judge write above and vice versa.
+    try:
+        await shadow_score_se(
+            evaluation_id=evaluation_id,
+            session_id=session_id,
+            query=query,
+            contexts=contexts,
+            conversation_history=None,
+            langfuse_trace_id=langfuse_trace_id,
+        )
+    except Exception as e:
+        logger.warning(f"Background SE shadow scoring failed (non-blocking): evaluation_id={evaluation_id}, error={e}")

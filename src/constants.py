@@ -310,6 +310,14 @@ ROUTE_RAG_CHAT = "/rag/chat"
 ROUTE_RAG_INGEST_NEWSLETTERS = "/rag/ingest/newsletters"
 ROUTE_RAG_SOURCES_NEWSLETTERS = "/rag/sources/newsletters"
 
+# RAG refusal messages — single source of truth.
+# Consumed by the shared refusal helper (rag.generation.rag_chain.refusal_for_empty_context),
+# the MCP rag_query tool, the REST chat handlers, and the eval RefusalComplianceMetric
+# pattern set. Keep these in sync with custom_metrics._REFUSAL_PATTERNS (the metric
+# derives its match set from them, with a coupling test in test_custom_metrics.py).
+RAG_REFUSAL_OUT_OF_RANGE = "No content was found within the requested date range. Broaden the window or rephrase the question."
+RAG_REFUSAL_NO_CONTENT = "No relevant content found in the indexed sources."
+
 # Metrics Routes (no prefix)
 ROUTE_METRICS = "/metrics"
 
@@ -1160,6 +1168,19 @@ class EvaluationStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class SeShadowKey(StrEnum):
+    """Langfuse score names / Mongo field names written by the SE shadow scorer.
+
+    Kept separate from EvaluationMetric so semantic-entropy shadow scores never
+    pollute the judge metrics consumed by _passes_threshold / overall_passed.
+    """
+
+    SE_SCORE = "se_shadow_score"
+    N_CLUSTERS = "se_shadow_n_clusters"
+    N_SAMPLES = "se_shadow_n_samples"
+    ESCALATION_FLAG = "se_shadow_escalated"
 
 
 class TranscriptionProvider(StrEnum):

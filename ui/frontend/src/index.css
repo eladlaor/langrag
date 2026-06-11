@@ -11,18 +11,18 @@
 
 :root {
   /* ---- Palette ---------------------------------------------------------- */
-  --paper:        #f2f6ef;  /* page background — pale green wash */
-  --paper-raised: #fbfdf9;  /* cards, panels — near-white with green cast */
-  --paper-sunk:   #e6efe1;  /* inset wells, table stripes */
-  --ink:          #16241a;  /* primary text — near-black green */
-  --ink-soft:     #38483a;  /* secondary text */
-  --ink-faint:    #6f8273;  /* tertiary / muted text — green-grey */
-  --rule:         #d3e1cf;  /* hairline borders */
-  --rule-strong:  #b9ccb3;
+  --paper:        #f7f9f6;  /* page background — clean off-white, faint green */
+  --paper-raised: #ffffff;  /* cards, panels — true white for crisp contrast */
+  --paper-sunk:   #eef3eb;  /* inset wells, table stripes */
+  --ink:          #11211a;  /* primary text — deep near-black green, high contrast */
+  --ink-soft:     #3a4a40;  /* secondary text */
+  --ink-faint:    #677a6c;  /* tertiary / muted text — green-grey */
+  --rule:         #e2e9dd;  /* hairline borders */
+  --rule-strong:  #cbd8c4;
 
   --accent:        #1f7a3d;  /* dominant forest green */
   --accent-hover:  #155c2c;
-  --accent-soft:   #dcebd9;  /* green tint background */
+  --accent-soft:   #e6f1e2;  /* green tint background */
   --accent-ink:    #134d25;  /* deep green text on tint */
 
   --success:  #1f7a3d;
@@ -36,21 +36,20 @@
   --info-soft:    #dceae6;
 
   /* ---- Typography ------------------------------------------------------- */
-  --font-display: "Bricolage Grotesque", "Plus Jakarta Sans", -apple-system,
-    BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
 
   /* ---- Geometry --------------------------------------------------------- */
-  --radius-sm: 4px;
-  --radius:    8px;
-  --radius-lg: 14px;
+  --radius-sm: 5px;
+  --radius:    9px;
+  --radius-lg: 16px;
 
-  --shadow-xs: 0 1px 2px rgba(22, 40, 26, 0.05);
-  --shadow-sm: 0 1px 3px rgba(22, 40, 26, 0.07), 0 1px 2px rgba(22, 40, 26, 0.05);
-  --shadow-md: 0 6px 22px -10px rgba(22, 40, 26, 0.20);
-  --shadow-lg: 0 24px 60px -22px rgba(22, 40, 26, 0.30);
+  --shadow-xs: 0 1px 2px rgba(17, 33, 26, 0.04);
+  --shadow-sm: 0 1px 2px rgba(17, 33, 26, 0.05), 0 2px 6px -2px rgba(17, 33, 26, 0.06);
+  --shadow-md: 0 8px 26px -12px rgba(17, 33, 26, 0.18);
+  --shadow-lg: 0 28px 70px -26px rgba(17, 33, 26, 0.28);
 
   /* ---- Bootstrap token overrides (read at runtime by BS 5.3) ------------ */
   --bs-body-bg: var(--paper);
@@ -97,14 +96,12 @@ body {
   font-family: var(--font-body);
   font-size: var(--bs-body-font-size);
   line-height: 1.6;
-  /* Green atmosphere: a soft top-down green wash + faint green grain.
-     Keeps green present across the whole canvas, not just on components. */
-  background-image:
-    radial-gradient(rgba(31, 122, 61, 0.05) 1px, transparent 1px),
-    linear-gradient(180deg, #e7f0e2 0%, var(--paper) 38%);
-  background-size: 22px 22px, 100% 100%;
-  background-repeat: repeat, no-repeat;
-  background-attachment: scroll, fixed;
+  font-feature-settings: "cv05" 1, "ss01" 1; /* Inter: cleaner lowercase l, single-storey a */
+  /* Clean canvas: one whisper-soft top-down green wash, no grain.
+     Keeps a hint of green atmosphere without visual noise. */
+  background-image: linear-gradient(180deg, #eef4ea 0%, var(--paper) 30%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 code,
@@ -123,11 +120,13 @@ h1, h2, h3, h4, h5, h6,
   font-family: var(--font-display);
   color: var(--ink);
   font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
+  letter-spacing: -0.01em;
+  line-height: 1.18;
+  font-optical-sizing: auto;
 }
 
-h1, .h1 { font-weight: 700; letter-spacing: -0.02em; }
+h1, .h1 { font-weight: 600; letter-spacing: -0.02em; }
+h2, .h2 { font-weight: 600; }
 
 /* Body copy and form controls stay in the humanist sans */
 p, label, input, select, textarea, button, .btn,
@@ -161,40 +160,43 @@ a:hover { color: var(--accent-hover); }
 .App { text-align: left; }
 
 .app-header {
-  /* deep-green band — green leads from the very top of the app */
-  background: linear-gradient(120deg, #134d25 0%, #1f7a3d 100%);
-  border-bottom: 1px solid #0e3a1c;
-  color: #eaf3e6;
+  /* Crisp white bar with a fine green hairline on top — sharp, not heavy */
+  background: var(--paper-raised);
+  border-top: 3px solid var(--accent);
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink);
+  box-shadow: var(--shadow-xs);
 }
 .app-header .brand-mark {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 1.6rem;
-  letter-spacing: -0.02em;
-  color: #ffffff;
+  font-size: 1.75rem;
+  letter-spacing: -0.025em;
+  color: var(--ink);
   line-height: 1.1;
   margin: 0;
+  font-optical-sizing: auto;
 }
-/* "RAG" pops in a bright leaf green against the deep band */
-.app-header .brand-mark .brand-accent { color: #9fe6ad; }
+/* "RAG" carries the forest-green accent against the ink wordmark */
+.app-header .brand-mark .brand-accent { color: var(--accent); }
 .app-header .brand-sub {
   font-size: 0.82rem;
-  color: rgba(234, 243, 230, 0.78);
+  color: var(--ink-faint);
   letter-spacing: 0.01em;
-  margin: 0;
+  margin: 0.1rem 0 0;
 }
 .app-userline {
   font-size: 0.8rem;
-  color: rgba(234, 243, 230, 0.72);
+  color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
 }
-/* Log-out button reads as a light outline on the green band */
+/* Log-out button reads as a quiet outline against the white bar */
 .app-header .btn-outline-light {
-  --bs-btn-color: #eaf3e6;
-  --bs-btn-border-color: rgba(234, 243, 230, 0.45);
-  --bs-btn-hover-bg: rgba(255, 255, 255, 0.12);
-  --bs-btn-hover-border-color: rgba(234, 243, 230, 0.7);
-  --bs-btn-hover-color: #ffffff;
+  --bs-btn-color: var(--ink-soft);
+  --bs-btn-border-color: var(--rule-strong);
+  --bs-btn-hover-bg: var(--paper-sunk);
+  --bs-btn-hover-border-color: var(--rule-strong);
+  --bs-btn-hover-color: var(--ink);
 }
 
 /* ---------------------------------------------------------------------------
@@ -202,7 +204,7 @@ a:hover { color: var(--accent-hover); }
    ------------------------------------------------------------------------- */
 .nav-tabs {
   border-bottom: 1px solid var(--rule);
-  gap: 0.25rem;
+  gap: 0.15rem;
 }
 .nav-tabs .nav-link {
   border: none;
@@ -210,11 +212,12 @@ a:hover { color: var(--accent-hover); }
   border-radius: 0;
   color: var(--ink-faint);
   font-weight: 500;
-  font-size: 0.92rem;
-  padding: 0.65rem 0.95rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.005em;
+  padding: 0.7rem 1.05rem;
   margin-bottom: -1px;
   background: transparent;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.18s ease, border-color 0.18s ease;
 }
 .nav-tabs .nav-link:hover {
   color: var(--ink);
@@ -222,10 +225,27 @@ a:hover { color: var(--accent-hover); }
   isolation: isolate;
 }
 .nav-tabs .nav-link.active {
-  color: var(--ink);
+  color: var(--accent);
   background: transparent;
   border-bottom-color: var(--accent);
   font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Tab content panel — every tab body sits on a crisp elevated card
+   ------------------------------------------------------------------------- */
+.tab-content {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.75rem;
+  margin-top: 1.25rem;
+}
+/* Cards already inside a panel shouldn't double up chrome */
+.tab-content > .card,
+.tab-content .card.shadow-sm {
+  box-shadow: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -322,15 +342,19 @@ a:hover { color: var(--accent-hover); }
   border: 1px solid var(--rule-strong);
   border-radius: var(--radius);
   color: var(--ink);
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.85rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.form-control::placeholder { color: var(--ink-faint); }
+.form-control::placeholder { color: var(--ink-faint); opacity: 0.85; }
+.form-control:hover:not(:focus):not(:disabled),
+.form-select:hover:not(:focus):not(:disabled) {
+  border-color: var(--accent);
+}
 .form-control:focus,
 .form-select:focus {
   background-color: var(--paper-raised);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3.5px var(--accent-soft);
   color: var(--ink);
 }
 .form-control:disabled,

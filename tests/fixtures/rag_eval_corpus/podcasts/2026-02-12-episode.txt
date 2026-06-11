@@ -1,0 +1,46 @@
+LangTalks Podcast — Episode recorded February 12, 2026
+Host: Maya Cohen. Guest: Priya Nair, ML platform lead who runs RAG systems in production.
+
+MAYA: Welcome back. Today we're getting practical about something everyone builds and almost nobody evaluates properly: RAG systems. Priya, you run retrieval-augmented generation in production. How do you actually evaluate one?
+
+PRIYA: The first thing I tell people is that RAG is an evaluation problem wearing a retrieval costume. You can't tune chunking, embeddings, and top-k by vibes. You need a golden dataset, a curated set of question and answer pairs that reflect what your users actually ask, and you score against it every time you change anything.
+
+MAYA: What metrics matter most?
+
+PRIYA: Three, and they map to the three places RAG breaks. Retrieval relevance: did we fetch the right chunks. Answer relevance: did the answer actually address the question. And faithfulness, which is the big one: is the answer grounded in the retrieved context, or did the model invent it. A fluent answer that isn't supported by the sources is worse than an honest "I don't know," because it's confidently wrong.
+
+MAYA: What do you use to measure those?
+
+PRIYA: DeepEval. It lets me run the whole RAG pipeline against the golden set and produce a faithfulness score, a relevance score, all of it, as numbers I can put in a CI gate. So a pull request that regresses faithfulness fails the build. That's the difference between "I think this got better" and "here's the number." Once you have the gate, you stop arguing about quality and start measuring it.
+
+MAYA: Let's switch to deployment. You've shipped these systems for real. What did production teach you that the demo didn't?
+
+PRIYA: That the model is the easy part. The hard part is everything around it. We containerize with Docker, pin every dependency, and keep a strict line between build-time config and run-time secrets. The classic mistake is baking environment-specific values into the image. Don't. The image should be environment-agnostic, and config comes in at run time.
+
+MAYA: And scaling?
+
+PRIYA: The key realization is that an LLM service is I/O-bound, not CPU-bound. You're waiting on the model provider most of the time. So scaling is about concurrency and connection management, not raw compute. Native async end to end, so one event loop keeps many in-flight requests busy. And you have to handle provider rate limits gracefully: queue, back off on 429s, degrade instead of falling over. Every external call gets a timeout and a defined failure path. We fail loud, with context, never silently.
+
+MAYA: Let's talk money, because these systems aren't free. How do you think about cost?
+
+PRIYA: Tokens are the dominant cost, and context discipline is the dominant lever. The instinct is to stuff the prompt with everything you retrieved. Resist it. We trim retrieved context down to the chunks that are genuinely relevant, and that alone cut our spend substantially. We cache stable prompt prefixes. And we set explicit cost budgets, per run and per day, enforced in code, with alerts. Cost is an operational metric, same tier as latency and error rate.
+
+MAYA: Any specific cost trap people fall into?
+
+PRIYA: Runaway loops. An agent that retries forever, or a top-k that's set to fifty when ten would do. Small defaults that nobody revisits quietly burn budget at scale. Audit your defaults.
+
+MAYA: Last big topic. Open-source versus proprietary models. Where do you land?
+
+PRIYA: It's genuinely a trade-off, not a religion. Proprietary models from the major providers are usually ahead on raw capability and tool-use reliability, and you pay per token with zero infrastructure burden. Open-source models give you control, predictable cost at scale, data residency, and the ability to fine-tune, but you own the serving infrastructure and the operational headache.
+
+MAYA: How do you decide?
+
+PRIYA: I ask two questions. Is this workload latency- and capability-sensitive, where the best model wins? Then proprietary. Is it high-volume, well-scoped, and cost-sensitive, where a smaller fine-tuned open model is good enough? Then open-source, self-hosted. We actually run both: a strong proprietary model for the hard reasoning steps, a small open model for the high-frequency classification work. Route by task. Don't pick one model to do everything.
+
+MAYA: And the capability gap, is it closing?
+
+PRIYA: At the top it's converging fast. So the things I increasingly care about aren't leaderboard scores, they're latency, cost, and how reliably a model uses tools and handles long context. Build your own small benchmark from your own tasks and re-run it on every release. The public leaderboard champion is often not the model that wins on your workload.
+
+MAYA: Priya Nair, this was great. Thank you.
+
+PRIYA: Thanks for having me.

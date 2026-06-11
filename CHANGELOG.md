@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.16.1] - 2026-06-11
+
+### Added
+- **Semantic-entropy hallucination detection (shadow mode), via the `taste-llm-evals` library:** a new runtime evaluation path (`src/rag/evaluation/runtime/se_shadow.py`) that samples each RAG answer N times and scores meaning-disagreement across the samples (semantic entropy, NLI-clustered) to catch *confident* hallucinations the LLM-as-judge and token-logprob signals miss. SE-only (langrag's generation exposes no logprobs, so Predictive Entropy is unavailable); the detector is a lazy-imported optional extra (`taste-llm-evals`, pulls torch/transformers) mirroring the DeBERTa enrichment SLM. Gated behind `RUNTIME_EVAL_SE_SHADOW_ENABLED` (default off); runs alongside the existing judge, dual-writes scores to Langfuse/Mongo (keys in `SeShadowKey`), never alters the answer, fail-soft. Escalation-only judging, threshold calibration are deferred.
+
+### Fixed
+- **REST chat could answer ungrounded on empty retrieval:** the "no content found, refuse" short-circuit existed only in the MCP `rag_query` tool, so `POST /api/rag/chat` and `POST /api/rag/chat/stream` fed an empty context straight into the LLM and an out-of-range or zero-hit query got a fabricated answer. Both REST handlers now short-circuit to the canonical refusal when retrieval yields empty context: HTTP 200, `citations == []`, the refusal persisted to session history like a normal answer, and the streaming handler emits it as a single token event without calling the LLM.
+
+### Changed
+- **Refusal text unified into a single source of truth:** `RAG_REFUSAL_OUT_OF_RANGE` and `RAG_REFUSAL_NO_CONTENT` now live in `src/constants.py` and are consumed by a shared `refusal_for_empty_context` helper (used by the MCP tool and both REST handlers) and by the eval `RefusalComplianceMetric` pattern set. Removes the two previously-independent hardcoded copies that could drift; a coupling test locks the metric to the constants.
+- **RAG eval gate now runs against a seeded corpus:** added a deterministic, committed fixture corpus (`tests/fixtures/rag_eval_corpus/`: newsletters + podcast transcripts spanning Jan–Apr 2026) and an idempotent seeding step that ingests it through the real pipeline. The `rag-eval` CI workflow seeds before scoring so retrieval has content, and reads `MONGODB_URI` (the variable the app actually consumes). The corpus deliberately omits the `must_refuse` windows (2030, 1990, 1995).
+
 ## [1.16.0] - 2026-06-06
 
 ### Added
@@ -250,7 +262,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.1...HEAD
+[1.16.1]: https://github.com/eladlaor/langrag/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/eladlaor/langrag/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/eladlaor/langrag/compare/v1.15.0...v1.15.1
 [1.15.0]: https://github.com/eladlaor/langrag/compare/v1.14.0...v1.15.0

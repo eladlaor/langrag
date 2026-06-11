@@ -1,0 +1,46 @@
+LangTalks Podcast — Episode recorded March 18, 2026
+Host: Maya Cohen. Guests: Tomer Levy, agent framework maintainer; and Sara Klein, applied AI researcher focused on safety.
+
+MAYA: Welcome back. It's mid-March 2026, and we're doing a quarter-in-review with two guests who don't always agree, which is exactly why they're here. Tomer, Sara, welcome. Let's start with LangGraph, because it's been everywhere in Q1 2026.
+
+TOMER: It's been the framework of the quarter, no question. What clicked for people in early 2026 is that LangGraph makes the control flow explicit. Your agent is a graph of nodes and edges, with typed state and reducers, instead of one giant prompt doing everything implicitly. Branching, loops, human-in-the-loop, parallel fan-out, you read it off the graph. And it's native async, which matters for tool-heavy pipelines.
+
+MAYA: Model releases this quarter. Quick takes.
+
+SARA: Early 2026 was a release-heavy stretch across all the major providers. The pattern I noticed is that capability at the top is converging, so the interesting differentiators are tool-use reliability, latency, and long-context handling, not headline benchmark scores. Build your own benchmark.
+
+MAYA: Let's get to MCP, because I want to be specific here. Tomer, give me distinct claims about the Model Context Protocol that you'd actually defend.
+
+TOMER: Sure, three of them. First claim: MCP has become the default integration surface for exposing tools and data to AI agents in 2026. Building an MCP server is now the expected way to make a system agent-accessible, not one option among many.
+
+MAYA: That's one.
+
+TOMER: Second claim: MCP's core value is its separation of concerns. It cleanly distinguishes tools, which are actions the model invokes, from resources, which are data the model reads, from prompts, which are reusable templates the server exposes. That taxonomy is what makes MCP designs maintainable.
+
+MAYA: And a third.
+
+TOMER: Third claim: small, single-purpose MCP tools with model-facing descriptions dramatically outperform large multi-mode tools, because they improve the model's tool-selection accuracy. The refactor from one big tool to several narrow ones is the single highest-impact change most teams can make.
+
+SARA: I'll add a safety-flavored fourth, since it's my lane. Because MCP servers let models take real actions, every MCP tool that mutates state is a new attack surface and has to be treated like an API gateway: least privilege, audit logging, and human approval for high-stakes actions.
+
+MAYA: Good segue, Sara. AI safety. Where's your head at this quarter?
+
+SARA: Guardrails and responsible AI. The shift I want people to internalize is that safety isn't a feature you bolt on at the end. It's a set of constraints you design in from the first tool definition. Least privilege on every tool. Input validation as a safety mechanism, not just correctness, because a model can be steered by malicious content it reads through a resource. And transparency with users about when an agent is acting on their behalf, plus logging so actions can be reviewed afterward.
+
+MAYA: Now the disagreement I promised. Multi-agent systems. Tomer, you build frameworks for them. Sara, you're skeptical. Tomer first.
+
+TOMER: I think multi-agent systems are the natural next step. When subtasks are genuinely independent, an orchestrator dispatching to specialized worker agents and aggregating results is cleaner and more scalable than one monolithic agent. Specialization helps. A research agent, a coding agent, a review agent, each tuned for its job.
+
+SARA: And here's where I push back. Most multi-agent designs I see are premature. A single well-structured agent with good tools usually beats a committee of agents that mostly spend their tokens talking to each other. Every agent boundary is latency, cost, and a new failure mode. My rule: don't reach for multiple agents until you've measured a single agent failing at the task, and the subtasks are truly independent.
+
+TOMER: I don't entirely disagree, honestly. The premature ones are a real problem. I'd just say the ceiling is higher than Sara gives it credit for, once the subtasks really are separable.
+
+SARA: Fair. We agree on "measure first." We disagree on how often the answer comes out in favor of multiple agents.
+
+MAYA: Last topic, lighter. n8n and automation.
+
+TOMER: n8n is the unglamorous glue that makes these systems useful. Scheduling recurring jobs, integrating with email and chat, connecting external services without writing yet another bespoke integration. We run scheduled generation jobs on a cron cadence through it and deliver output automatically.
+
+SARA: And same safety discipline applies. Keep each automation step small and single-purpose, log every step with structured context, make failures visible. A workflow that silently skips a step is worse than one that stops loudly.
+
+MAYA: Tomer Levy, Sara Klein, thank you both. That's the show.

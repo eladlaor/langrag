@@ -56,7 +56,7 @@ from db.repositories.rag_evaluations import EvaluationsRepository
 from rag.auth.dependencies import require_api_key
 from rag.auth.rate_limit import limiter
 from rag.conversation.manager import ConversationManager
-from rag.generation.rag_chain import generate_answer, generate_answer_stream
+from rag.generation.rag_chain import generate_answer, generate_answer_stream, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.sources.podcast_source import PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS, PodcastSource
 
@@ -137,18 +137,27 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
             context = retrieval_result["context"]
             citations = retrieval_result["citations"]
 
-            full_answer = ""
-            async for token in generate_answer_stream(
-                query=body.query,
-                context=context,
-                conversation_history=history,
-                date_start=date_start,
-                date_end=date_end,
-                freshness_warning=retrieval_result["freshness_warning"],
-                newest_source_date=retrieval_result["newest_source_date"],
-            ):
-                full_answer += token
-                yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': token})}\n\n"
+            # Empty-context guard: emit the canonical refusal as a single TOKEN
+            # event (so the client renders it identically to a normal answer) and
+            # skip the LLM entirely. No citations on a refusal.
+            if not context:
+                refusal = refusal_for_empty_context(date_start, date_end)
+                full_answer = refusal
+                citations = []
+                yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': refusal})}\n\n"
+            else:
+                full_answer = ""
+                async for token in generate_answer_stream(
+                    query=body.query,
+                    context=context,
+                    conversation_history=history,
+                    date_start=date_start,
+                    date_end=date_end,
+                    freshness_warning=retrieval_result["freshness_warning"],
+                    newest_source_date=retrieval_result["newest_source_date"],
+                ):
+                    full_answer += token
+                    yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': token})}\n\n"
 
             for citation in citations:
                 yield f"event: {RAGEventType.CITATION}\ndata: {json.dumps(citation, default=str)}\n\n"
@@ -382,6 +391,25 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
 
         context = retrieval_result["context"]
         citations = retrieval_result["citations"]
+
+        # Empty-context guard: never feed the LLM an empty context (it would
+        # hallucinate an ungrounded answer). Return the canonical refusal instead,
+        # persisted to session history exactly like a normal answer.
+        if not context:
+            answer = refusal_for_empty_context(date_start, date_end)
+            await manager.add_assistant_message(
+                session_id=session_id,
+                content=answer,
+                citations=[],
+            )
+            return RAGChatResponse(
+                session_id=session_id,
+                answer=answer,
+                citations=[],
+                freshness_warning=False,
+                oldest_source_date=None,
+                newest_source_date=None,
+            )
 
         answer = await generate_answer(
             query=body.query,
