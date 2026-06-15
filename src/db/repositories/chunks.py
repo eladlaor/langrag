@@ -10,7 +10,7 @@ from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from constants import COLLECTION_RAG_CHUNKS
+from constants import COLLECTION_RAG_CHUNKS, DEFAULT_MAX_QUERY_RESULTS
 from custom_types.field_keys import RAGChunkKeys as Keys
 from db.repositories.base import BaseRepository
 
@@ -77,11 +77,14 @@ class ChunksRepository(BaseRepository):
 
     async def count_by_source_type(self) -> dict[str, int]:
         """Get chunk counts grouped by content_source type."""
+        # The $group reduces to one doc per content-source type (a small, bounded
+        # set), but the $limit + bounded to_list keep this defensively unbounded-safe.
         pipeline = [
             {"$group": {"_id": f"${Keys.CONTENT_SOURCE}", "count": {"$sum": 1}}},
             {"$sort": {"_id": 1}},
+            {"$limit": DEFAULT_MAX_QUERY_RESULTS},
         ]
-        results = await self.collection.aggregate(pipeline).to_list(length=None)
+        results = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
         return {doc["_id"]: doc["count"] for doc in results}
 
     async def list_ingested_sources(self, content_source: str | None = None) -> list[dict]:
@@ -110,8 +113,11 @@ class ChunksRepository(BaseRepository):
                 }
             },
             {"$sort": {"created_at": -1}},
+            {"$limit": DEFAULT_MAX_QUERY_RESULTS},
         ]
-        results = await self.collection.aggregate(pipeline).to_list(length=None)
+        # One doc per distinct source_id; $limit + bounded to_list guard against
+        # an unexpectedly large source catalog materializing fully into memory.
+        results = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
         return [
             {
                 Keys.SOURCE_ID: doc["_id"],

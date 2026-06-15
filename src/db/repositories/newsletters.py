@@ -5,6 +5,7 @@ Manages persisted newsletter records for future use as examples.
 Stores all versions (original, enriched, translated) with metadata.
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, UTC
@@ -445,32 +446,18 @@ class NewslettersRepository(BaseRepository):
                 logger.error(f"Cannot generate file: content not found for {newsletter_id} " f"(version={version}, format={format})")
                 return None
 
-            # Auto-generate output path if not provided
-            if not output_path:
-                import tempfile
-
-                file_extension = {
-                    FileFormat.JSON: FILE_EXT_JSON,
-                    FileFormat.MARKDOWN: FILE_EXT_MD,
-                    FileFormat.HTML: FILE_EXT_HTML,
-                }[format]
-
-                temp_dir = Path(tempfile.gettempdir()) / "langrag_newsletters"
-                temp_dir.mkdir(parents=True, exist_ok=True)
-
-                output_path = str(temp_dir / f"{newsletter_id}_{version}{file_extension}")
-
-            # Ensure parent directory exists
-            output_file = Path(output_path)
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write content to file
-            if format == FileFormat.JSON:
-                with open(output_path, "w", encoding="utf-8") as f:
-                    json.dump(content, f, indent=2, ensure_ascii=False)
-            else:
-                with open(output_path, "w", encoding="utf-8") as f:
-                    f.write(content)
+            # Resolve the output path and write to disk. All filesystem work is
+            # blocking, so it is offloaded to a thread — doing mkdir/open/write
+            # directly here would stall the event loop and every concurrent
+            # request sharing it.
+            output_path = await asyncio.to_thread(
+                _write_newsletter_file,
+                content,
+                output_path,
+                newsletter_id,
+                version,
+                format,
+            )
 
             logger.info(f"Generated file for newsletter {newsletter_id} " f"(version={version}, format={format}) at {output_path}")
             return output_path
@@ -478,3 +465,38 @@ class NewslettersRepository(BaseRepository):
         except Exception as e:
             logger.error(f"Failed to generate file for newsletter {newsletter_id} " f"(version={version}, format={format}): {e}")
             raise
+
+
+def _write_newsletter_file(content: Any, output_path: str | None, newsletter_id: str, version: VersionType, format: FormatType) -> str:
+    """Resolve the output path (if needed) and write newsletter content to disk.
+
+    Blocking (mkdir + open + write); intended to be called via asyncio.to_thread
+    so it never runs on the event loop.
+
+    Returns:
+        The path the content was written to.
+    """
+    if not output_path:
+        import tempfile
+
+        file_extension = {
+            FileFormat.JSON: FILE_EXT_JSON,
+            FileFormat.MARKDOWN: FILE_EXT_MD,
+            FileFormat.HTML: FILE_EXT_HTML,
+        }[format]
+
+        temp_dir = Path(tempfile.gettempdir()) / "langrag_newsletters"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        output_path = str(temp_dir / f"{newsletter_id}_{version}{file_extension}")
+
+    # Ensure parent directory exists
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    if format == FileFormat.JSON:
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(content, f, indent=2, ensure_ascii=False)
+    else:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    return output_path

@@ -140,8 +140,11 @@ async def extract_and_persist_memories(
             from observability.metrics import agent_metrics as _am
 
             _am.record_memory_write(str(namespace))
-        except Exception:
-            pass  # best-effort observability
+        except Exception as metrics_err:
+            # Best-effort observability — must not fail memory persistence, but
+            # log at debug so a broken metrics pipeline is diagnosable rather
+            # than silently swallowed.
+            logger.debug("record_memory_write failed: %s", metrics_err)
 
     logger.info(
         "extracted memories: user_id=%s candidates=%d persisted=%d (threshold=%.2f)",

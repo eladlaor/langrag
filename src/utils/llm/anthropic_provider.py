@@ -188,8 +188,11 @@ class AnthropicProvider(PromptInputBuilderMixin, LLMProviderInterface):
             return
         try:
             langfuse_context.update_current_observation(level="ERROR", status_message=str(error))
-        except Exception:
-            pass
+        except Exception as trace_err:
+            # Observability failures must never mask the underlying LLM error,
+            # but they should not vanish silently either — a broken tracing
+            # pipeline needs to be diagnosable.
+            logging.debug(f"Failed to update Langfuse error observation: {trace_err}")
 
     # =========================================================================
     # Public API methods

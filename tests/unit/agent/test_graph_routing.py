@@ -24,7 +24,6 @@ from langgraph.store.memory import InMemoryStore
 
 from agent.auth.user_context import UserContext, user_context
 from agent.graph import build_agent_graph
-from agent.memory.mongodb_store import MongoDBStore  # only for typing assert
 from graphs.state_keys import AgentStateKeys as Keys
 
 pytestmark = [pytest.mark.asyncio]
@@ -224,23 +223,66 @@ async def test_tool_call_count_caps_at_max_per_turn():
     """A runaway LLM that always emits a tool call must not loop forever
     — the budget node halts the loop once `tool_call_count` exceeds the
     configured ceiling."""
-    # Always emit the same tool call. The default
+    # Emit one tool call per turn, each with a UNIQUE id so the add_messages
+    # reducer doesn't dedupe them and the loop genuinely iterates. The default
     # AgentSettings.max_tool_calls_per_turn is 12.
-    tc = {"name": "list_my_communities", "args": {}, "id": "loop"}
-    replies = [AIMessage(content="", tool_calls=[tc])] * 20
+    replies = [AIMessage(content="", tool_calls=[{"name": "list_my_communities", "args": {}, "id": f"loop-{i}"}]) for i in range(20)]
     graph, _ = await _build(replies)
     with user_context(_ctx()):
         result = await graph.ainvoke(
             {"messages": [HumanMessage(content="loop")]},
             config={
+                # Each tool iteration costs 3 super-steps (AGENT→TOOLS→CHECK_BUDGET);
+                # raise the recursion limit above 12*3 so the BUDGET cap is what
+                # halts the loop, not LangGraph's default step ceiling.
+                "recursion_limit": 100,
                 "configurable": {
                     "thread_id": "t5",
+                    Keys.USER_ID: "u-real",
+                    Keys.COMMUNITIES: ["mcp_israel"],
+                },
+            },
+        )
+    # Loop must have halted at the cap. With single-call turns the count
+    # lands exactly on the ceiling and never exceeds it.
+    assert result.get(Keys.TOOL_CALL_COUNT) == 12
+
+
+async def test_tool_call_count_never_exceeds_cap_on_large_batch():
+    """A single LLM turn that emits MANY tool calls at once must not blow
+    past the per-turn ceiling. The tools node enforces the budget *before*
+    executing, short-circuiting over-budget calls as error ToolMessages so
+    tool_call_count can never exceed max_tool_calls_per_turn (12).
+
+    This guards the off-by-N overshoot bug: previously the count was
+    incremented by len(tool_calls) for the whole batch and only checked
+    afterwards, letting an N-call batch overshoot by up to N-1.
+    """
+    # One AI turn emitting 20 tool calls at once (well over the cap of 12).
+    big_batch = [{"name": "list_my_communities", "args": {}, "id": f"b-{i}"} for i in range(20)]
+    replies = [
+        AIMessage(content="", tool_calls=big_batch),
+        AIMessage(content="done"),
+    ]
+    graph, _ = await _build(replies)
+    with user_context(_ctx()):
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="do everything at once")]},
+            config={
+                "configurable": {
+                    "thread_id": "t6",
                     Keys.USER_ID: "u-real",
                     Keys.COMMUNITIES: ["mcp_israel"],
                 }
             },
         )
-    # Loop must have halted before tool_call_count blew past the cap.
-    # The cap is 12 but a fresh AI turn after the cap can still happen,
-    # so allow some slack as long as the bound is enforced.
-    assert result.get(Keys.TOOL_CALL_COUNT) <= 13
+    # Hard invariant: count clamped to the ceiling, never above.
+    assert result.get(Keys.TOOL_CALL_COUNT) == 12
+    # Every one of the 20 tool calls still got exactly one ToolMessage
+    # (provider API contract: one response per tool_call_id).
+    tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_msgs) == 20
+    # The 8 over-budget calls are error messages; the first 12 executed.
+    error_msgs = [m for m in tool_msgs if m.status == "error"]
+    assert len(error_msgs) == 8
+    assert all("budget" in m.content.lower() for m in error_msgs)

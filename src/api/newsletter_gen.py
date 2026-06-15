@@ -1042,9 +1042,9 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     logger.info(f"Using format: {summary_format}")
     logger.info(f"Loaded {len(brief_mention_items)} brief mention items from ranking")
 
-    # Creating output directory for Phase 2
+    # Creating output directory for Phase 2 (offloaded — blocking on event loop)
     phase2_output_dir = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AFTER_SELECTION)
-    os.makedirs(phase2_output_dir, exist_ok=True)
+    await asyncio.to_thread(os.makedirs, phase2_output_dir, exist_ok=True)
 
     # Saving selected discussions to temporary file (required by ContentGenerator)
     selected_discussions_file = os.path.join(phase2_output_dir, OUTPUT_FILENAME_SELECTED_DISCUSSIONS)
@@ -1063,7 +1063,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         # Generating newsletter (JSON, MD, HTML)
         # Following the same pattern as generate_consolidated_newsletter node
         newsletter_output_dir = os.path.join(phase2_output_dir, DIR_NAME_NEWSLETTER)
-        os.makedirs(newsletter_output_dir, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, newsletter_output_dir, exist_ok=True)
 
         result = await content_generator.generate_content(
             operation=ContentGenerationOperations.GENERATE_NEWSLETTER_SUMMARY,
@@ -1104,7 +1104,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         try:
             # Preparing output directories
             link_enrichment_dir = os.path.join(phase2_output_dir, DIR_NAME_LINK_ENRICHMENT)
-            os.makedirs(link_enrichment_dir, exist_ok=True)
+            await asyncio.to_thread(os.makedirs, link_enrichment_dir, exist_ok=True)
 
             expected_enriched_json = os.path.join(link_enrichment_dir, OUTPUT_FILENAME_ENRICHED_JSON)
             expected_enriched_md = os.path.join(link_enrichment_dir, OUTPUT_FILENAME_ENRICHED_MD)

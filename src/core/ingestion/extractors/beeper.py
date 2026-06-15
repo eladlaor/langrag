@@ -145,10 +145,28 @@ def _run_async_extraction_in_process(source_name, kwargs_dict):
         return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
 
 
-# Module-level lock to serialize Beeper session refresh across concurrent API requests.
+# Lock to serialize Beeper session refresh across concurrent API requests.
 # SQLite (used by matrix-nio for the encryption store) does not handle concurrent writers,
 # so parallel orchestrator runs must take turns refreshing the session.
-_session_refresh_lock = asyncio.Lock()
+#
+# The lock is created lazily on first use rather than at import time: an
+# asyncio.Lock() constructed at import binds to whatever event loop happens to be
+# current then (or none), and is later rejected with "bound to a different event
+# loop" when refresh runs under a different loop (tests, workers, re-entry).
+# Creating it inside the running loop avoids that crash.
+_session_refresh_lock: asyncio.Lock | None = None
+
+
+def _get_session_refresh_lock() -> asyncio.Lock:
+    """Return the process-wide session-refresh lock, creating it lazily.
+
+    Must be called from within a running event loop so the lock binds to the
+    loop that will actually await it.
+    """
+    global _session_refresh_lock
+    if _session_refresh_lock is None:
+        _session_refresh_lock = asyncio.Lock()
+    return _session_refresh_lock
 
 
 class RawDataExtractorBeeper(RawDataExtractorInterface):
@@ -338,7 +356,7 @@ class RawDataExtractorBeeper(RawDataExtractorInterface):
         """
         logging.info("Refreshing Matrix session via direct login (acquiring session lock)...")
 
-        async with _session_refresh_lock:
+        async with _get_session_refresh_lock():
             logging.info("Session lock acquired - proceeding with refresh")
             await self._refresh_session_impl()
 

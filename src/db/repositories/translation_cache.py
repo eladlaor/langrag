@@ -18,7 +18,7 @@ from pymongo import UpdateOne
 
 from db.repositories.base import BaseRepository
 from config import get_settings
-from constants import COLLECTION_TRANSLATION_CACHE
+from constants import COLLECTION_TRANSLATION_CACHE, DEFAULT_MAX_QUERY_RESULTS
 from custom_types.field_keys import DbFieldKeys
 
 logger = logging.getLogger(__name__)
@@ -190,8 +190,9 @@ class TranslationCacheRepository(BaseRepository):
                     }
                 },
                 {"$sort": {"count": -1}},
+                {"$limit": DEFAULT_MAX_QUERY_RESULTS},
             ]
-            by_chat_language = await self.collection.aggregate(pipeline).to_list(length=None)
+            by_chat_language = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
 
             now = datetime.now(UTC)
             expired_count = await self.count({DbFieldKeys.EXPIRES_AT: {"$lt": now}})

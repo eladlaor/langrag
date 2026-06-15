@@ -136,6 +136,14 @@ class LLMSettings(BaseSettings):
     # interactive RAG/agent paths. Cap it explicitly.
     request_timeout_seconds: float = Field(default=120.0, description="HTTP request timeout (seconds) applied to the AsyncOpenAI and AsyncAnthropic clients. Bounds how long a hung upstream LLM call can block a request slot.")
 
+    # Upper bound on the estimated input-token size of a generation prompt
+    # (system + examples + serialized discussions). When the assembled prompt is
+    # estimated to exceed this, the builder fails fast with a descriptive error
+    # rather than letting the call hit the provider's context-length limit and
+    # then burn the full retry budget on a guaranteed failure. Generous default;
+    # tune per the smallest model actually used for generation.
+    max_prompt_input_tokens: int = Field(default=180000, description="Fail-fast ceiling on estimated prompt input tokens for newsletter generation, to pre-empt context-length errors and wasted retries.")
+
     model_config = SettingsConfigDict(env_prefix="LLM_")
 
     # =========================================================================

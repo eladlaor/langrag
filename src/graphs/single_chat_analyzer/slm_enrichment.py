@@ -197,6 +197,12 @@ def _enrich_messages_batch(
     return messages
 
 
+def _read_json_file(file_path: str) -> Any:
+    """Read and parse a UTF-8 JSON file. Blocking; callers offload via asyncio.to_thread."""
+    with open(file_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _atomic_json_write(file_path: str, data: Any) -> None:
     """Write JSON data atomically using temp file and rename."""
     path = Path(file_path)
@@ -264,9 +270,9 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
                 _load_enrichment_model, model_name,
             )
 
-            # Load discussions
-            with open(discussions_file, encoding="utf-8") as f:
-                data = json.load(f)
+            # Load discussions — offloaded to a thread because a blocking JSON
+            # read on the event loop would stall every other parallel chat worker.
+            data = await asyncio.to_thread(_read_json_file, discussions_file)
 
             discussions = data.get(DiscussionKeys.DISCUSSIONS, []) if isinstance(data, dict) else data
             if not isinstance(discussions, list):

@@ -73,6 +73,7 @@ from observability.llm.evaluation import score_newsletter_generation
 from api.sse import with_logging
 from api.sse.node_decorators import with_progress
 from custom_types.field_keys import DiscussionKeys, RankingResultKeys, ContentResultKeys, MergeGroupKeys
+from custom_types.exceptions import LLMError
 from custom_types.sse_events import (
     STAGE_CONSOLIDATE_SETUP,
     STAGE_CONSOLIDATE_DISCUSSIONS,
@@ -81,6 +82,16 @@ from custom_types.sse_events import (
     STAGE_CONSOLIDATE_ENRICH,
     STAGE_CONSOLIDATE_TRANSLATE,
 )
+
+# Transient infrastructure failures that justify graceful degradation of the
+# OPTIONAL discussion-merging step (the run can proceed unmerged). Programming
+# errors are deliberately excluded so merger bugs surface loudly instead of
+# hiding behind an always-green "continue unmerged" fallback.
+#   - LLMError: the project's wrapper for embedding/LLM provider failures
+#     (rate-limit, API error, response error) raised by the providers.
+#   - ConnectionError / TimeoutError / asyncio.TimeoutError / OSError: network
+#     and socket-level flakiness reaching the embedding/LLM backend.
+_MERGE_TRANSIENT_ERRORS = (LLMError, ConnectionError, TimeoutError, asyncio.TimeoutError, OSError)
 
 
 # Configure logging
@@ -514,15 +525,22 @@ async def merge_similar_discussions(state: ParallelOrchestratorState, config: Ru
         )
         merge_result = await merger.merge(discussions)
 
-    except Exception as e:
-        # Graceful degradation - if merging fails, continue with unmerged discussions
-        logger.warning(f"Discussion merging failed, continuing with unmerged: {e}")
+    except _MERGE_TRANSIENT_ERRORS as e:
+        # Graceful degradation is reserved for TRANSIENT infrastructure failures
+        # (embedding/LLM API errors, network, timeouts): merging is an enhancement,
+        # so a flaky embedder shouldn't sink the whole consolidation. Continue with
+        # the unmerged discussions.
+        logger.warning(f"Discussion merging hit a transient failure, continuing with unmerged: {e}")
         return {
             OrchestratorKeys.MERGED_DISCUSSIONS_FILE_PATH: aggregated_path,
             OrchestratorKeys.NUM_DISCUSSIONS_BEFORE_MERGE: len(discussions),
             OrchestratorKeys.NUM_DISCUSSIONS_AFTER_MERGE: len(discussions),
             OrchestratorKeys.MERGE_OPERATIONS_COUNT: 0,
         }
+    # NOTE: programming errors (KeyError, TypeError, ValueError, AttributeError,
+    # IndexError, ...) are intentionally NOT caught here. Swallowing them silently
+    # degraded to "unmerged" hid real merger bugs behind an always-green fallback.
+    # They now propagate and fail the run loudly, per the fail-fast mandate.
 
     # Prepare output data
     merged_data = {

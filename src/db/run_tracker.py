@@ -16,7 +16,7 @@ import logging
 import uuid
 
 from constants import NewsletterVersionType, RunStatus
-from custom_types.field_keys import ContentResultKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, RankingResultKeys
+from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, RankingResultKeys
 from datetime import UTC
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,11 @@ class RunTracker:
         try:
             from datetime import datetime
 
-            result = await self._runs_repo.update_one({"run_id": run_id}, {"$set": {"diagnostic_report": diagnostic_report, "diagnostic_report.generated_at": datetime.now(UTC)}})
+            # Stamp generated_at INSIDE the report document. Setting both
+            # "diagnostic_report" and "diagnostic_report.generated_at" in one $set
+            # is a conflicting-path update that MongoDB rejects outright.
+            report_to_store = {**diagnostic_report, DbFieldKeys.GENERATED_AT: datetime.now(UTC)}
+            result = await self._runs_repo.update_one({DbFieldKeys.RUN_ID: run_id}, {"$set": {DbFieldKeys.DIAGNOSTIC_REPORT: report_to_store}})
             logger.info(f"Stored diagnostic report for run: {run_id}")
             return result.modified_count > 0
         except Exception as e:

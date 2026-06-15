@@ -387,6 +387,13 @@ COLLECTION_USER_API_KEYS = "user_api_keys"
 COLLECTION_AGENT_SESSIONS = "agent_sessions"
 COLLECTION_AGENT_MEMORIES = "agent_memories"
 
+# Safety ceiling for queries that would otherwise materialize an unbounded result
+# set into memory (Motor's cursor.to_list(length=None)). Callers that legitimately
+# want everything still pass an explicit limit; this only guards the "no limit"
+# default so a single query can never OOM the process. When the cap is hit the
+# repository logs a warning so the truncation is never silent.
+DEFAULT_MAX_QUERY_RESULTS = 10000
+
 # Schema version stamps written on every persisted document. Per-collection so
 # each document type can evolve its schema independently without forcing
 # lockstep migrations. Read by future lazy-migration code; bump the matching

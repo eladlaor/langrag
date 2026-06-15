@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import logging
 from enum import StrEnum
-from typing import Any, Awaitable, Callable
+from typing import Any
+from collections.abc import Callable
 
 from langchain_core.messages import (
-    AIMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -44,7 +44,6 @@ from langgraph.errors import GraphInterrupt
 
 from agent.auth.acl import CommunityPermissionError
 from observability.metrics import agent_metrics as _agent_metrics
-from agent.auth.user_context import current_user_context
 from agent.memory.extractor import extract_and_persist_memories
 from agent.memory.retriever import load_relevant_memories
 from agent.memory.summarizer import maybe_summarize
@@ -203,10 +202,37 @@ async def build_agent_graph(
 
         tools_by_name = {t.name: t for t in tools}
         tool_messages: list[ToolMessage] = []
-        for call in tool_calls:
+
+        # Hard per-turn cap: enforce the ceiling BEFORE executing, not just after.
+        # The LLM may emit several tool calls in one step; without this, a batch
+        # could blow past max_tool_calls_per_turn by up to (batch_size - 1) before
+        # route_after_budget ever runs. We execute only as many calls as the
+        # remaining budget allows and short-circuit the rest as error
+        # ToolMessages. Every tool_call_id still gets exactly one ToolMessage,
+        # which the provider API requires.
+        already_used = state.get(Keys.TOOL_CALL_COUNT, 0)
+        budget_remaining = max(0, settings.max_tool_calls_per_turn - already_used)
+
+        for index, call in enumerate(tool_calls):
             name = call.get("name") if isinstance(call, dict) else getattr(call, "name", "")
             args = call.get("args") if isinstance(call, dict) else getattr(call, "args", {})
             call_id = call.get("id") if isinstance(call, dict) else getattr(call, "id", "")
+
+            # Over-budget: do not execute. Emit an error ToolMessage so the LLM
+            # learns the call was refused and stops requesting more.
+            if index >= budget_remaining:
+                _agent_metrics.record_tool_call(name, "error")
+                _agent_metrics.record_budget_halt("max_tool_calls_per_turn")
+                tool_messages.append(
+                    ToolMessage(
+                        content=(f"Tool call budget exhausted: the per-turn limit of " f"{settings.max_tool_calls_per_turn} tool calls has been reached. " f"This call was not executed."),
+                        tool_call_id=call_id,
+                        status="error",
+                        name=name,
+                    )
+                )
+                continue
+
             tool = tools_by_name.get(name)
             if tool is None:
                 tool_messages.append(
@@ -276,9 +302,13 @@ async def build_agent_graph(
                 )
             )
 
+        # Count only calls that passed the budget gate (i.e. were actually
+        # attempted). Over-budget short-circuited calls do not consume budget —
+        # they were never executed — so the count can never exceed the ceiling.
+        executed_count = min(len(tool_calls), budget_remaining)
         return {
             Keys.MESSAGES: tool_messages,
-            Keys.TOOL_CALL_COUNT: state.get(Keys.TOOL_CALL_COUNT, 0) + len(tool_calls),
+            Keys.TOOL_CALL_COUNT: already_used + executed_count,
         }
 
     async def check_budget_node(state: AgentState, config: RunnableConfig | None = None) -> dict:

@@ -14,7 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from db.repositories.base import BaseRepository
 from config import get_settings
 from custom_types.field_keys import DbFieldKeys
-from constants import COLLECTION_EXTRACTION_CACHE
+from constants import COLLECTION_EXTRACTION_CACHE, DEFAULT_MAX_QUERY_RESULTS
 
 logger = logging.getLogger(__name__)
 
@@ -166,9 +166,9 @@ class ExtractionCacheRepository(BaseRepository):
             total_entries = await self.count()
 
             # Count by chat name
-            pipeline = [{"$group": {"_id": "$chat_name", "count": {"$sum": 1}, "total_messages": {"$sum": "$message_count"}}}, {"$sort": {"count": -1}}]
+            pipeline = [{"$group": {"_id": "$chat_name", "count": {"$sum": 1}, "total_messages": {"$sum": "$message_count"}}}, {"$sort": {"count": -1}}, {"$limit": DEFAULT_MAX_QUERY_RESULTS}]
 
-            by_chat = await self.collection.aggregate(pipeline).to_list(length=None)
+            by_chat = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
 
             # Count expired entries
             now = datetime.now(UTC)

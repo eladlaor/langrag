@@ -7,17 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.16.2] - 2026-06-15
+
+### Added
+- **Prompt token-budget guard:** new `src/utils/llm/token_budget.py` (tiktoken-based `estimate_tokens`/`estimate_messages_tokens` with a char-length short-circuit fallback, plus `enforce_prompt_token_budget` raising `LLMContextLengthError`) and a `llm.max_prompt_input_tokens` setting (default 180000). The LangTalks format now fails fast before an oversized discussion set hits the provider's context-length limit and burns the entire retry budget on an unwinnable request.
+
+### Fixed
+- **Diagnostic-report run update used conflicting paths:** `run_tracker` now stamps `generated_at` inside the report document and writes it with a single `$set`, removing the conflicting top-level/nested path update that could fail the Mongo write. Adds `DIAGNOSTIC_REPORT`/`GENERATED_AT` field-key constants instead of inline strings.
+- **Greedy JSON extraction from LLM output:** the JSON parser now decodes the first *balanced* value via `JSONDecoder.raw_decode` over candidate brace/bracket positions and widened the code-fence regex, instead of a greedy span match that could swallow trailing prose or concatenated objects.
+- **Module-level `asyncio.Lock()` bound to import-time loop:** the Beeper session-refresh lock is now created lazily inside the running event loop, avoiding cross-loop binding.
+- **Unbounded `to_list()` materialization:** repository `find_many` now applies a `DEFAULT_MAX_QUERY_RESULTS` ceiling (with a truncation warning) and the stats aggregations add an explicit `$limit` + bounded `to_list`, preventing an unbounded cursor from loading an entire collection into memory.
+- **Per-turn tool-call budget overshoot:** the agent tools node now enforces `max_tool_calls_per_turn` *before* executing a batch, short-circuiting over-budget calls to error `ToolMessage`s so `tool_call_count` can never exceed the ceiling (previously an N-call batch could overshoot by up to N-1).
+- **Blocking I/O on the event loop:** offloaded the genuinely-blocking discussions-file read (`slm_enrichment`), newsletter file writes (`newsletters` repo), and `os.makedirs` calls (`newsletter_gen`) via `asyncio.to_thread`.
+- **Over-broad fallback in discussion merger:** `merge_similar_discussions` now only falls back on transient errors (LLM/connection/timeout/OS) and lets programming errors propagate, restoring fail-fast behavior.
+- **Silent `except: pass` swallows:** the two bare swallows in the Anthropic provider and memory extractor now log at debug level instead of discarding the error silently.
+
 ## [1.16.1] - 2026-06-11
 
 ### Added
-- **Semantic-entropy hallucination detection (shadow mode), via the `taste-llm-evals` library:** a new runtime evaluation path (`src/rag/evaluation/runtime/se_shadow.py`) that samples each RAG answer N times and scores meaning-disagreement across the samples (semantic entropy, NLI-clustered) to catch *confident* hallucinations the LLM-as-judge and token-logprob signals miss. SE-only (langrag's generation exposes no logprobs, so Predictive Entropy is unavailable); the detector is a lazy-imported optional extra (`taste-llm-evals`, pulls torch/transformers) mirroring the DeBERTa enrichment SLM. Gated behind `RUNTIME_EVAL_SE_SHADOW_ENABLED` (default off); runs alongside the existing judge, dual-writes scores to Langfuse/Mongo (keys in `SeShadowKey`), never alters the answer, fail-soft. Escalation-only judging, threshold calibration are deferred.
+- **Semantic-entropy hallucination detection (shadow mode), via the `taste-llm-evals` library:** a new runtime evaluation path (`src/rag/evaluation/runtime/se_shadow.py`) that samples each RAG answer N times and scores meaning-disagreement across the samples (semantic entropy, NLI-clustered) to catch *confident* hallucinations the LLM-as-judge and token-logprob signals miss. SE-only (langrag's generation exposes no logprobs, so Predictive Entropy is unavailable); the detector is a lazy-imported optional extra (`taste-llm-evals`, pulls torch/transformers) mirroring the DeBERTa enrichment SLM. Gated behind `RUNTIME_EVAL_SE_SHADOW_ENABLED` (default off); runs alongside the existing judge, dual-writes scores to Langfuse/Mongo (keys in `SeShadowKey`), never alters the answer, fail-soft. Escalation-only judging, threshold calibration are deferred (see `knowledge/plans/TASTE_INTEGRATION.md`).
 
 ### Fixed
 - **REST chat could answer ungrounded on empty retrieval:** the "no content found, refuse" short-circuit existed only in the MCP `rag_query` tool, so `POST /api/rag/chat` and `POST /api/rag/chat/stream` fed an empty context straight into the LLM and an out-of-range or zero-hit query got a fabricated answer. Both REST handlers now short-circuit to the canonical refusal when retrieval yields empty context: HTTP 200, `citations == []`, the refusal persisted to session history like a normal answer, and the streaming handler emits it as a single token event without calling the LLM.
 
 ### Changed
 - **Refusal text unified into a single source of truth:** `RAG_REFUSAL_OUT_OF_RANGE` and `RAG_REFUSAL_NO_CONTENT` now live in `src/constants.py` and are consumed by a shared `refusal_for_empty_context` helper (used by the MCP tool and both REST handlers) and by the eval `RefusalComplianceMetric` pattern set. Removes the two previously-independent hardcoded copies that could drift; a coupling test locks the metric to the constants.
-- **RAG eval gate now runs against a seeded corpus:** added a deterministic, committed fixture corpus (`tests/fixtures/rag_eval_corpus/`: newsletters + podcast transcripts spanning Jan–Apr 2026) and an idempotent seeding step that ingests it through the real pipeline. The `rag-eval` CI workflow seeds before scoring so retrieval has content, and reads `MONGODB_URI` (the variable the app actually consumes). The corpus deliberately omits the `must_refuse` windows (2030, 1990, 1995).
+- **RAG eval gate now runs against a seeded corpus:** added a deterministic, committed fixture corpus (`tests/fixtures/rag_eval_corpus/`: newsletters + podcast transcripts spanning Jan–Apr 2026) and an idempotent seeding entrypoint (`scripts/seed_rag_eval_corpus.py`) that ingests it through the real pipeline. The `rag-eval` CI workflow seeds before scoring so retrieval has content, and reads `MONGODB_URI` (the variable the app actually consumes). The corpus deliberately omits the `must_refuse` windows (2030, 1990, 1995).
 
 ## [1.16.0] - 2026-06-06
 
@@ -262,7 +277,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.1...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.2...HEAD
+[1.16.2]: https://github.com/eladlaor/langrag/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/eladlaor/langrag/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/eladlaor/langrag/compare/v1.15.1...v1.16.0
 [1.15.1]: https://github.com/eladlaor/langrag/compare/v1.15.0...v1.15.1

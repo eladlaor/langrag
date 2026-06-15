@@ -424,6 +424,8 @@ class DbFieldKeys:
     LAST_RUN_ERROR = "last_run_error"
     NEXT_RUN = "next_run"
     RUN_COUNT = "run_count"
+    DIAGNOSTIC_REPORT = "diagnostic_report"
+    GENERATED_AT = "generated_at"
 
 
 class UserKeys:

@@ -9,6 +9,8 @@ from typing import Any, TypeVar, Generic
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pydantic import BaseModel
 
+from constants import DEFAULT_MAX_QUERY_RESULTS
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
@@ -115,7 +117,10 @@ class BaseRepository(Generic[T]):
         Args:
             query: MongoDB query filter
             sort: List of (field, direction) tuples
-            limit: Maximum documents to return (0 = no limit)
+            limit: Maximum documents to return. 0 means "no explicit limit" — a
+                DEFAULT_MAX_QUERY_RESULTS safety ceiling is applied so an
+                unbounded query can never materialize an entire collection into
+                memory. Pass a positive value for a precise cap.
             skip: Number of documents to skip
             projection: Fields to include/exclude (e.g., {"field": 1, "_id": 0})
 
@@ -129,10 +134,25 @@ class BaseRepository(Generic[T]):
                 cursor = cursor.sort(sort)
             if skip:
                 cursor = cursor.skip(skip)
-            if limit:
-                cursor = cursor.limit(limit)
 
-            return await cursor.to_list(length=None)
+            # Apply an explicit caller limit, or fall back to the safety ceiling
+            # so to_list() is never unbounded.
+            effective_limit = limit if limit else DEFAULT_MAX_QUERY_RESULTS
+            cursor = cursor.limit(effective_limit)
+
+            results = await cursor.to_list(length=effective_limit)
+
+            # Surface (never silently hide) the case where the safety ceiling
+            # clipped a "no explicit limit" query — it means a caller needs to
+            # paginate or pass a real limit.
+            if not limit and len(results) >= DEFAULT_MAX_QUERY_RESULTS:
+                logger.warning(
+                    f"find_many on {self.collection_name} hit the DEFAULT_MAX_QUERY_RESULTS "
+                    f"ceiling ({DEFAULT_MAX_QUERY_RESULTS}); results truncated. "
+                    f"Pass an explicit limit or paginate. query_keys={list(query.keys())}"
+                )
+
+            return results
         except Exception as e:
             logger.error(f"Failed to find documents in {self.collection_name}: {e}")
             raise

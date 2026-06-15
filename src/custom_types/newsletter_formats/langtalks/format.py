@@ -12,8 +12,10 @@ from pydantic import BaseModel
 
 from custom_types.newsletter_formats.base import NewsletterFormatBase
 from custom_types.newsletter_formats.image_context import build_image_context_text
-from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys, LlmInputKeys
+from custom_types.field_keys import NewsletterStructureKeys, LlmInputKeys
 from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, HEBREW_LANGUAGE_CODES, MessageRole, SummaryFormats, LANGTALKS_DISPLAY_NAME, LANGTALKS_CHAT_NAME_DEFAULT
+from config import get_settings
+from utils.llm.token_budget import enforce_prompt_token_budget
 from .schema import LlmResponseLangTalksNewsletterContent
 from .prompt import (
     LANGTALKS_NEWSLETTER_PROMPT,
@@ -95,6 +97,14 @@ class LangTalksFormat(NewsletterFormatBase):
         """
         featured_topics_exclusion = self._build_featured_topics_exclusion(featured_discussions)
 
+        # NOTE on safety: user-derived content (discussion titles, brief-mention
+        # JSON, etc.) is passed ONLY as named .format() *argument values* — never
+        # spliced into the template string before formatting. .format() does not
+        # re-interpret braces that appear inside argument values, so a chat
+        # message containing literal "{...}" cannot break or inject into the
+        # prompt here. Do NOT refactor this to pre-build a string and then call
+        # .format() on it, or to f-string the user content into the template —
+        # either change would reintroduce a brace-injection / KeyError crash.
         if brief_mention_items:
             worth_mentioning_guidance = WORTH_MENTIONING_WITH_CANDIDATES.format(
                 num_candidates=len(brief_mention_items),
@@ -157,6 +167,13 @@ class LangTalksFormat(NewsletterFormatBase):
                 "content": ("According to the requirements and inspired by the examples, " "generate the LangTalks newsletter summary for:\n\n" f"{json.dumps(discussions, indent=2, ensure_ascii=False)}" f"{image_context}" f"{language_instruction}"),
             }
         )
+
+        # Fail fast if the assembled prompt is too large for the model's context
+        # window. Without this, an oversized discussion set silently hits the
+        # provider's context-length limit at call time and then burns the entire
+        # retry budget on a request that can never succeed.
+        max_input_tokens = get_settings().llm.max_prompt_input_tokens
+        enforce_prompt_token_budget(messages, max_input_tokens, context=str(SummaryFormats.LANGTALKS_FORMAT))
 
         return messages
 
