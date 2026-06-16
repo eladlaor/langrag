@@ -63,7 +63,7 @@ class LLMJudge:
 
         try:
             message = await asyncio.wait_for(self._client.ainvoke(prompt), timeout=self._timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Judge timeout for metric={metric}, timeout={self._timeout}s")
             return JudgeResult(score=None, reasoning=None, error="timeout")
         except Exception as exc:

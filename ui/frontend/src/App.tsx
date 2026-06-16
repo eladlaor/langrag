@@ -13,6 +13,7 @@ import { RunsBrowser } from "./components/RunsBrowser";
 import { SchedulesPage } from "./components/SchedulesPage";
 import { RAGChatPage } from "./components/rag/RAGChatPage";
 import { UsersAdmin } from "./components/admin/UsersAdmin";
+import { AccessRequestsAdmin } from "./components/admin/AccessRequestsAdmin";
 import { ExtractedImagesGallery } from "./components/admin/ExtractedImagesGallery";
 import { PeriodicNewsletterResponse } from "./types";
 import "./App.css";
@@ -90,6 +91,12 @@ function App() {
             {isAdmin && (
               <Tab eventKey="users" title="Users">
                 <UsersAdmin />
+              </Tab>
+            )}
+
+            {isAdmin && (
+              <Tab eventKey="access-requests" title="Access Requests">
+                {activeTab === "access-requests" && <AccessRequestsAdmin />}
               </Tab>
             )}
           </Tabs>

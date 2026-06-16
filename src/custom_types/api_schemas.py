@@ -10,7 +10,7 @@ API contract compatibility.
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from constants import OutputAction, BatchJobStatus
+from constants import OutputAction, BatchJobStatus, LinkEnrichmentStatus
 from custom_types.db_schemas import UserRole
 
 
@@ -83,6 +83,53 @@ class SetDisabledRequest(BaseModel):
     """Admin request to enable or disable a user account."""
 
     disabled: bool = Field(..., description="True to disable the account, False to re-enable it.")
+
+
+# ============= Self-Signup Models =============
+
+
+class SignupRequest(BaseModel):
+    """Request body for email+password self-signup."""
+
+    email: EmailStr = Field(..., description="Email to register (must be on the allowlist).")
+    password: str = Field(..., min_length=1, description="Password for the new account.")
+
+
+class AuthConfigResponse(BaseModel):
+    """Public booleans the SPA uses to decide which auth options to render."""
+
+    google_enabled: bool = Field(..., description="True when 'Sign in with Google' is available.")
+    signup_enabled: bool = Field(..., description="True when self-serve signup is available.")
+
+
+class AccessRequestCreate(BaseModel):
+    """Public contact-form submission asking for access (not on the allowlist)."""
+
+    email: EmailStr = Field(..., description="Email of the requester.")
+    name: str | None = Field(default=None, description="Optional display name.")
+    message: str | None = Field(default=None, description="Optional free-text message.")
+
+
+class AccessRequestAck(BaseModel):
+    """Generic acknowledgement returned for every access-request submission.
+
+    Identical for new and duplicate submissions (anti-enumeration): the client
+    cannot tell whether the email was already known.
+    """
+
+    received: bool = Field(default=True, description="Always true; the submission was accepted.")
+    message: str = Field(..., description="Generic acknowledgement message.")
+
+
+class AccessRequestView(BaseModel):
+    """Admin-facing projection of an access-request document."""
+
+    request_id: str = Field(..., description="Access-request identifier.")
+    email: str = Field(..., description="Requester email (normalized).")
+    name: str | None = Field(default=None, description="Optional display name.")
+    message: str | None = Field(default=None, description="Optional free-text message.")
+    requested_provider: str | None = Field(default=None, description="Provider the requester attempted, if known.")
+    status: str = Field(..., description="Review status (pending/approved/rejected).")
 
 
 # ============= Periodic Newsletter Models =============
@@ -368,6 +415,12 @@ class Phase2GenerationResponse(BaseModel):
 
     # Link metadata
     links_metadata_path: str | None = Field(None, description="Path to aggregated links metadata JSON")
+
+    # Link-enrichment outcome. The base newsletter is always returned when generation succeeds;
+    # these fields report the optional enrichment step's outcome honestly instead of masking a
+    # failure as success.
+    enrichment_status: LinkEnrichmentStatus = Field(LinkEnrichmentStatus.SUCCEEDED, description="Outcome of the optional link-enrichment step")
+    enrichment_error: str | None = Field(None, description="Error detail when enrichment_status is 'failed'")
 
 
 # ============= RAG Conversation Models =============

@@ -79,6 +79,7 @@ class SingleChatStateKeys:
     PREPROCESSED_FILE_PATH = "preprocessed_file_path"
     TRANSLATED_FILE_PATH = "translated_file_path"
     SEPARATE_DISCUSSIONS_FILE_PATH = "separate_discussions_file_path"
+    DISCUSSION_COUNT = "discussion_count"
     DISCUSSIONS_RANKING_FILE_PATH = "discussions_ranking_file_path"
     NEWSLETTER_JSON_PATH = "newsletter_json_path"
     NEWSLETTER_MD_PATH = "newsletter_md_path"

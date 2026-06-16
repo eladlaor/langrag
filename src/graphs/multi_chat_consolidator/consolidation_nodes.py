@@ -346,16 +346,24 @@ async def consolidate_discussions(state: ParallelOrchestratorState, config: Runn
             for idx, discussion in enumerate(chat_discussions):
                 # Preserve original ID
                 original_id = discussion.get(DiscussionKeys.ID, f"discussion_{idx+1}")
-                discussion[DiscussionKeys.ORIGINAL_ID] = original_id
 
-                # Create globally unique ID with chat prefix
-                discussion[DiscussionKeys.ID] = f"{chat_prefix}_{original_id}"
-
-                # Add source metadata
-                discussion[DiscussionKeys.SOURCE_CHAT] = chat_name
-                discussion[DiscussionKeys.SOURCE_DATE_RANGE] = f"{chat_result.get(SingleChatKeys.START_DATE)} to {chat_result.get(SingleChatKeys.END_DATE)}"
-                all_discussions.append(discussion)
-                total_messages += len(discussion.get(DiscussionKeys.MESSAGES, []))
+                # Build the consolidated view as a NEW dict rather than mutating the
+                # loaded object. Rewriting id/original_id/source_chat in place is
+                # non-idempotent: if these per-chat lists are ever cached or reused
+                # (the pipeline is moving toward MongoDB-backed inter-node passing),
+                # a second consolidation pass would re-prefix already-prefixed IDs
+                # (chat_chat_discussion_1) and corrupt cross-chat attribution.
+                consolidated_discussion = {
+                    **discussion,
+                    DiscussionKeys.ORIGINAL_ID: original_id,
+                    # Create globally unique ID with chat prefix
+                    DiscussionKeys.ID: f"{chat_prefix}_{original_id}",
+                    # Add source metadata
+                    DiscussionKeys.SOURCE_CHAT: chat_name,
+                    DiscussionKeys.SOURCE_DATE_RANGE: f"{chat_result.get(SingleChatKeys.START_DATE)} to {chat_result.get(SingleChatKeys.END_DATE)}",
+                }
+                all_discussions.append(consolidated_discussion)
+                total_messages += len(consolidated_discussion.get(DiscussionKeys.MESSAGES, []))
 
             source_chats.append(chat_name)
             logger.info(f"Aggregated {len(chat_discussions)} discussions from chat: {chat_name}")

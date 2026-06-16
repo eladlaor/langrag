@@ -217,6 +217,7 @@ class RetrievalPipeline:
             citation = {
                 "index": i,
                 "chunk_id": chunk.get(Keys.CHUNK_ID, ""),
+                "source_id": chunk.get(Keys.SOURCE_ID, ""),
                 "source_type": chunk.get(Keys.CONTENT_SOURCE, ""),
                 "source_title": source_title,
                 "source_date_start": _to_iso(date_start),

@@ -109,6 +109,7 @@ class SingleChatState(TypedDict):
 
     # === Processing Metadata ===
     message_count: int | None  # Number of messages processed
+    discussion_count: int | None  # Number of separated discussions (set by separate_discussions node)
     reused_existing: bool | None  # Whether existing files were reused (not regenerated)
     slm_filter_stats: dict | None  # SLM pre-filter statistics (from slm_prefilter node)
 
@@ -236,6 +237,7 @@ def create_single_chat_state(*, chat_name: str, data_source_name: str, start_dat
         "image_discussion_map": None,
         # === Processing Metadata ===
         "message_count": None,
+        "discussion_count": None,
         "reused_existing": None,
         "slm_filter_stats": None,
         # === Worker Isolation ===

@@ -75,6 +75,7 @@ from constants import (
     DataSources,
     ContentGenerationOperations,
     OutputAction,
+    LinkEnrichmentStatus,
     UNIVERSAL_OUTPUT_ACTIONS,
     COMMUNITY_ALLOWED_OUTPUT_ACTIONS,
     ENV_DEFAULT_EMAIL_RECIPIENT,
@@ -1176,11 +1177,12 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
                     enriched_html_path=enriched_html_path,
                     # Links metadata
                     links_metadata_path=links_metadata_path,
+                    enrichment_status=LinkEnrichmentStatus.SUCCEEDED,
                 )
             else:
                 logger.warning("Link enrichment did not produce enriched files, returning base newsletter")
                 return Phase2GenerationResponse(
-                    message="Newsletter generated successfully (link enrichment skipped)",
+                    message="Newsletter generated (link enrichment skipped: no enriched files produced)",
                     newsletter_path=newsletter_html_path,  # Use base HTML version
                     num_discussions=len(selected_discussions),
                     content_length=content_length,
@@ -1189,22 +1191,27 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
                     base_json_path=newsletter_json_path,
                     base_md_path=newsletter_md_path,
                     base_html_path=newsletter_html_path,
+                    enrichment_status=LinkEnrichmentStatus.SKIPPED,
                 )
 
         except Exception as enrichment_error:
             logger.error(f"Link enrichment failed: {enrichment_error}", exc_info=True)
-            # Don't fail the whole endpoint, return base newsletter
-            logger.warning("Returning base newsletter without link enrichment")
+            # The base newsletter generated successfully, so we still return it rather than 500.
+            # But we must NOT report this as a clean success: surface the enrichment failure
+            # explicitly via enrichment_status/enrichment_error so callers can detect it.
+            logger.warning("Returning base newsletter; link enrichment failed")
             return Phase2GenerationResponse(
-                message="Newsletter generated successfully (link enrichment failed)",
+                message="Newsletter generated, but link enrichment failed (base newsletter returned)",
                 newsletter_path=newsletter_html_path,  # Use base HTML version
                 num_discussions=len(selected_discussions),
                 content_length=content_length,
-                validation_passed=True,
+                validation_passed=True,  # Base-newsletter format validation still passed
                 # Base paths
                 base_json_path=newsletter_json_path,
                 base_md_path=newsletter_md_path,
                 base_html_path=newsletter_html_path,
+                enrichment_status=LinkEnrichmentStatus.FAILED,
+                enrichment_error=str(enrichment_error),
             )
 
     except Exception as e:

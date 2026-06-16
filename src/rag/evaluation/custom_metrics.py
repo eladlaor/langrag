@@ -16,6 +16,17 @@ Three metrics specific to the langrag.ai date-aware contract:
     the answer must contain a refusal phrase (no in-range content found, etc.)
     rather than fabricating an answer. Score is 1.0 on a clean refusal else 0.0.
 
+  - DateGroundingMetric: every citation's stored source_date_start must match the
+    TRUE source date, derived independently of the chunk's own stored value. This
+    is the distinction from DateFilterHonoredMetric — that metric only checks the
+    stored tag lands inside the requested window, trusting the tag; this one checks
+    the tag is itself correct against ground truth, catching ingestion-time date
+    corruption (timezone drift, wrong-source cache keys) that the filter check
+    cannot see. Ground truth comes from additional_metadata["expected_source_dates"],
+    a {citation-key -> ISO date} map authored in the golden set (offline CI bar);
+    the live integration variant derives it from the source-of-truth at eval time
+    (see rag.evaluation.date_grounding.resolve_true_source_date).
+
 These metrics are deepeval-compatible (BaseMetric subclasses) so they slot into
 the CI eval gate (src/rag/evaluation/gate.py) alongside the LLM-judge metrics.
 """
@@ -24,10 +35,14 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
-from typing import Iterable
+from datetime import UTC, datetime, timedelta
+from collections.abc import Iterable
 
-from constants import RAG_REFUSAL_NO_CONTENT, RAG_REFUSAL_OUT_OF_RANGE
+from constants import (
+    RAG_DATE_GROUNDING_TOLERANCE_DAYS,
+    RAG_REFUSAL_NO_CONTENT,
+    RAG_REFUSAL_OUT_OF_RANGE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +79,14 @@ def _to_datetime(value) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _coerce_utc(value: datetime | None) -> datetime | None:
+    """Normalise to tz-aware UTC so naive (golden-set) and aware (ingested) dates
+    can be subtracted without a TypeError. Naive values are assumed UTC."""
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 def _split_factual_sentences(answer: str) -> list[str]:
@@ -202,5 +225,87 @@ class RefusalComplianceMetric(_AsyncCompatibleMetric):
         refused = any(p in answer for p in _REFUSAL_PATTERNS)
         self.score = 1.0 if refused else 0.0
         self.reason = "Refused as required." if refused else "Expected refusal, got an answer."
+        self.success = self.score >= self.threshold
+        return self.score
+
+
+def _citation_key(cite: dict) -> str | None:
+    """The stable key used to look a citation up in the expected_source_dates map.
+
+    source_id uniquely identifies the source-of-truth (newsletter doc id / podcast
+    file). source_title is the human-readable fallback the golden set is authored
+    against when source_id isn't surfaced. Prefer the precise key, fall back to the
+    title so an older golden set keyed by title still resolves.
+    """
+    return cite.get("source_id") or cite.get("source_title")
+
+
+class DateGroundingMetric(_AsyncCompatibleMetric):
+    """Every citation's stored date must match the TRUE source date.
+
+    Unlike DateFilterHonoredMetric, which trusts the stored tag and only checks it
+    falls inside the requested window, this metric checks the tag is *correct*. The
+    ground-truth map (additional_metadata['expected_source_dates'], keyed by
+    source_id or source_title -> ISO date) is derived independently of the chunk's
+    stored value — from the golden set offline, or from the source-of-truth live —
+    so a chunk stamped with the wrong date fails here even though it would sail
+    through every other date metric.
+
+    Score = fraction of citations whose source_date_start is within
+    RAG_DATE_GROUNDING_TOLERANCE_DAYS of the true date. Citations with no ground
+    truth available are skipped (not penalised) — absence of a known-true date is a
+    golden-set gap, not a grounding failure. If NO citation has ground truth the
+    metric passes vacuously and says so, so a missing map never masquerades as a
+    green grounding score.
+    """
+
+    def __init__(self, threshold: float = 1.0, tolerance_days: int = RAG_DATE_GROUNDING_TOLERANCE_DAYS) -> None:
+        super().__init__(threshold=threshold)
+        self._tolerance = timedelta(days=tolerance_days)
+
+    def measure(self, test_case: LLMTestCase, *args, **kwargs) -> float:  # type: ignore[override]
+        meta = getattr(test_case, "additional_metadata", None) or {}
+        expected: dict = meta.get("expected_source_dates") or {}
+        citations: Iterable[dict] = meta.get("citations") or []
+
+        if not expected:
+            self.score = 1.0
+            self.reason = "No ground-truth source dates supplied; grounding not evaluated (vacuous pass)."
+            self.success = True
+            return self.score
+
+        checked = 0
+        grounded = 0
+        mismatches: list[str] = []
+        for cite in citations:
+            key = _citation_key(cite)
+            true_raw = expected.get(key) if key is not None else None
+            true_date = _coerce_utc(_to_datetime(true_raw))
+            if true_date is None:
+                continue
+            # Ingestion stamps source_date_start as tz-aware UTC; golden-set ground
+            # truth is authored naive ("2025-03-01"). Coerce both to UTC before
+            # subtracting — a naive/aware mix would raise TypeError and crash the gate.
+            stored = _coerce_utc(_to_datetime(cite.get("source_date_start")))
+            checked += 1
+            if stored is not None and abs(stored - true_date) <= self._tolerance:
+                grounded += 1
+            else:
+                mismatches.append(
+                    f"{key}: stored={cite.get('source_date_start')} true={true_raw}"
+                )
+
+        if checked == 0:
+            self.score = 1.0
+            self.reason = "No citation matched a ground-truth entry; grounding not evaluated (vacuous pass)."
+            self.success = True
+            return self.score
+
+        self.score = grounded / checked
+        self.reason = (
+            f"{grounded}/{checked} citations correctly grounded to their true source date "
+            f"(±{self._tolerance.days}d)."
+            + (f" Mismatches: {mismatches[:3]}" if mismatches else "")
+        )
         self.success = self.score >= self.threshold
         return self.score

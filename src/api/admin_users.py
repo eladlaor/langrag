@@ -18,22 +18,25 @@ from constants import (
     HTTP_STATUS_BAD_REQUEST,
     HTTP_STATUS_CONFLICT,
     HTTP_STATUS_NOT_FOUND,
+    ROUTE_AUTH_ACCESS_REQUESTS,
     ROUTE_AUTH_USER_BY_ID,
     ROUTE_AUTH_USER_DISABLE,
     ROUTE_AUTH_USER_PASSWORD,
     ROUTE_AUTH_USERS,
 )
 from custom_types.api_schemas import (
+    AccessRequestView,
     AdminUserView,
     CreateUserRequest,
     CurrentUser,
     ResetPasswordRequest,
     SetDisabledRequest,
 )
-from custom_types.db_schemas import UserRole
-from custom_types.field_keys import UserKeys
+from custom_types.db_schemas import AccessRequestStatus, UserRole
+from custom_types.field_keys import AccessRequestKeys, UserKeys
 from api.auth import require_admin
 from db.connection import get_database
+from db.repositories.access_requests import AccessRequestsRepository
 from db.repositories.users import UsersRepository
 from observability.app import get_logger
 from rag.auth.passwords import hash_password
@@ -55,6 +58,18 @@ def _to_admin_view(user: dict) -> AdminUserView:
         role=UserRole(user[UserKeys.ROLE]),
         communities=list(user.get(UserKeys.COMMUNITIES, [])),
         disabled=bool(user.get(UserKeys.DISABLED, False)),
+    )
+
+
+def _to_access_request_view(doc: dict) -> AccessRequestView:
+    """Project a raw access-request document to the admin view."""
+    return AccessRequestView(
+        request_id=doc[AccessRequestKeys.REQUEST_ID],
+        email=doc[AccessRequestKeys.EMAIL],
+        name=doc.get(AccessRequestKeys.NAME),
+        message=doc.get(AccessRequestKeys.MESSAGE),
+        requested_provider=doc.get(AccessRequestKeys.REQUESTED_PROVIDER),
+        status=doc[AccessRequestKeys.STATUS],
     )
 
 
@@ -90,6 +105,22 @@ async def create_user(request: CreateUserRequest, _: CurrentUser = Depends(requi
         logger.error(
             "create_user failed",
             extra={"event": "admin_create_error", "function": "create_user", "email": email, "error": str(e)},
+        )
+        raise
+
+
+@router.get(ROUTE_AUTH_ACCESS_REQUESTS, response_model=list[AccessRequestView])
+async def list_access_requests(status: str | None = None, _: CurrentUser = Depends(require_admin)) -> list[AccessRequestView]:
+    """List self-signup access requests newest-first, optionally by status."""
+    try:
+        repo = AccessRequestsRepository(await get_database())
+        status_filter = AccessRequestStatus(status) if status is not None else None
+        docs = await repo.list_requests(status=status_filter)
+        return [_to_access_request_view(d) for d in docs]
+    except Exception as e:
+        logger.error(
+            "list_access_requests failed",
+            extra={"event": "admin_list_access_requests_error", "function": "list_access_requests", "error": str(e)},
         )
         raise
 

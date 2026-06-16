@@ -255,6 +255,21 @@ export const NewsletterDiscussionSelector: React.FC<NewsletterDiscussionSelector
                 <Badge bg="danger">Failed</Badge>
               )}
             </p>
+            {generationResult.enrichment_status === "failed" && (
+              <p className="mb-0 mt-2">
+                <Badge bg="warning" text="dark">Link enrichment failed</Badge>{" "}
+                Showing the base newsletter without links.
+                {generationResult.enrichment_error && (
+                  <> <code>{generationResult.enrichment_error}</code></>
+                )}
+              </p>
+            )}
+            {generationResult.enrichment_status === "skipped" && (
+              <p className="mb-0 mt-2">
+                <Badge bg="secondary">Link enrichment skipped</Badge>{" "}
+                No enriched files were produced; showing the base newsletter.
+              </p>
+            )}
           </Alert>
 
           {/* HTML Preview Section */}

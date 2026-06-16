@@ -33,7 +33,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Importing routers after logging setup
-from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media
+from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media, google_oauth
 from api.auth import require_session
 from api.observability import metrics_router, runs_router
 from constants import (
@@ -74,23 +74,49 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(f"Required API keys missing from environment: {_missing_keys}. Set them in .env and ensure docker-compose passes them through before starting the service.")
 
     # Fail-fast on a misconfigured login gate so production never boots an open
-    # gate. When enabled, both the shared password and the Fernet session key
-    # MUST be present (mirrors the RAG_API_KEY_PEPPER check in hash_api_key).
+    # gate. When enabled, the Fernet session key MUST be present (it is the only
+    # secret the per-user cookie login path needs; the old shared
+    # LANGRAG_LOGIN_PASSWORD is deprecated and no longer required at startup).
     from config import get_settings as _get_settings
-    from constants import ENV_LOGIN_PASSWORD, ENV_LOGIN_SESSION_KEY
+    from constants import ENV_LOGIN_SESSION_KEY
 
     _login_settings = _get_settings().login
-    if _login_settings.enabled:
-        _login_missing = []
-        if not _login_settings.password:
-            _login_missing.append(ENV_LOGIN_PASSWORD)
-        if not _login_settings.session_key:
-            _login_missing.append(ENV_LOGIN_SESSION_KEY)
-        if _login_missing:
+    if _login_settings.enabled and not _login_settings.session_key:
+        raise RuntimeError(
+            f"Login gate is enabled but {ENV_LOGIN_SESSION_KEY} is missing. "
+            f"Set it in the environment (or set LANGRAG_LOGIN_ENABLED=false to disable the gate) before starting the service."
+        )
+
+    # Fail-fast on a misconfigured Google OAuth surface. When Google sign-in is
+    # enabled, the OAuth client id/secret/redirect plus the secret signing the
+    # transient Authlib session MUST all be present (mirrors the login gate
+    # check above). Register the Authlib client once at startup.
+    from constants import (
+        ENV_GOOGLE_CLIENT_ID,
+        ENV_GOOGLE_CLIENT_SECRET,
+        ENV_GOOGLE_REDIRECT_URI,
+        ENV_SIGNUP_OAUTH_STATE_SECRET,
+    )
+
+    _settings = _get_settings()
+    if _settings.google.enabled:
+        _google_missing = []
+        if not _settings.google.client_id:
+            _google_missing.append(ENV_GOOGLE_CLIENT_ID)
+        if not _settings.google.client_secret:
+            _google_missing.append(ENV_GOOGLE_CLIENT_SECRET)
+        if not _settings.google.redirect_uri:
+            _google_missing.append(ENV_GOOGLE_REDIRECT_URI)
+        if not _settings.signup.oauth_state_secret:
+            _google_missing.append(ENV_SIGNUP_OAUTH_STATE_SECRET)
+        if _google_missing:
             raise RuntimeError(
-                f"Login gate is enabled but required secrets are missing: {_login_missing}. "
-                f"Set them in the environment (or set LANGRAG_LOGIN_ENABLED=false to disable the gate) before starting the service."
+                f"Google sign-in is enabled but required secrets are missing: {_google_missing}. "
+                f"Set them in the environment (or set LANGRAG_GOOGLE_ENABLED=false to disable Google sign-in) before starting the service."
             )
+        from api.google_oauth import register_google
+
+        register_google(_settings)
 
     try:
         from db.connection import get_database, close_connection
@@ -168,6 +194,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Transient signed Starlette session for Authlib's OAuth state+nonce round-trip
+# ONLY. This is NOT the Fernet auth session (that stays an HttpOnly cookie
+# issued by issue_session_cookie); it is a short-lived cookie that carries the
+# CSRF state and OIDC nonce across the Google redirect. SameSite=Lax is correct
+# for the top-level callback navigation. Only added when Google is enabled so
+# the default deployment is unaffected.
+if settings.google.enabled:
+    from starlette.middleware.sessions import SessionMiddleware
+
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.signup.oauth_state_secret,
+        same_site="lax",
+        https_only=settings.login.cookie_secure,
+    )
+
 # Security headers middleware
 from api.security_headers import add_security_headers
 
@@ -187,6 +229,12 @@ setup_rate_limiting(app)
 # Auth router is mounted PUBLICLY: login/logout/session must be reachable
 # without an existing session (it is what establishes the session).
 app.include_router(auth.router, prefix=API_V1_PREFIX, tags=["auth"])
+# Google OAuth login/callback. Mounted on the same public auth prefix so they
+# resolve at /api/auth/google/login and /api/auth/google/callback. Always
+# mounted; both routes 404 when Google is disabled (the SessionMiddleware they
+# need is only added when enabled, but the disabled-guard returns before any
+# request.session access).
+app.include_router(google_oauth.router, prefix=API_V1_PREFIX, tags=["auth-google"])
 # Admin-only user management. The router self-guards every route with
 # require_admin (which depends on require_session), so no _session_gate here.
 app.include_router(admin_users.router, prefix=API_V1_PREFIX, tags=["admin-users"])

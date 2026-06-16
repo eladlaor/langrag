@@ -91,6 +91,49 @@ ROUTE_AUTH_USER_BY_ID = "/auth/users/{user_id}"
 ROUTE_AUTH_USER_PASSWORD = "/auth/users/{user_id}/password"
 ROUTE_AUTH_USER_DISABLE = "/auth/users/{user_id}/disable"
 
+# Self-signup + access-request + Google OAuth routes (mounted after
+# API_V1_PREFIX). The signup, access-request POST, config, and Google routes
+# are PUBLIC (unauthenticated); the access-request GET is ADMIN-only. The
+# Google login/callback constants are defined now even though the OAuth
+# endpoints are wired in a later slice (deferred until a Google client exists).
+ROUTE_AUTH_SIGNUP = "/auth/signup"
+ROUTE_AUTH_GOOGLE_LOGIN = "/auth/google/login"
+ROUTE_AUTH_GOOGLE_CALLBACK = "/auth/google/callback"
+ROUTE_AUTH_ACCESS_REQUESTS = "/auth/access-requests"
+ROUTE_AUTH_CONFIG = "/auth/config"
+
+# Structured machine-readable code returned in the signup 403 body when the
+# email is not on the allowlist. The frontend branches on this to show the
+# invite-only rejection screen.
+SIGNUP_CODE_NOT_ALLOWLISTED = "not_allowlisted"
+
+# Google OAuth / OIDC wiring constants consumed by api.google_oauth. The client
+# name is the Authlib registry key; the discovery URL is Google's OIDC metadata
+# document (Authlib derives the authorize/token/jwks endpoints from it); the
+# scope string requests the OIDC id_token plus the email/profile claims.
+GOOGLE_OAUTH_CLIENT_NAME = "google"
+GOOGLE_OIDC_DISCOVERY_URL = "https://accounts.google.com/.well-known/openid-configuration"
+GOOGLE_OAUTH_SCOPE = "openid email profile"
+
+# Keys in the userinfo claims returned alongside the validated id_token.
+GOOGLE_CLAIM_SUB = "sub"
+GOOGLE_CLAIM_EMAIL = "email"
+GOOGLE_CLAIM_EMAIL_VERIFIED = "email_verified"
+# Key under which authorize_access_token() exposes the parsed OIDC userinfo.
+GOOGLE_TOKEN_USERINFO_KEY = "userinfo"
+
+# Query-param names used on the Google login + callback round-trip. `next` is
+# the optional post-login relative redirect; `signup`/`rejected`/`email` drive
+# the SPA invite-only rejection screen on a brand-new, non-allowlisted identity.
+QUERY_PARAM_NEXT = "next"
+QUERY_PARAM_SIGNUP = "signup"
+QUERY_PARAM_EMAIL = "email"
+SIGNUP_STATUS_REJECTED = "rejected"
+
+# Server-side key under which the Google login route stashes the validated
+# `next` path in the transient Starlette session for the callback to read.
+OAUTH_SESSION_NEXT_KEY = "oauth_next"
+
 # Name of the HttpOnly cookie carrying the Fernet-encrypted session token.
 SESSION_COOKIE_NAME = "langrag_session"
 
@@ -318,6 +361,15 @@ ROUTE_RAG_SOURCES_NEWSLETTERS = "/rag/sources/newsletters"
 RAG_REFUSAL_OUT_OF_RANGE = "No content was found within the requested date range. Broaden the window or rephrase the question."
 RAG_REFUSAL_NO_CONTENT = "No relevant content found in the indexed sources."
 
+# RAG eval metric identifiers. The legacy three metric keys remain inline string
+# literals in gate.py for historical continuity; new metric keys are defined here.
+RAG_METRIC_DATE_GROUNDING = "date_grounding"
+# A chunk's stored source_date_start is considered correctly grounded when it lands
+# within this many days of the independently-derived true source date. Newsletters
+# cover a multi-day window, so an exact-equality check would false-fail; the tolerance
+# absorbs the legitimate start..end spread without admitting a genuinely wrong date.
+RAG_DATE_GROUNDING_TOLERANCE_DAYS = 1
+
 # Metrics Routes (no prefix)
 ROUTE_METRICS = "/metrics"
 
@@ -345,6 +397,7 @@ APP_DESCRIPTION = "Newsletter generation from WhatsApp group chats using LangGra
 # ============================================================================
 
 HTTP_STATUS_OK = 200
+HTTP_STATUS_FOUND = 302
 HTTP_STATUS_BAD_REQUEST = 400
 HTTP_STATUS_UNAUTHORIZED = 401
 HTTP_STATUS_FORBIDDEN = 403
@@ -386,6 +439,9 @@ COLLECTION_USERS = "users"
 COLLECTION_USER_API_KEYS = "user_api_keys"
 COLLECTION_AGENT_SESSIONS = "agent_sessions"
 COLLECTION_AGENT_MEMORIES = "agent_memories"
+# Self-signup access requests: persisted contact-form submissions from users who
+# are not on the allowlist, for later admin review.
+COLLECTION_ACCESS_REQUESTS = "access_requests"
 
 # Safety ceiling for queries that would otherwise materialize an unbounded result
 # set into memory (Motor's cursor.to_list(length=None)). Callers that legitimately
@@ -405,11 +461,13 @@ CURRENT_SCHEMA_VERSION_MESSAGE = 1
 CURRENT_SCHEMA_VERSION_NEWSLETTER = 1
 CURRENT_SCHEMA_VERSION_RAG_CHUNK = 1
 # v2 adds individual-account login fields (password_hash, session_epoch,
-# disabled). Additive with defaults, so old v1 docs read back cleanly.
-CURRENT_SCHEMA_VERSION_USER = 2
+# disabled). v3 adds self-signup external-identity fields (auth_provider,
+# google_sub). Additive with defaults, so old v1/v2 docs read back cleanly.
+CURRENT_SCHEMA_VERSION_USER = 3
 CURRENT_SCHEMA_VERSION_USER_API_KEY = 1
 CURRENT_SCHEMA_VERSION_AGENT_SESSION = 1
 CURRENT_SCHEMA_VERSION_AGENT_MEMORY = 1
+CURRENT_SCHEMA_VERSION_ACCESS_REQUEST = 1
 
 # Agent memory Atlas Search indexes (paired via $rankFusion).
 AGENT_MEMORY_VECTOR_INDEX_NAME = "agent_memory_embeddings"
@@ -611,6 +669,14 @@ class DataSources(StrEnum):
 
 class WorkflowNames(StrEnum):
     PERIODIC_NEWSLETTER = "periodic_newsletter"
+
+
+class LinkEnrichmentStatus(StrEnum):
+    """Outcome of the optional Phase-2 link-enrichment step."""
+
+    SUCCEEDED = "succeeded"  # Enriched newsletter produced
+    SKIPPED = "skipped"  # Enrichment ran but produced no enriched files
+    FAILED = "failed"  # Enrichment raised; base newsletter returned instead
 
 
 class PreprocessingOperations(StrEnum):
@@ -843,6 +909,22 @@ ENV_LOGIN_SESSION_KEY = "LANGRAG_LOGIN_SESSION_KEY"
 # from these two values. Required only for that first-boot path.
 ENV_BOOTSTRAP_ADMIN_EMAIL = "LANGRAG_BOOTSTRAP_ADMIN_EMAIL"
 ENV_BOOTSTRAP_ADMIN_PASSWORD = "LANGRAG_BOOTSTRAP_ADMIN_PASSWORD"
+
+# Self-signup gate (resolved via the LANGRAG_SIGNUP_ prefix in config).
+# The allowlist is a JSON/CSV list of emails permitted to self-register; the
+# OAuth state secret signs the transient Starlette session used by Authlib's
+# state+nonce round-trip (wired in a later slice).
+ENV_SIGNUP_ENABLED = "LANGRAG_SIGNUP_ENABLED"
+ENV_SIGNUP_ALLOWLIST = "LANGRAG_SIGNUP_ALLOWLIST"
+ENV_SIGNUP_OAUTH_STATE_SECRET = "LANGRAG_SIGNUP_OAUTH_STATE_SECRET"
+
+# Google OAuth / OIDC (resolved via the LANGRAG_GOOGLE_ prefix in config). The
+# fields exist now; the OAuth endpoints that consume them are wired in a later
+# slice once a Google client is registered.
+ENV_GOOGLE_ENABLED = "LANGRAG_GOOGLE_ENABLED"
+ENV_GOOGLE_CLIENT_ID = "LANGRAG_GOOGLE_CLIENT_ID"
+ENV_GOOGLE_CLIENT_SECRET = "LANGRAG_GOOGLE_CLIENT_SECRET"
+ENV_GOOGLE_REDIRECT_URI = "LANGRAG_GOOGLE_REDIRECT_URI"
 
 
 # ============================================================================

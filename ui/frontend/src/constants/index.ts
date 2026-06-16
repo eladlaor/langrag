@@ -118,6 +118,10 @@ export const AUTH_ROUTES = {
   LOGOUT: "/api/auth/logout",
   SESSION: "/api/auth/session",
   USERS: "/api/auth/users",
+  SIGNUP: "/api/auth/signup",
+  GOOGLE_LOGIN: "/api/auth/google/login",
+  ACCESS_REQUESTS: "/api/auth/access-requests",
+  CONFIG: "/api/auth/config",
 } as const;
 
 // Parameterized admin user-management route builders (single source of truth).
@@ -132,8 +136,26 @@ export const authUserDisable = (userId: string): string =>
 export const ROLE_ADMIN = "admin";
 export const ROLE_VIEWER = "viewer";
 
+// Access-request status values (must match backend AccessRequestStatus).
+export const ACCESS_REQUEST_STATUS_PENDING = "pending";
+
+// Query-string key for filtering access requests by status (admin GET).
+export const ACCESS_REQUEST_STATUS_PARAM = "status";
+
 // Distinguishable error code thrown by createUser on a 409 duplicate email.
 export const ERROR_DUPLICATE_EMAIL = "duplicate_email";
+
+// Backend signup-rejection code carried in a 403 `detail.code` when the email
+// is not on the allowlist. The signup gate switches to the rejection screen
+// when it sees this exact code (matches backend SIGNUP_CODE_NOT_ALLOWLISTED).
+export const SIGNUP_CODE_NOT_ALLOWLISTED = "not_allowlisted";
+
+// Google OAuth callback redirects the SPA here on a non-allowlisted sign-in:
+// `/?signup=rejected&email=<urlencoded>`. The query-param names are the
+// behavioral contract with the backend redirect, so they live as constants.
+export const SIGNUP_REJECTED_QUERY_PARAM = "signup";
+export const SIGNUP_REJECTED_QUERY_VALUE = "rejected";
+export const SIGNUP_REJECTED_EMAIL_PARAM = "email";
 
 // Always attach the HttpOnly session cookie on same-origin API calls (via nginx)
 export const FETCH_CREDENTIALS: RequestCredentials = "same-origin";

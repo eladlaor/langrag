@@ -7,7 +7,8 @@
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-import { AuthProvider, useAuth } from "./AuthContext";
+import { AuthProvider, useAuth, NotAllowlistedError } from "./AuthContext";
+import { SIGNUP_CODE_NOT_ALLOWLISTED } from "../constants";
 
 const ORIG_FETCH = global.fetch;
 
@@ -21,14 +22,27 @@ function mockFetch(impl: jest.Mock) {
 }
 
 const Probe: React.FC = () => {
-  const { status, currentUser, isAdmin, login } = useAuth();
+  const { status, currentUser, isAdmin, login, signup } = useAuth();
+  const [signupErr, setSignupErr] = React.useState<string>("none");
   return (
     <div>
       <span data-testid="status">{status}</span>
       <span data-testid="email">{currentUser?.email ?? "none"}</span>
       <span data-testid="role">{currentUser?.role ?? "none"}</span>
       <span data-testid="isAdmin">{String(isAdmin)}</span>
+      <span data-testid="signupErr">{signupErr}</span>
       <button onClick={() => void login("u@example.com", "pw")}>login</button>
+      <button
+        onClick={() =>
+          void signup("new@example.com", "pw").catch((e) => {
+            setSignupErr(
+              e instanceof NotAllowlistedError ? e.code : "other_error"
+            );
+          })
+        }
+      >
+        signup
+      </button>
     </div>
   );
 };
@@ -99,4 +113,146 @@ test("login posts {email, password} and stores the returned user", async () => {
   expect(loginCall).toBeDefined();
   const body = JSON.parse((loginCall![1] as RequestInit).body as string);
   expect(body).toEqual({ email: "u@example.com", password: "pw" });
+});
+
+test("signup posts to /api/auth/signup and authenticates on success", async () => {
+  const fetchMock = jest.fn(async (url: string, _init?: RequestInit) => {
+    if (url.includes("/api/auth/session")) {
+      return { ok: false, status: 401, json: async () => ({}) } as Response;
+    }
+    if (url.includes("/api/auth/config")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ google_enabled: false, signup_enabled: true }),
+      } as Response;
+    }
+    if (url.includes("/api/auth/signup")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          authenticated: true,
+          email: "new@example.com",
+          role: "viewer",
+        }),
+      } as Response;
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  mockFetch(fetchMock);
+
+  render(
+    <AuthProvider>
+      <Probe />
+    </AuthProvider>
+  );
+
+  await waitFor(() =>
+    expect(screen.getByTestId("status")).toHaveTextContent("unauthenticated")
+  );
+
+  fireEvent.click(screen.getByText("signup"));
+
+  await waitFor(() =>
+    expect(screen.getByTestId("email")).toHaveTextContent("new@example.com")
+  );
+  expect(screen.getByTestId("status")).toHaveTextContent("authenticated");
+  expect(screen.getByTestId("role")).toHaveTextContent("viewer");
+
+  const signupCall = fetchMock.mock.calls.find((c) =>
+    String(c[0]).includes("/api/auth/signup")
+  );
+  const body = JSON.parse((signupCall![1] as RequestInit).body as string);
+  expect(body).toEqual({ email: "new@example.com", password: "pw" });
+});
+
+test("signup throws NotAllowlistedError on a 403 detail.code=not_allowlisted", async () => {
+  const fetchMock = jest.fn(async (url: string) => {
+    if (url.includes("/api/auth/session")) {
+      return { ok: false, status: 401, json: async () => ({}) } as Response;
+    }
+    if (url.includes("/api/auth/config")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ google_enabled: false, signup_enabled: true }),
+      } as Response;
+    }
+    if (url.includes("/api/auth/signup")) {
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({
+          detail: {
+            message: "not on the list",
+            code: SIGNUP_CODE_NOT_ALLOWLISTED,
+          },
+        }),
+      } as Response;
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  mockFetch(fetchMock);
+
+  render(
+    <AuthProvider>
+      <Probe />
+    </AuthProvider>
+  );
+
+  await waitFor(() =>
+    expect(screen.getByTestId("status")).toHaveTextContent("unauthenticated")
+  );
+
+  fireEvent.click(screen.getByText("signup"));
+
+  await waitFor(() =>
+    expect(screen.getByTestId("signupErr")).toHaveTextContent(
+      SIGNUP_CODE_NOT_ALLOWLISTED
+    )
+  );
+  // Still unauthenticated — the rejection is distinguishable, not a login.
+  expect(screen.getByTestId("status")).toHaveTextContent("unauthenticated");
+});
+
+test("signup throws a generic (non-allowlist) error on other failures", async () => {
+  const fetchMock = jest.fn(async (url: string) => {
+    if (url.includes("/api/auth/session")) {
+      return { ok: false, status: 401, json: async () => ({}) } as Response;
+    }
+    if (url.includes("/api/auth/config")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ google_enabled: false, signup_enabled: true }),
+      } as Response;
+    }
+    if (url.includes("/api/auth/signup")) {
+      // 409 duplicate — plain-string detail, NOT the allowlist object.
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({ detail: "already registered" }),
+      } as Response;
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  mockFetch(fetchMock);
+
+  render(
+    <AuthProvider>
+      <Probe />
+    </AuthProvider>
+  );
+
+  await waitFor(() =>
+    expect(screen.getByTestId("status")).toHaveTextContent("unauthenticated")
+  );
+
+  fireEvent.click(screen.getByText("signup"));
+
+  await waitFor(() =>
+    expect(screen.getByTestId("signupErr")).toHaveTextContent("other_error")
+  );
 });

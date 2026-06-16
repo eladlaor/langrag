@@ -479,6 +479,10 @@ async def separate_discussions(state: SingleChatState, config: RunnableConfig | 
             logger.warning(f"Failed to count discussions: {e}")
 
         result = {Keys.SEPARATE_DISCUSSIONS_FILE_PATH: expected_file}
+        if discussions_count is not None:
+            # Persist to state so the orchestrator wrapper can surface it in worker results
+            # (consumed by aggregate_results for MongoDB tracking).
+            result[Keys.DISCUSSION_COUNT] = discussions_count
 
         # Updating span with output
         if span:

@@ -48,6 +48,11 @@ _enrichment_model = None
 _enrichment_tokenizer = None
 _enrichment_thresholds = None
 
+# Per-message enrichment field keys. SLM_ACTIVE_LABELS lives on DiscussionKeys
+# because the ranker reads it; the raw-score and flag fields are local to this node.
+SLM_LABELS_KEY = "slm_labels"
+SLM_FLAGS_KEY = "slm_flags"
+
 # Label names in model output order
 ENRICHMENT_LABEL_NAMES = [
     "professional", "question", "experience_sharing", "resource", "opinion",
@@ -190,9 +195,9 @@ def _enrich_messages_batch(
         content = msg.get("content", "")
         flags = _compute_flags(content)
 
-        msg["slm_labels"] = label_scores
-        msg["slm_active_labels"] = active_labels
-        msg["slm_flags"] = flags
+        msg[SLM_LABELS_KEY] = label_scores
+        msg[DiscussionKeys.SLM_ACTIVE_LABELS] = active_labels
+        msg[SLM_FLAGS_KEY] = flags
 
     return messages
 
@@ -293,7 +298,7 @@ async def slm_enrichment_node(state: SingleChatState, config: RunnableConfig | N
                         settings.slm_enrichment.batch_size,
                     )
                     total_messages += len(messages)
-                    total_enriched += sum(1 for m in messages if m.get("slm_active_labels"))
+                    total_enriched += sum(1 for m in messages if m.get(DiscussionKeys.SLM_ACTIVE_LABELS))
 
             # Write enriched discussions to a DISTINCT file rather than
             # overwriting separate_discussions' output in place. In-place

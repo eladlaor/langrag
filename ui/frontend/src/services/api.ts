@@ -14,6 +14,7 @@ import {
   authUserPassword,
   authUserDisable,
   ERROR_DUPLICATE_EMAIL,
+  ACCESS_REQUEST_STATUS_PARAM,
 } from "../constants";
 import {
   PeriodicNewsletterRequest,
@@ -32,6 +33,7 @@ import {
   RAGEvaluation,
   ExtractedImagesResponse,
   ExtractedImagesQuery,
+  AccessRequest,
 } from "../types";
 import { RAG_API_ROUTES } from "../constants/rag";
 import {
@@ -534,6 +536,24 @@ export const api = {
         body: JSON.stringify({ disabled }),
       });
       return handleResponse<{ message?: string }>(response);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  },
+
+  /**
+   * List self-signup access requests (admin only). Optionally filter by status;
+   * the backend returns newest-first.
+   */
+  async listAccessRequests(status?: string): Promise<AccessRequest[]> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (status) queryParams.set(ACCESS_REQUEST_STATUS_PARAM, status);
+      const qs = queryParams.toString();
+      const url = `${API_BASE_URL}${AUTH_ROUTES.ACCESS_REQUESTS}${qs ? `?${qs}` : ""}`;
+      const response = await fetch(url, { credentials: FETCH_CREDENTIALS });
+      return handleResponse<AccessRequest[]>(response);
     } catch (error) {
       if (error instanceof ApiError) throw error;
       throw new ApiError(0, `Network error: ${error instanceof Error ? error.message : "Unknown error"}`);

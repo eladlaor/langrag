@@ -29,6 +29,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from utils.llm.chat_model_factory import create_chat_model
 from utils.llm.json_parser import parse_json_response
+from utils.llm.retry import with_retry
 
 from config import get_settings
 from constants import DiscussionCategory, MessageRole
@@ -142,6 +143,25 @@ def _first_last_sample(messages: list[dict[str, Any]]) -> list[str]:
     return [first, messages[-1].get("content", "")]
 
 
+def _aggregate_slm_label_counts(messages: list[dict[str, Any]]) -> dict[str, int]:
+    """Aggregate per-message SLM active labels into a discussion-level count map.
+
+    Returns {label: number_of_messages_carrying_that_label}. Empty dict when no
+    message in the discussion was enriched, which is the signal downstream code
+    uses to decide whether enrichment is available.
+
+    This compact aggregation is what reaches the ranking LLM: the prompt reasons
+    about how many messages in a discussion are tagged professional/substantive/etc.,
+    so per-discussion counts preserve that signal at a fraction of the token cost of
+    embedding every message's full 15-float label vector.
+    """
+    counts: dict[str, int] = {}
+    for msg in messages:
+        for label in msg.get(DiscussionKeys.SLM_ACTIVE_LABELS, []) or []:
+            counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
 def prepare_discussions_for_llm(discussions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Prepare discussions for LLM analysis by extracting key fields.
@@ -172,6 +192,14 @@ def prepare_discussions_for_llm(discussions: list[dict[str, Any]]) -> list[dict[
                 # discussion this is just [content]; for multi-message, [first, last].
                 DiscussionKeys.SAMPLE_MESSAGES: _first_last_sample(disc.get(DiscussionKeys.MESSAGES) or []),
             }
+
+            # Carry SLM enrichment signals into the summary the LLM actually sees.
+            # Aggregated to per-discussion label counts to keep the prompt compact;
+            # only set when at least one message was enriched, so its presence
+            # doubles as the "enrichment available" flag downstream.
+            label_counts = _aggregate_slm_label_counts(disc.get(DiscussionKeys.MESSAGES) or [])
+            if label_counts:
+                summary[DiscussionKeys.SLM_LABEL_COUNTS] = label_counts
 
             # Add merged discussion metadata if present
             if disc.get(DiscussionKeys.IS_MERGED, False):
@@ -239,12 +267,10 @@ async def rank_with_llm(
     """
     discussions_json = json.dumps(discussions_summary, indent=2)
 
-    # Build SLM enrichment section (detect if messages have slm_active_labels)
-    has_enrichment = any(
-        msg.get("slm_active_labels")
-        for disc in discussions_summary
-        for msg in disc.get("messages", [])
-    )
+    # Build SLM enrichment section. prepare_discussions_for_llm only attaches
+    # slm_label_counts when a discussion had at least one enriched message, so
+    # its presence on any summary is a faithful "enrichment available" signal.
+    has_enrichment = any(disc.get(DiscussionKeys.SLM_LABEL_COUNTS) for disc in discussions_summary)
     enrichment_section = SLM_ENRICHMENT_SECTION if has_enrichment else NO_SLM_ENRICHMENT_SECTION
     if has_enrichment:
         logger.info("SLM enrichment labels detected on messages, including in ranking prompt")
@@ -285,11 +311,18 @@ async def rank_with_llm(
         if callback:
             callbacks.append(callback)
 
-    # Invoke LLM
+    # Invoke LLM. The network call is wrapped in exponential-backoff retry on
+    # transient provider errors (rate limits, timeouts, 5xx), matching the
+    # @with_retry policy every provider method uses. Only the call itself is
+    # retried — JSON parsing and validation below must not re-run the request.
+    @with_retry(max_retries=3, base_delay=1.0)
+    async def _invoke_ranking_chain():
+        invoke_config = {"callbacks": callbacks} if callbacks else {}
+        return await chain.ainvoke({"discussions_json": discussions_json, "summary_format": summary_format, "repetition_analysis_section": repetition_section, "slm_enrichment_section": enrichment_section}, config=invoke_config)
+
     logger.info(f"Analyzing {len(discussions_summary)} discussions with LLM...")
     try:
-        invoke_config = {"callbacks": callbacks} if callbacks else {}
-        response = await chain.ainvoke({"discussions_json": discussions_json, "summary_format": summary_format, "repetition_analysis_section": repetition_section, "slm_enrichment_section": enrichment_section}, config=invoke_config)
+        response = await _invoke_ranking_chain()
 
         # Parse LLM response (handles markdown fences, preamble text from non-OpenAI providers)
         ranking_result = parse_json_response(response.content)

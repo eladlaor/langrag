@@ -14,6 +14,18 @@ export type {
   RAGChatState,
 } from "./rag";
 
+// Access requests (self-signup, admin review). Mirrors AccessRequestDocument.
+export interface AccessRequest {
+  request_id: string;
+  email: string;
+  name?: string | null;
+  message?: string | null;
+  status: string;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+}
+
 // Request types
 export interface PeriodicNewsletterRequest {
   start_date: string; // YYYY-MM-DD format
@@ -227,6 +239,10 @@ export interface Phase2GenerationResponse {
 
   // Link metadata
   links_metadata_path?: string;
+
+  // Link-enrichment outcome (base newsletter is always returned on generation success)
+  enrichment_status?: 'succeeded' | 'skipped' | 'failed';
+  enrichment_error?: string;
 }
 
 // Runs Browser Types

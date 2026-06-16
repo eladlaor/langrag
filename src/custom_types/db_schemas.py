@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any
 from pydantic import BaseModel, Field
 from constants import (
+    CURRENT_SCHEMA_VERSION_ACCESS_REQUEST,
     CURRENT_SCHEMA_VERSION_AGENT_MEMORY,
     CURRENT_SCHEMA_VERSION_AGENT_SESSION,
     CURRENT_SCHEMA_VERSION_DISCUSSION,
@@ -33,6 +34,26 @@ class UserRole(StrEnum):
 
     ADMIN = "admin"
     VIEWER = "viewer"
+
+
+class AuthProvider(StrEnum):
+    """How a `users` account authenticates.
+
+    PASSWORD: email+password only. GOOGLE: Google OAuth/OIDC only.
+    PASSWORD_AND_GOOGLE: both linked to the same email identity.
+    """
+
+    PASSWORD = "password"
+    GOOGLE = "google"
+    PASSWORD_AND_GOOGLE = "password_and_google"
+
+
+class AccessRequestStatus(StrEnum):
+    """Lifecycle status of an `access_requests` document."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class MemoryNamespace(StrEnum):
@@ -218,12 +239,33 @@ class UserDocument(BaseModel):
     password_hash: str | None = Field(default=None, description="argon2id PHC hash of the account password; None for accounts without a login (legacy/agent-only)")
     session_epoch: int = Field(default=0, description="Server-side session revocation counter; bumped on password reset to invalidate live sessions")
     disabled: bool = Field(default=False, description="When True the account cannot log in")
+    auth_provider: AuthProvider = Field(default=AuthProvider.PASSWORD, description="How this account authenticates (password, google, or both)")
+    google_sub: str | None = Field(default=None, description="Google OIDC subject identifier (never the email); set when the account is linked to Google. Sparse-unique-indexed.")
     communities: list[str] = Field(default_factory=list, description="Community keys this user is authorized to act on")
     preferences: dict[str, Any] = Field(default_factory=dict, description="Free-form preferences (language, default community, etc.)")
     quotas: UserQuotas = Field(default_factory=UserQuotas, description="Daily quotas enforced by check_budget_node")
     daily_usage: UserDailyUsage | None = Field(None, description="Rolling per-UTC-day usage counters")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
     last_seen_at: datetime | None = Field(None, description="Last time this user authenticated against the agent API")
+
+
+class AccessRequestDocument(BaseModel):
+    """Schema for a self-signup access request.
+
+    Persisted when a non-allowlisted user submits the contact form asking for
+    access. Reviewed by an admin out of band; no account is created here.
+    """
+
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_ACCESS_REQUEST, description="Document schema version for lazy migration")
+    request_id: str = Field(..., description="Application-level request identifier (uuid4)")
+    email: str = Field(..., description="Normalized email of the requester")
+    name: str | None = Field(default=None, description="Optional display name supplied by the requester")
+    message: str | None = Field(default=None, description="Optional free-text message from the requester")
+    requested_provider: str | None = Field(default=None, description="AuthProvider value the requester attempted (password/google), if known")
+    status: AccessRequestStatus = Field(default=AccessRequestStatus.PENDING, description="Review status")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Submission timestamp")
+    reviewed_at: datetime | None = Field(default=None, description="When an admin reviewed this request")
+    reviewed_by: str | None = Field(default=None, description="user_id of the reviewing admin")
 
 
 class UserApiKeyDocument(BaseModel):

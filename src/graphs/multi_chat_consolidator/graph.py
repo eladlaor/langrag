@@ -133,6 +133,14 @@ async def chat_worker_wrapper(state: SingleChatState, config: RunnableConfig | N
             SingleChatKeys.NEWSLETTER_HTML_PATH: final_state.get(SingleChatKeys.NEWSLETTER_HTML_PATH),
             SingleChatKeys.FINAL_TRANSLATED_FILE_PATH: final_state.get(SingleChatKeys.FINAL_TRANSLATED_FILE_PATH),
             SingleChatKeys.REUSED_EXISTING: final_state.get(SingleChatKeys.REUSED_EXISTING, False),
+            # Enriched (with-links) newsletter paths. aggregate_results persists ENRICHED_MD for
+            # MongoDB tracking and _find_best_html_path resolves the enriched HTML for email from
+            # the enriched MD path. Omitting these silently degraded the single-chat email to the
+            # non-enriched newsletter (or no email at all).
+            SingleChatKeys.ENRICHED_NEWSLETTER_JSON_PATH: final_state.get(SingleChatKeys.ENRICHED_NEWSLETTER_JSON_PATH),
+            SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH: final_state.get(SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH),
+            # Discussion count for MongoDB chat-status tracking (read via WorkerResultKeys.DISCUSSION_COUNT).
+            WorkerResultKeys.DISCUSSION_COUNT: final_state.get(SingleChatKeys.DISCUSSION_COUNT),
             # NEW: Include paths needed for cross-chat consolidation
             SingleChatKeys.SEPARATE_DISCUSSIONS_FILE_PATH: final_state.get(SingleChatKeys.SEPARATE_DISCUSSIONS_FILE_PATH),
             SingleChatKeys.DISCUSSIONS_RANKING_FILE_PATH: final_state.get(SingleChatKeys.DISCUSSIONS_RANKING_FILE_PATH),

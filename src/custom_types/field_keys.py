@@ -42,6 +42,12 @@ class DiscussionKeys:
     FIRST_MESSAGE_IN_DISCUSSION_TIMESTAMP = "first_message_in_discussion_timestamp"
     SAMPLE_MESSAGES = "sample_messages"
     MESSAGES = "messages"
+    # Per-message multi-label enrichment fields written by slm_enrichment_node.
+    SLM_ACTIVE_LABELS = "slm_active_labels"
+    # Compact per-discussion aggregation of active labels (label -> message count),
+    # injected into the ranking summary so the LLM sees enrichment signals without
+    # the token cost of every message's full label vector.
+    SLM_LABEL_COUNTS = "slm_label_counts"
     IS_MERGED = "is_merged"
     SOURCE_DISCUSSIONS = "source_discussions"
     SOURCE_GROUP = "group"
@@ -437,6 +443,11 @@ class UserKeys:
     PASSWORD_HASH = "password_hash"
     SESSION_EPOCH = "session_epoch"
     DISABLED = "disabled"
+    # External-identity fields (self-signup, schema v3). AUTH_PROVIDER records
+    # how the account authenticates; GOOGLE_SUB is the OIDC subject identifier
+    # (never the email), sparse-unique-indexed.
+    AUTH_PROVIDER = "auth_provider"
+    GOOGLE_SUB = "google_sub"
     COMMUNITIES = "communities"
     PREFERENCES = "preferences"
     QUOTAS = "quotas"
@@ -456,6 +467,20 @@ class UserKeys:
     USAGE_CHAT_OUTPUT_TOKENS = "chat_output_tokens"
     USAGE_MEMORY_TOKENS = "memory_tokens"
     USAGE_NEWSLETTER_RUNS = "newsletter_runs"
+
+
+class AccessRequestKeys:
+    """Keys for `access_requests` collection documents (self-signup)."""
+
+    REQUEST_ID = "request_id"
+    EMAIL = "email"
+    NAME = "name"
+    MESSAGE = "message"
+    REQUESTED_PROVIDER = "requested_provider"
+    STATUS = "status"
+    CREATED_AT = "created_at"
+    REVIEWED_AT = "reviewed_at"
+    REVIEWED_BY = "reviewed_by"
 
 
 class UserApiKeyKeys:

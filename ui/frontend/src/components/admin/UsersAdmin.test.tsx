@@ -36,7 +36,11 @@ function renderWithAuth(
     status: "authenticated",
     currentUser: { email: "admin@example.com", role: "admin" },
     isAdmin: true,
+    config: { googleEnabled: false, signupEnabled: false },
+    rejectedSignup: null,
     login: jest.fn(async () => undefined),
+    signup: jest.fn(async () => undefined),
+    loginWithGoogle: jest.fn(),
     logout: jest.fn(async () => undefined),
     ...overrides,
   };

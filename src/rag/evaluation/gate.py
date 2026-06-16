@@ -13,14 +13,22 @@ Pass thresholds (CI-enforced):
   date_citation_compliance  >= 1.00
   date_filter_honored       >= 1.00
   refusal_compliance        >= 1.00
+  date_grounding            >= 1.00
 
 The gate exits non-zero if any aggregated metric is below threshold, or if
 any test case marked must_refuse is not refused.
+
+date_grounding closes the gap the other date metrics leave open: they confirm a
+date tag is present (citation compliance) and lands inside the requested window
+(filter honoured), but neither checks the tag is *correct*. date_grounding compares
+each citation's stored source_date_start against the true source date derived
+independently of the chunk — from the golden case's expected_source_dates offline,
+or from the source-of-truth live — so an ingestion-time date corruption fails here
+even when every other date metric is green.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -29,10 +37,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from constants import RAG_METRIC_DATE_GROUNDING
 from observability.metrics.rag_metrics import record_eval_score
 from rag.evaluation.custom_metrics import (
     DateCitationComplianceMetric,
     DateFilterHonoredMetric,
+    DateGroundingMetric,
     RefusalComplianceMetric,
 )
 from rag.mcp.tools import rag_query
@@ -49,6 +59,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "date_citation_compliance": 1.00,
     "date_filter_honored": 1.00,
     "refusal_compliance": 1.00,
+    RAG_METRIC_DATE_GROUNDING: 1.00,
 }
 
 
@@ -180,6 +191,12 @@ async def _run_case(case: dict[str, Any]) -> CaseResult:
         "date_filter": response.get("date_filter") or date_filter,
         "citations": citations,
         "must_refuse": must_refuse,
+        # Offline grounding oracle: the golden case's known-true source dates,
+        # keyed by source_id or source_title. Absent on cases not yet annotated —
+        # DateGroundingMetric then passes vacuously, so the gate stays green until
+        # ground truth is authored. The live integration eval supplies this map
+        # from the source-of-truth instead (see test_date_grounding.py).
+        "expected_source_dates": case.get("expected_source_dates") or {},
     }
 
     # Custom metrics
@@ -188,6 +205,7 @@ async def _run_case(case: dict[str, Any]) -> CaseResult:
         ("date_citation_compliance", DateCitationComplianceMetric()),
         ("date_filter_honored", DateFilterHonoredMetric()),
         ("refusal_compliance", RefusalComplianceMetric()),
+        (RAG_METRIC_DATE_GROUNDING, DateGroundingMetric()),
     ]:
         # deepeval LLMTestCase mimic — only attributes our metrics consume
         class _TC:

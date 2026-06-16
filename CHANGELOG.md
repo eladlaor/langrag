@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-06-16
+
+### Added
+- **RAG date-grounding eval metric:** new `DateGroundingMetric` closes the last gap in the date-aware eval suite. The existing date metrics only confirm a citation's date tag is *present* (`DateCitationComplianceMetric`) and falls inside the *requested* window (`DateFilterHonoredMetric`) — neither verifies the tag is *correct*. `DateGroundingMetric` compares each citation's stored `source_date_start` against the true source date derived independently of the chunk: from the golden case's optional `expected_source_dates` map offline, or, via the new `src/rag/evaluation/date_grounding.py` oracle, re-derived live from the source-of-truth (newsletter `start_date` in MongoDB, podcast filename/manifest `episode_date`). This catches ingestion-time date corruption that previously passed every other date metric. Added to the CI gate at a hard `1.00` threshold (`RAG_METRIC_DATE_GROUNDING`), the citation payload now carries `source_id` so the oracle can resolve ground truth, with unit coverage in `tests/unit/rag/test_custom_metrics.py` and a live integration suite in `tests/integration/rag/test_date_grounding.py`.
+
+### Security
+- **`/api/auth/login` was not rate-limited:** the login endpoint had no throttling while `signup` and the access-request form did, leaving password brute-force / credential-stuffing unbounded and turning the deliberately-expensive argon2id verify into a CPU/memory DoS amplifier. Login now carries `@limiter.limit(RATE_LOGIN)` (`10/minute`, per-IP), matching the signup limit.
+- **Raw API key embedded in the rate-limit bucket key:** `_rate_limit_key` returned `key:<raw-api-key>`, writing the secret verbatim into limiter storage and diagnostics. The key is now bucketed on a SHA-256 prefix (unpeppered — uniqueness, not replay protection, is what a bucket key needs), so the raw secret never leaves the request.
+- **Rate-limit counters are configurable for multi-worker deploys:** added `API_RATE_LIMIT_STORAGE_URI` (empty by default = the in-memory store correct for the single-worker container). Set it to a shared store (e.g. `redis://...`) when running multiple uvicorn workers or replicas, otherwise each process keeps its own counter and the effective limit becomes N× the configured value.
+
+### Fixed
+- **Startup no longer requires the deprecated `LANGRAG_LOGIN_PASSWORD`:** the login-gate fail-fast in the lifespan startup still demanded the shared password that per-user accounts replaced, so a clean deployment that dropped the dead env var crashed at boot. The check now requires only `LANGRAG_LOGIN_SESSION_KEY` (the sole secret the Fernet-cookie path uses).
+- **429 handler could mask a rate-limit response as a 500:** the `RateLimitExceeded` handler dereferenced `request.client.host`, which is `None` on some ASGI transports, raising `AttributeError` inside the handler. It now guards `request.client` and logs `"unknown"` when absent.
+- **DeBERTa SLM enrichment labels never reached the ranker (silent no-op):** the enrichment node tagged each message with `slm_active_labels`, but `prepare_discussions_for_llm` dropped the full message list from its summary, so the ranking prompt never saw the labels and the `has_enrichment` detection (which read a `messages` key absent from the summary) was always false — the model inference cost was paid for zero effect. `prepare_discussions_for_llm` now aggregates active labels into a compact per-discussion `slm_label_counts` map carried into the summary the LLM actually receives, the detection reads that field, and the prompt section was rewritten to describe the count map instead of a per-message field. New `DiscussionKeys.SLM_ACTIVE_LABELS`/`SLM_LABEL_COUNTS` constants replace the inline strings.
+- **Discussion-ranking LLM call had no retry:** `rank_with_llm` invoked the ranking model directly, bypassing the exponential-backoff policy every provider method uses, so a single transient rate-limit/timeout/5xx failed the whole chat. The network invocation is now wrapped in `@with_retry(max_retries=3, base_delay=1.0)`; only the call is retried, not the downstream JSON parse/validation.
+- **Cross-chat consolidation mutated loaded discussion objects in place:** `consolidate_discussions` rewrote `id`/`original_id`/`source_chat` directly on the loaded per-chat objects, which would double-prefix IDs and corrupt attribution if those lists were ever cached or reused. It now builds a new dict per discussion and leaves the source objects untouched, making the step idempotent.
+
 ## [1.16.2] - 2026-06-15
 
 ### Added
@@ -277,7 +294,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.16.2...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/eladlaor/langrag/compare/v1.16.2...v1.17.0
 [1.16.2]: https://github.com/eladlaor/langrag/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/eladlaor/langrag/compare/v1.16.0...v1.16.1
 [1.16.0]: https://github.com/eladlaor/langrag/compare/v1.15.1...v1.16.0

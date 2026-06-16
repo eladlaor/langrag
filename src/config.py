@@ -350,6 +350,9 @@ class APISettings(BaseSettings):
     # CORS settings
     cors_allowed_origins: list[str] = Field(default=["http://localhost:3000", "http://localhost:3001"], description="Allowed CORS origins")
 
+    # Rate limiting
+    rate_limit_storage_uri: str = Field(default="", description="Shared storage backend for rate-limit counters (e.g. redis://host:6379). Empty = in-memory per-process (correct for a single uvicorn worker). MUST be set to a shared store if you run more than one worker or replica, otherwise each process keeps its own counter and the effective limit becomes N× the configured value.")
+
     # SSE streaming settings
     keepalive_interval_seconds: int = Field(default=15, description="SSE keepalive interval in seconds")
     min_event_timeout_seconds: float = Field(default=0.5, description="Minimum event timeout for SSE streaming")
@@ -631,6 +634,52 @@ class LoginSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LANGRAG_LOGIN_")
 
 
+class SignupSettings(BaseSettings):
+    """
+    Self-serve signup gate.
+
+    Gates email+password and Google self-registration behind an email
+    allowlist. The allowlist is a small list that grows slowly; entries are
+    normalized (lowercased + trimmed) at check time via is_email_allowlisted().
+    `oauth_state_secret` signs the transient Starlette session Authlib uses to
+    stash the OAuth state+nonce during the Google redirect round-trip (wired in
+    a later slice); fail-fast at startup when Google is enabled but it is empty.
+
+    Env names resolve via the LANGRAG_SIGNUP_ prefix, e.g.
+    LANGRAG_SIGNUP_ENABLED, LANGRAG_SIGNUP_ALLOWLIST,
+    LANGRAG_SIGNUP_OAUTH_STATE_SECRET.
+    """
+
+    enabled: bool = Field(default=True, description="Allow self-serve signup. When false, the signup endpoints reject with 403.")
+    allowlist: list[str] = Field(default_factory=list, description="Emails permitted to self-register (JSON or CSV). Compared after normalization (lowercase + trim).")
+    oauth_state_secret: str = Field(default="", description="Secret signing the transient Starlette session for Authlib's OAuth state+nonce round-trip. Required when Google is enabled.")
+
+    model_config = SettingsConfigDict(env_prefix="LANGRAG_SIGNUP_")
+
+
+class GoogleOAuthSettings(BaseSettings):
+    """
+    Google OAuth2 / OIDC sign-in.
+
+    The fields exist now so config and .env.example are complete; the OAuth
+    login/callback endpoints that consume them are wired in a later slice once
+    a Google client is registered. When `enabled` is true, the client id +
+    secret + redirect_uri are required (fail-fast at startup, see main.py
+    lifespan).
+
+    Env names resolve via the LANGRAG_GOOGLE_ prefix, e.g.
+    LANGRAG_GOOGLE_ENABLED, LANGRAG_GOOGLE_CLIENT_ID,
+    LANGRAG_GOOGLE_CLIENT_SECRET, LANGRAG_GOOGLE_REDIRECT_URI.
+    """
+
+    enabled: bool = Field(default=False, description="Enable 'Sign in with Google'. When false, no Google routes are mounted and /api/auth/config reports google_enabled=false.")
+    client_id: str = Field(default="", description="Google OAuth web-application client id. Required when enabled.")
+    client_secret: str = Field(default="", description="Google OAuth web-application client secret. Required when enabled. Deploy-env only; never committed.")
+    redirect_uri: str = Field(default="", description="Authorized redirect URI registered in the Google Cloud console, e.g. https://langrag.ai/api/auth/google/callback. Required when enabled.")
+
+    model_config = SettingsConfigDict(env_prefix="LANGRAG_GOOGLE_")
+
+
 # ============================================================================
 # MAIN SETTINGS CLASS
 # ============================================================================
@@ -667,6 +716,8 @@ class Settings(BaseSettings):
     checkpointer: CheckpointerSettings = Field(default_factory=CheckpointerSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     login: LoginSettings = Field(default_factory=LoginSettings)
+    signup: SignupSettings = Field(default_factory=SignupSettings)
+    google: GoogleOAuthSettings = Field(default_factory=GoogleOAuthSettings)
 
     # Output directories
     output_base_dir: str = Field(default="output", description="Base output directory")

@@ -1,5 +1,7 @@
 from core.ingestion.preprocessors.base import DataPreprocessorInterface
 
+import asyncio
+import functools
 import json
 import logging
 import os
@@ -480,12 +482,19 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                     if msg.get("matrix_event_id")
                 }
 
-                translated_subset, batch_info = translator.translate_messages_batch(
-                    all_messages=messages_to_translate,
-                    translate_from=translate_from,
-                    translate_to=translate_to,
-                    batch_size=batch_size,
-                    timeout_minutes=120,
+                # BatchTranslator.translate_messages_batch is synchronous and polls the
+                # provider batch job with blocking time.sleep (up to timeout_minutes).
+                # Offload to a worker thread so it never blocks the event loop, which would
+                # otherwise stall all parallel chat workers, SSE progress streams, and HTTP requests.
+                translated_subset, batch_info = await asyncio.to_thread(
+                    functools.partial(
+                        translator.translate_messages_batch,
+                        all_messages=messages_to_translate,
+                        translate_from=translate_from,
+                        translate_to=translate_to,
+                        batch_size=batch_size,
+                        timeout_minutes=120,
+                    )
                 )
 
                 # Build map of freshly translated messages

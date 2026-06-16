@@ -282,6 +282,18 @@ INDEXES = {
         {"keys": [("email", ASCENDING)], "unique": True},
         # Reverse community lookup (e.g., "who owns mcp_israel?")
         {"keys": [("communities", ASCENDING)]},
+        # External-identity lookup for Google sign-in (self-signup, schema v3).
+        # sparse=True is required so the many password-only rows (google_sub
+        # absent / None) do not collide under the unique constraint.
+        {"keys": [("google_sub", ASCENDING)], "unique": True, "sparse": True},
+    ],
+    "access_requests": [
+        # Primary lookup by request_id
+        {"keys": [("request_id", ASCENDING)], "unique": True},
+        # Admin review listing: pending first, newest first
+        {"keys": [("status", ASCENDING), ("created_at", DESCENDING)]},
+        # Per-email history (newest first)
+        {"keys": [("email", ASCENDING), ("created_at", DESCENDING)]},
     ],
     "user_api_keys": [
         # Per-request lookup on the hashed bearer

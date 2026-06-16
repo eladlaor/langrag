@@ -14,7 +14,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
 from constants import COLLECTION_USERS, CURRENT_SCHEMA_VERSION_USER, SCHEMA_VERSION_FIELD
-from custom_types.db_schemas import UserDailyUsage, UserQuotas, UserRole
+from custom_types.db_schemas import AuthProvider, UserDailyUsage, UserQuotas, UserRole
 from custom_types.field_keys import UserKeys as Keys
 from db.repositories.base import BaseRepository
 
@@ -64,6 +64,8 @@ class UsersRepository(BaseRepository):
             Keys.PASSWORD_HASH: password_hash,
             Keys.SESSION_EPOCH: 0,
             Keys.DISABLED: False,
+            Keys.AUTH_PROVIDER: str(AuthProvider.PASSWORD),
+            Keys.GOOGLE_SUB: None,
             Keys.COMMUNITIES: list(communities),
             Keys.PREFERENCES: preferences or {},
             Keys.QUOTAS: (quotas or UserQuotas()).model_dump(),
@@ -78,6 +80,88 @@ class UsersRepository(BaseRepository):
             raise
         logger.info(f"Created user: user_id={user_id} email={email} communities={communities}")
         return user_id
+
+    async def create_self_signup_user(
+        self,
+        email: str,
+        *,
+        auth_provider: AuthProvider,
+        password_hash: str | None = None,
+        google_sub: str | None = None,
+    ) -> str:
+        """Create a self-signed-up user. Returns the new user_id (uuid4 string).
+
+        VIEWER-only invariant: this method HARDCODES role=VIEWER and
+        communities=[] and accepts no role/communities argument, so the
+        self-signup path can never structurally mint an ADMIN. Admin
+        provisioning goes through create_user instead.
+
+        Raises DuplicateKeyError on a duplicate email or a duplicate google_sub
+        (the latter validated by the sparse-unique index on google_sub).
+        """
+        user_id = str(uuid.uuid4())
+        now = datetime.now(UTC)
+        email = normalize_email(email)
+        document = {
+            SCHEMA_VERSION_FIELD: CURRENT_SCHEMA_VERSION_USER,
+            Keys.USER_ID: user_id,
+            Keys.EMAIL: email,
+            Keys.ROLE: str(UserRole.VIEWER),
+            Keys.PASSWORD_HASH: password_hash,
+            Keys.SESSION_EPOCH: 0,
+            Keys.DISABLED: False,
+            Keys.AUTH_PROVIDER: str(auth_provider),
+            Keys.GOOGLE_SUB: google_sub,
+            Keys.COMMUNITIES: [],
+            Keys.PREFERENCES: {},
+            Keys.QUOTAS: UserQuotas().model_dump(),
+            Keys.DAILY_USAGE: None,
+            Keys.CREATED_AT: now,
+            Keys.LAST_SEEN_AT: None,
+        }
+        try:
+            await self.create(document)
+        except DuplicateKeyError:
+            logger.warning(
+                "create_self_signup_user: duplicate key rejected",
+                extra={"event": "self_signup_duplicate", "function": "create_self_signup_user", "email": email, "has_google_sub": google_sub is not None},
+            )
+            raise
+        logger.info(
+            "Created self-signup user",
+            extra={"event": "self_signup_created", "function": "create_self_signup_user", "user_id": user_id, "auth_provider": str(auth_provider)},
+        )
+        return user_id
+
+    async def find_by_google_sub(self, google_sub: str) -> dict[str, Any] | None:
+        """Fetch a user by their Google OIDC subject identifier."""
+        try:
+            return await self.find_one({Keys.GOOGLE_SUB: google_sub})
+        except Exception as e:
+            logger.error(
+                "find_by_google_sub failed",
+                extra={"event": "find_by_google_sub_failed", "function": "find_by_google_sub", "error": str(e)},
+            )
+            raise
+
+    async def link_google_identity(self, user_id: str, google_sub: str) -> bool:
+        """Link a Google identity to an existing (password) account.
+
+        Sets google_sub and flips auth_provider to PASSWORD_AND_GOOGLE. Raises
+        DuplicateKeyError if that google_sub is already bound to another row
+        (sub-hijack defense, enforced by the sparse-unique index).
+        """
+        try:
+            return await self.update_one(
+                {Keys.USER_ID: user_id},
+                {"$set": {Keys.GOOGLE_SUB: google_sub, Keys.AUTH_PROVIDER: str(AuthProvider.PASSWORD_AND_GOOGLE)}},
+            )
+        except Exception as e:
+            logger.error(
+                "link_google_identity failed",
+                extra={"event": "link_google_identity_failed", "function": "link_google_identity", "user_id": user_id, "error": str(e)},
+            )
+            raise
 
     async def set_password(self, user_id: str, password_hash: str) -> bool:
         """Set a new password hash and bump the session epoch.

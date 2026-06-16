@@ -47,20 +47,23 @@ When setting repetition_identification_reasoning, be specific:
 - Explain the semantic overlap
 """
 
-# SLM enrichment context - injected when messages have been enriched with multi-label scores
+# SLM enrichment context - injected when discussions carry aggregated multi-label scores
 SLM_ENRICHMENT_SECTION = """
 **SLM ENRICHMENT LABELS (Pre-computed Semantic Signals)**
 
-Each message in the discussions below has been pre-tagged with semantic labels by a specialized model.
-Use these labels as pre-computed quality signals to speed up your analysis:
+Each discussion below may carry a `slm_label_counts` field: a map of semantic label -> number of
+messages in that discussion tagged with the label by a specialized classifier. Use these counts as
+pre-computed quality signals to speed up your analysis:
 
-- Messages tagged as `professional`, `experience_sharing`, `how_to`, or `substantive` indicate **high-quality technical content** — these strongly support the Relevance & Importance (50%) and Quality & Depth (30%) factors.
-- Messages tagged as `question` or `discussion_init` indicate **conversation starters** — discussions with many of these are driving engagement.
-- Messages tagged as `resource` indicate **shared links, tools, papers** — concrete value for readers.
-- Messages tagged only as `reaction` or `humor` are **lower signal** — they indicate engagement but not depth.
-- Messages tagged as `off_group_topic` are **noise** — discussions dominated by these should be downranked.
+- High counts of `professional`, `experience_sharing`, `how_to`, or `substantive` indicate **high-quality technical content** — these strongly support the Relevance & Importance (50%) and Quality & Depth (30%) factors.
+- High counts of `question` or `discussion_init` indicate **conversation starters** — discussions with many of these are driving engagement.
+- A non-zero `resource` count indicates **shared links, tools, papers** — concrete value for readers.
+- Discussions whose counts are dominated by `reaction` or `humor` are **lower signal** — engagement without depth.
+- A high `off_group_topic` count means **noise** — such discussions should be downranked.
 
-Look at the `slm_active_labels` field on each message. A discussion where most messages are tagged `professional` + `substantive` is likely more valuable than one dominated by `reaction` labels.
+Interpret the counts relative to the discussion's total message count: a discussion where most messages
+are tagged `professional` + `substantive` is likely more valuable than one dominated by `reaction`.
+Discussions without a `slm_label_counts` field were not enriched — judge them on the other factors alone.
 """
 
 # Used when enrichment is not available

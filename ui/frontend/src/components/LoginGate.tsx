@@ -22,11 +22,15 @@ import {
   Form,
   Spinner,
 } from "react-bootstrap";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth, NotAllowlistedError } from "../contexts/AuthContext";
 import { LOGIN_BRANDING_TITLE } from "../constants";
 import { logger } from "../utils/logger";
+import { RejectionScreen } from "./RejectionScreen";
 
 const LOG_COMPONENT = "LoginGate";
+
+// In-card view modes for the unauthenticated gate.
+type GateMode = "signin" | "signup" | "rejected";
 
 // Brand palette — forest green, matching the app-wide design system.
 const BRAND = {
@@ -105,6 +109,44 @@ const scopedCss = `
     margin: 0;
   }
   .login-gate-card .login-wordmark .accent { color: ${BRAND.GREEN}; }
+  .login-gate-card .google-btn {
+    background: #ffffff;
+    color: #1f2933;
+    border: 1px solid #d7dee3;
+    font-weight: 600;
+    padding: 0.6rem;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .login-gate-card .google-btn:hover:not(:disabled),
+  .login-gate-card .google-btn:focus-visible:not(:disabled) {
+    background: #f4f6f8;
+    box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.25);
+    color: #1f2933;
+  }
+  .login-gate-card .gate-divider {
+    display: flex;
+    align-items: center;
+    color: #8a958c;
+    font-size: 0.8rem;
+    margin: 1.1rem 0;
+  }
+  .login-gate-card .gate-divider::before,
+  .login-gate-card .gate-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #e2e9dd;
+  }
+  .login-gate-card .gate-divider span { padding: 0 0.75rem; }
+  .login-gate-card .gate-toggle-link {
+    color: ${BRAND.GREEN};
+    background: none;
+    border: none;
+    font-weight: 600;
+    padding: 0;
+    text-decoration: none;
+  }
+  .login-gate-card .gate-toggle-link:hover { text-decoration: underline; }
 `;
 
 const useScopedBrandStyle = (): void => {
@@ -122,13 +164,46 @@ const useScopedBrandStyle = (): void => {
 export const LoginGate: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const { status, login } = useAuth();
+  const { status, login, signup, loginWithGoogle, config, rejectedSignup } =
+    useAuth();
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
+  const [confirmPassword, setConfirmPassword] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<boolean>(false);
+  // Generic signup failure (disabled / duplicate / validation), distinct from
+  // the invite-only rejection which switches to the RejectionScreen.
+  const [signupError, setSignupError] = useState<boolean>(false);
+  const [confirmMismatch, setConfirmMismatch] = useState<boolean>(false);
+
+  // A Google-redirect rejection (?signup=rejected) starts the gate in the
+  // rejection view with the email prefilled.
+  const [mode, setMode] = useState<GateMode>(
+    rejectedSignup ? "rejected" : "signin"
+  );
+  const [rejectedEmail, setRejectedEmail] = useState<string>(
+    rejectedSignup?.email ?? ""
+  );
 
   useScopedBrandStyle();
+
+  const resetTransient = () => {
+    setError(false);
+    setSignupError(false);
+    setConfirmMismatch(false);
+    setPassword("");
+    setConfirmPassword("");
+  };
+
+  const switchMode = (next: GateMode) => {
+    resetTransient();
+    setMode(next);
+    logger.info("Gate mode switched", {
+      component: LOG_COMPONENT,
+      event: "gate_mode_switch",
+      mode: next,
+    });
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -153,6 +228,61 @@ export const LoginGate: React.FC<{ children: React.ReactNode }> = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSignupSubmit = async (
+    event: React.FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+    setSignupError(false);
+    setConfirmMismatch(false);
+    if (password !== confirmPassword) {
+      setConfirmMismatch(true);
+      logger.info("Signup form rejected — password mismatch", {
+        component: LOG_COMPONENT,
+        event: "signup_submit",
+      });
+      return;
+    }
+    setSubmitting(true);
+    logger.info("Signup form submitted", {
+      component: LOG_COMPONENT,
+      event: "signup_submit",
+    });
+    try {
+      await signup(email, password);
+      // On success the provider flips status to 'authenticated'.
+    } catch (err) {
+      if (err instanceof NotAllowlistedError) {
+        logger.info("Signup not allowlisted — showing rejection screen", {
+          component: LOG_COMPONENT,
+          event: "signup_submit",
+        });
+        setRejectedEmail(email);
+        setPassword("");
+        setConfirmPassword("");
+        setMode("rejected");
+        return;
+      }
+      logger.warn("Signup form error", {
+        component: LOG_COMPONENT,
+        event: "signup_submit",
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
+      setSignupError(true);
+      setPassword("");
+      setConfirmPassword("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogle = () => {
+    logger.info("Continue with Google clicked", {
+      component: LOG_COMPONENT,
+      event: "google_click",
+    });
+    loginWithGoogle();
   };
 
   if (status === "checking") {
@@ -184,69 +314,236 @@ export const LoginGate: React.FC<{ children: React.ReactNode }> = ({
           </h1>
         </div>
         <Card.Body className="p-4 p-sm-5">
-          <p className="text-muted text-center mb-4" style={{ fontSize: "0.9rem" }}>
-            Newsletter intelligence — sign in to continue
-          </p>
-
-          {error && (
-            <Alert variant="danger" className="py-2">
-              Incorrect email or password
-            </Alert>
-          )}
-
-          <Form onSubmit={handleSubmit}>
-            <Form.Group className="mb-3" controlId="loginEmail">
-              <Form.Label className="visually-hidden">Email</Form.Label>
-              <Form.Control
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                autoComplete="username"
-                disabled={submitting}
-                isInvalid={error}
+          {mode === "rejected" ? (
+            <>
+              <p
+                className="text-muted text-center mb-4"
+                style={{ fontSize: "0.9rem" }}
+              >
+                Request access to LangRAG
+              </p>
+              <RejectionScreen
+                initialEmail={rejectedEmail}
+                accentColor={BRAND.GREEN}
+                onBack={() => switchMode("signin")}
               />
-            </Form.Group>
+            </>
+          ) : (
+            <>
+              <p
+                className="text-muted text-center mb-4"
+                style={{ fontSize: "0.9rem" }}
+              >
+                Newsletter intelligence —{" "}
+                {mode === "signin" ? "sign in to continue" : "create your account"}
+              </p>
 
-            <Form.Group className="mb-4" controlId="loginPassword">
-              <Form.Label className="visually-hidden">Password</Form.Label>
-              <Form.Control
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                disabled={submitting}
-                isInvalid={error}
-              />
-            </Form.Group>
-
-            <Button
-              type="submit"
-              className="w-100 login-submit-btn"
-              style={submitButtonStyle}
-              disabled={
-                submitting || email.length === 0 || password.length === 0
-              }
-            >
-              {submitting ? (
+              {config.googleEnabled && (
                 <>
-                  <Spinner
-                    as="span"
-                    animation="border"
-                    size="sm"
-                    role="status"
-                    aria-hidden="true"
-                    className="me-2"
-                  />
-                  Signing in…
+                  <Button
+                    type="button"
+                    className="w-100 google-btn"
+                    onClick={handleGoogle}
+                    disabled={submitting}
+                    data-testid="google-login-btn"
+                  >
+                    Continue with Google
+                  </Button>
+                  <div className="gate-divider">
+                    <span>or</span>
+                  </div>
+                </>
+              )}
+
+              {mode === "signin" ? (
+                <>
+                  {error && (
+                    <Alert variant="danger" className="py-2">
+                      Incorrect email or password
+                    </Alert>
+                  )}
+                  <Form onSubmit={handleSubmit}>
+                    <Form.Group className="mb-3" controlId="loginEmail">
+                      <Form.Label className="visually-hidden">Email</Form.Label>
+                      <Form.Control
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoFocus
+                        autoComplete="username"
+                        disabled={submitting}
+                        isInvalid={error}
+                      />
+                    </Form.Group>
+
+                    <Form.Group className="mb-4" controlId="loginPassword">
+                      <Form.Label className="visually-hidden">
+                        Password
+                      </Form.Label>
+                      <Form.Control
+                        type="password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password"
+                        disabled={submitting}
+                        isInvalid={error}
+                      />
+                    </Form.Group>
+
+                    <Button
+                      type="submit"
+                      className="w-100 login-submit-btn"
+                      style={submitButtonStyle}
+                      disabled={
+                        submitting ||
+                        email.length === 0 ||
+                        password.length === 0
+                      }
+                    >
+                      {submitting ? (
+                        <>
+                          <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                          />
+                          Signing in…
+                        </>
+                      ) : (
+                        "Sign In"
+                      )}
+                    </Button>
+                  </Form>
+                  {config.signupEnabled && (
+                    <p
+                      className="text-center text-muted mb-0 mt-4"
+                      style={{ fontSize: "0.85rem" }}
+                    >
+                      Don&apos;t have an account?{" "}
+                      <button
+                        type="button"
+                        className="gate-toggle-link"
+                        onClick={() => switchMode("signup")}
+                        data-testid="toggle-to-signup"
+                      >
+                        Create account
+                      </button>
+                    </p>
+                  )}
                 </>
               ) : (
-                "Sign In"
+                <>
+                  {signupError && (
+                    <Alert variant="danger" className="py-2">
+                      Could not create your account. Please check your details
+                      and try again.
+                    </Alert>
+                  )}
+                  <Form onSubmit={handleSignupSubmit}>
+                    <Form.Group className="mb-3" controlId="signupEmail">
+                      <Form.Label className="visually-hidden">Email</Form.Label>
+                      <Form.Control
+                        type="email"
+                        placeholder="Email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        autoFocus
+                        autoComplete="username"
+                        disabled={submitting}
+                        isInvalid={signupError}
+                        data-testid="signup-email"
+                      />
+                    </Form.Group>
+
+                    <Form.Group className="mb-3" controlId="signupPassword">
+                      <Form.Label className="visually-hidden">
+                        Password
+                      </Form.Label>
+                      <Form.Control
+                        type="password"
+                        placeholder="Password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="new-password"
+                        disabled={submitting}
+                        isInvalid={signupError}
+                        data-testid="signup-password"
+                      />
+                    </Form.Group>
+
+                    <Form.Group className="mb-4" controlId="signupConfirm">
+                      <Form.Label className="visually-hidden">
+                        Confirm password
+                      </Form.Label>
+                      <Form.Control
+                        type="password"
+                        placeholder="Confirm password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        autoComplete="new-password"
+                        disabled={submitting}
+                        isInvalid={confirmMismatch}
+                        data-testid="signup-confirm"
+                      />
+                      {confirmMismatch && (
+                        <Form.Control.Feedback type="invalid">
+                          Passwords do not match.
+                        </Form.Control.Feedback>
+                      )}
+                    </Form.Group>
+
+                    <Button
+                      type="submit"
+                      className="w-100 login-submit-btn"
+                      style={submitButtonStyle}
+                      disabled={
+                        submitting ||
+                        email.length === 0 ||
+                        password.length === 0 ||
+                        confirmPassword.length === 0
+                      }
+                      data-testid="signup-submit"
+                    >
+                      {submitting ? (
+                        <>
+                          <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                          />
+                          Creating account…
+                        </>
+                      ) : (
+                        "Create account"
+                      )}
+                    </Button>
+                  </Form>
+                  <p
+                    className="text-center text-muted mb-0 mt-4"
+                    style={{ fontSize: "0.85rem" }}
+                  >
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      className="gate-toggle-link"
+                      onClick={() => switchMode("signin")}
+                      data-testid="toggle-to-signin"
+                    >
+                      Sign in
+                    </button>
+                  </p>
+                </>
               )}
-            </Button>
-          </Form>
+            </>
+          )}
         </Card.Body>
       </Card>
     </Container>
