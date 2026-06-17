@@ -94,18 +94,31 @@ class RunDocument(BaseModel):
 class DiscussionDocument(BaseModel):
     """Schema for discussion records."""
 
-    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_DISCUSSION, description="Document schema version for lazy migration")
+    schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_DISCUSSION, description="Document schema version (offline-migrated; see constants)")
     discussion_id: str = Field(..., description="Unique identifier for the discussion")
     run_id: str = Field(..., description="Associated pipeline run ID")
     chat_name: str = Field(..., description="Source chat name")
     title: str = Field(..., description="Discussion title")
     nutshell: str = Field(..., description="Brief summary of the discussion")
+    # Embed-vs-reference decision: message_ids is an embedded array, NOT a
+    # reference collection. Bound: a single discussion holds at most a few
+    # hundred WhatsApp message IDs (~30 bytes each), well under MongoDB's 16MB
+    # document limit. Fallback if that ever breaks (e.g. mega-threads): stop
+    # embedding and look messages up by {run_id, chat_name} range, or bucket
+    # the ids. Embedding is correct here because the ids are always read
+    # together with the discussion and never independently queried.
     message_ids: list[str] = Field(..., description="List of message IDs in this discussion")
     message_count: int = Field(..., description="Number of messages in the discussion")
     ranking_score: float = Field(default=0.0, description="Relevance ranking score (0-10)")
     first_message_timestamp: int | None = Field(None, description="Timestamp of first message")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+    # Semantic-search fields. Large (a 1536-float embedding is ~6KB BSON), so
+    # read/list paths MUST project these out (see DiscussionsRepository); they
+    # are only needed by the vector-search index and similarity queries.
+    embedding: list[float] | None = Field(None, description="Embedding vector for semantic search")
+    embedding_model: str | None = Field(None, description="Model that produced the embedding")
+    embedding_timestamp: datetime | None = Field(None, description="When the embedding was generated")
 
 
 class MessageDocument(BaseModel):

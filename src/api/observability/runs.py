@@ -29,6 +29,7 @@ from constants import (
     COLLECTION_DISCUSSIONS,
     COLLECTION_RUNS,
     DEFAULT_EMBEDDING_MODEL,
+    DISCUSSION_VECTOR_INDEX_NAME,
     DIR_NAME_CONSOLIDATED,
     DIR_NAME_PER_CHAT,
     DIR_NAME_DISCUSSIONS_FOR_SELECTION,
@@ -933,8 +934,8 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
                 pipeline = [
                     {
                         "$vectorSearch": {
-                            "index": "discussion_embeddings",
-                            "path": "embedding",
+                            "index": DISCUSSION_VECTOR_INDEX_NAME,
+                            "path": DbFieldKeys.EMBEDDING,
                             "queryVector": query_embedding,
                             "numCandidates": limit * 10,
                             "limit": limit,

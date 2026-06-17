@@ -118,34 +118,37 @@ async def check_repetition_hybrid(current_discussion: dict[str, Any], run_ids_to
         if not current_embedding:
             raise ValueError("Failed to generate embedding for current discussion")
 
-        # Step 2: Load historical embeddings from MongoDB
+        # Step 2: Find similar historical discussions server-side via $vectorSearch.
+        # The DB does the similarity (HNSW), the relevance floor, the sort, and
+        # returns only top-k candidate metadata — embeddings never leave the
+        # server. Replaces the former pull-1000-embeddings-and-score-in-Python scan.
         db = await get_database()
         repo = DiscussionsRepository(db)
 
-        historical_discussions = await repo.get_discussions_with_embeddings(
+        candidates = await repo.find_similar_discussions(
+            query_embedding=current_embedding,
             run_ids=run_ids_to_check,
-            limit=1000,  # Should cover all historical discussions
+            top_k=top_k_matches,
+            min_score=similarity_threshold,
         )
 
-        if not historical_discussions:
-            logger.info("No historical discussions with embeddings found")
+        if not candidates:
+            logger.info("No similar historical discussions found via vector search")
             return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: "No historical discussions available for comparison", "similar_historical": [], "penalty_applied": 0.0}
 
-        # Step 3: Compute similarities and find top-K matches
-        similar_historical = []
-
-        for hist_disc in historical_discussions:
-            if DiscussionKeys.EMBEDDING not in hist_disc:
-                logger.warning(f"Missing embedding for discussion {hist_disc[DbFieldKeys.DISCUSSION_ID]}")
-                continue
-
-            similarity = embedder.compute_similarity(current_embedding, hist_disc[DiscussionKeys.EMBEDDING])
-
-            if similarity >= similarity_threshold:
-                similar_historical.append({DbFieldKeys.DISCUSSION_ID: hist_disc[DbFieldKeys.DISCUSSION_ID], DiscussionKeys.TITLE: hist_disc[DiscussionKeys.TITLE], DiscussionKeys.NUTSHELL: hist_disc[DiscussionKeys.NUTSHELL], DbFieldKeys.CHAT_NAME: hist_disc.get(DbFieldKeys.CHAT_NAME, "Unknown"), "newsletter_date": hist_disc.get("created_at", datetime.now(UTC)).strftime("%Y-%m-%d"), "similarity": similarity})
-
-        # Sort by similarity and take top-K
-        top_matches = sorted(similar_historical, key=lambda x: x["similarity"], reverse=True)[:top_k_matches]
+        # Step 3: Shape candidates for the validation prompt (already filtered,
+        # scored, and sorted by the DB; just project to the display shape).
+        top_matches = [
+            {
+                DbFieldKeys.DISCUSSION_ID: c[DbFieldKeys.DISCUSSION_ID],
+                DiscussionKeys.TITLE: c[DiscussionKeys.TITLE],
+                DiscussionKeys.NUTSHELL: c[DiscussionKeys.NUTSHELL],
+                DbFieldKeys.CHAT_NAME: c.get(DbFieldKeys.CHAT_NAME, "Unknown"),
+                "newsletter_date": c.get("created_at", datetime.now(UTC)).strftime("%Y-%m-%d"),
+                "similarity": c["similarity"],
+            }
+            for c in candidates
+        ]
 
         logger.info(f"Found {len(top_matches)} similar historical discussions " f"(threshold: {similarity_threshold:.2f})")
 

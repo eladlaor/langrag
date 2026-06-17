@@ -8,9 +8,10 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import WriteConcern
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_RUNS, CURRENT_SCHEMA_VERSION_RUN, RunStatus, SCHEMA_VERSION_FIELD
+from constants import COLLECTION_RUNS, CURRENT_SCHEMA_VERSION_RUN, RunStatus, SCHEMA_VERSION_FIELD, WRITE_CONCERN_MAJORITY
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ class RunsRepository(BaseRepository):
     """
 
     def __init__(self, db: AsyncIOMotorDatabase):
-        super().__init__(db, COLLECTION_RUNS)
+        # Durable record: majority write concern so a completed/failed run
+        # survives a primary failover on multi-node Atlas.
+        super().__init__(db, COLLECTION_RUNS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))
 
     async def create_run(
         self,
@@ -77,17 +80,22 @@ class RunsRepository(BaseRepository):
             {"$set": {"status": RunStatus.RUNNING, "started_at": datetime.now(UTC)}},
         )
 
-    async def complete_run(self, run_id: str, output_path: str = None) -> bool:
-        """Mark run as completed."""
+    async def complete_run(self, run_id: str, output_path: str = None, metrics: dict[str, Any] | None = None) -> bool:
+        """Mark run as completed.
+
+        Status and metrics are written in a single update so there is no
+        intermediate window where a run is `completed` but metrics-less.
+        """
+        fields_to_set: dict[str, Any] = {
+            "status": RunStatus.COMPLETED,
+            "completed_at": datetime.now(UTC),
+            "output_path": output_path,
+        }
+        if metrics:
+            fields_to_set["metrics"] = metrics
         return await self.update_one(
             {"run_id": run_id},
-            {
-                "$set": {
-                    "status": RunStatus.COMPLETED,
-                    "completed_at": datetime.now(UTC),
-                    "output_path": output_path,
-                }
-            },
+            {"$set": fields_to_set},
         )
 
     async def fail_run(self, run_id: str, error: str) -> bool:

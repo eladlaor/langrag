@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import PyMongoError
 
 from constants import COLLECTION_RAG_API_KEYS, RAG_API_KEY_PREFIX
 from custom_types.field_keys import RAGApiKeyKeys as Keys
@@ -67,7 +68,7 @@ class RAGApiKeysRepository(BaseRepository):
             {Keys.KEY_ID: key_id},
             {"$set": {Keys.ENABLED: False}},
         )
-        return updated > 0
+        return updated
 
     async def touch_last_used(self, key_id: str) -> None:
         """Best-effort update of last_used_at; failures are swallowed (non-critical path)."""
@@ -76,7 +77,7 @@ class RAGApiKeysRepository(BaseRepository):
                 {Keys.KEY_ID: key_id},
                 {"$set": {Keys.LAST_USED_AT: datetime.now(UTC)}},
             )
-        except Exception as e:
+        except PyMongoError as e:
             logger.warning(f"Failed to update last_used_at for key_id={key_id}: {e}")
 
     async def list_keys(self) -> list[dict[str, Any]]:

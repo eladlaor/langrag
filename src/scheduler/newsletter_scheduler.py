@@ -21,6 +21,7 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
+from pymongo import ReadPreference
 
 from constants import (
     CHANGE_STREAM_RECONNECT_DELAY_SECONDS,
@@ -214,7 +215,9 @@ async def _change_stream_watcher() -> None:
     while not _shutdown_event.is_set():
         try:
             db = await get_database()
-            collection = db[COLLECTION_SCHEDULED_NEWSLETTERS]
+            # Pin the change-stream source to the primary so the watcher never
+            # opens against a lagging secondary and misses or reorders events.
+            collection = db.get_collection(COLLECTION_SCHEDULED_NEWSLETTERS, read_preference=ReadPreference.PRIMARY)
 
             # `fullDocument='updateLookup'` is required so update events carry
             # the post-image with the new next_run/enabled values.
@@ -245,7 +248,7 @@ async def _change_stream_watcher() -> None:
                     _shutdown_event.wait(), timeout=CHANGE_STREAM_RECONNECT_DELAY_SECONDS
                 )
                 return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
 

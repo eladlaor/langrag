@@ -11,9 +11,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import WriteConcern
 from pymongo.errors import DuplicateKeyError
 
-from constants import COLLECTION_USERS, CURRENT_SCHEMA_VERSION_USER, SCHEMA_VERSION_FIELD
+from constants import COLLECTION_USERS, CURRENT_SCHEMA_VERSION_USER, SCHEMA_VERSION_FIELD, WRITE_CONCERN_MAJORITY
 from custom_types.db_schemas import AuthProvider, UserDailyUsage, UserQuotas, UserRole
 from custom_types.field_keys import UserKeys as Keys
 from db.repositories.base import BaseRepository
@@ -38,7 +39,9 @@ class UsersRepository(BaseRepository):
     """Repository for community-admin user records."""
 
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
-        super().__init__(db, COLLECTION_USERS)
+        # Durable record: majority write concern so an account (and its
+        # disabled/role state) survives a primary failover on multi-node Atlas.
+        super().__init__(db, COLLECTION_USERS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))
 
     async def create_user(
         self,

@@ -173,6 +173,56 @@ class MessagesRepository(BaseRepository):
 
         return await self.find_many(query, sort=[("timestamp", 1)], limit=limit)
 
+    async def get_messages_page(
+        self,
+        run_id: str,
+        chat_name: str | None = None,
+        page_size: int = 1000,
+        cursor: tuple[int, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], tuple[int, str] | None]:
+        """
+        Range-based (keyset) pagination over a run's messages.
+
+        Unlike skip/limit, this scans forward from a stable (timestamp,
+        message_id) cursor, so it stays O(page_size) regardless of how deep the
+        page is and is immune to documents shifting between pages. Backed by the
+        {run_id, chat_name, timestamp} compound index; the find_many ceiling is
+        now only a backstop, not the paging mechanism.
+
+        Args:
+            run_id: Run identifier (equality).
+            chat_name: Optional chat-name filter (equality).
+            page_size: Max documents per page.
+            cursor: (timestamp, message_id) of the last doc from the previous
+                page, or None for the first page.
+
+        Returns:
+            (page, next_cursor). next_cursor is None when the run is exhausted.
+        """
+        query: dict[str, Any] = {DbFieldKeys.RUN_ID: run_id}
+        if chat_name:
+            query[DbFieldKeys.CHAT_NAME] = chat_name
+        if cursor is not None:
+            last_ts, last_id = cursor
+            # Strictly after the cursor in (timestamp, message_id) order. The
+            # message_id tiebreaker keeps progress correct when timestamps tie.
+            query["$or"] = [
+                {DbFieldKeys.TIMESTAMP: {"$gt": last_ts}},
+                {DbFieldKeys.TIMESTAMP: last_ts, DbFieldKeys.MESSAGE_ID: {"$gt": last_id}},
+            ]
+
+        page = await self.find_many(
+            query,
+            sort=[(DbFieldKeys.TIMESTAMP, 1), (DbFieldKeys.MESSAGE_ID, 1)],
+            limit=page_size,
+        )
+
+        next_cursor: tuple[int, str] | None = None
+        if len(page) == page_size:
+            last = page[-1]
+            next_cursor = (last[DbFieldKeys.TIMESTAMP], last[DbFieldKeys.MESSAGE_ID])
+        return page, next_cursor
+
     async def count_messages_by_run(self, run_id: str, chat_name: str | None = None) -> int:
         """
         Count messages for a run.

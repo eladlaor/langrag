@@ -15,6 +15,8 @@ Usage (async nodes in LangGraph 1.0+):
 import logging
 import uuid
 
+from pymongo.errors import PyMongoError
+
 from constants import NewsletterVersionType, RunStatus
 from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, RankingResultKeys
 from datetime import UTC
@@ -90,7 +92,7 @@ class RunTracker:
         try:
             await self._runs_repo.start_run(run_id)
             return True
-        except Exception as e:
+        except PyMongoError as e:
             logger.warning(f"Failed to start run: {e}")
             return False
 
@@ -102,7 +104,7 @@ class RunTracker:
         try:
             await self._runs_repo.update_stage(run_id, stage, status, metadata)
             return True
-        except Exception as e:
+        except PyMongoError as e:
             logger.warning(f"Failed to update stage: {e}")
             return False
 
@@ -112,12 +114,10 @@ class RunTracker:
             return False
 
         try:
-            await self._runs_repo.complete_run(run_id, output_path)
-            if metrics:
-                await self._runs_repo.update_one({"run_id": run_id}, {"$set": {"metrics": metrics}})
+            await self._runs_repo.complete_run(run_id, output_path, metrics)
             logger.info(f"Completed run: {run_id}")
             return True
-        except Exception as e:
+        except PyMongoError as e:
             logger.warning(f"Failed to complete run: {e}")
             return False
 
@@ -129,7 +129,7 @@ class RunTracker:
         try:
             await self._runs_repo.fail_run(run_id, error)
             return True
-        except Exception as e:
+        except PyMongoError as e:
             logger.warning(f"Failed to mark run as failed: {e}")
             return False
 
@@ -154,10 +154,10 @@ class RunTracker:
             # "diagnostic_report" and "diagnostic_report.generated_at" in one $set
             # is a conflicting-path update that MongoDB rejects outright.
             report_to_store = {**diagnostic_report, DbFieldKeys.GENERATED_AT: datetime.now(UTC)}
-            result = await self._runs_repo.update_one({DbFieldKeys.RUN_ID: run_id}, {"$set": {DbFieldKeys.DIAGNOSTIC_REPORT: report_to_store}})
+            persisted = await self._runs_repo.update_one({DbFieldKeys.RUN_ID: run_id}, {"$set": {DbFieldKeys.DIAGNOSTIC_REPORT: report_to_store}})
             logger.info(f"Stored diagnostic report for run: {run_id}")
-            return result.modified_count > 0
-        except Exception as e:
+            return persisted
+        except PyMongoError as e:
             logger.warning(f"Failed to store diagnostic report for run {run_id}: {e}")
             return False
 

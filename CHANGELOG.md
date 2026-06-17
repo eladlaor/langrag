@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-06-17
+
+### Added
+- **Discussion vector index is now created in code:** `ensure_indexes()` builds the `discussion_embeddings` Atlas vector-search index programmatically (modern `vectorSearch` syntax, scalar quantization, `run_id`/`chat_name` filter fields), with the same startup dimension-mismatch fail-fast as the RAG chunk index. The former "create it by hand in the Atlas UI" docstring is gone — no manual setup step remains.
+- **Schema-version startup guard:** `ensure_schema_versions()` refuses to start the process if any stored document carries an explicit `schema_version` below the minimum supported version for its collection (documents missing the field are treated as pre-versioning and read fine via defaults). There is no read-path migration ladder; migrations remain offline/eager.
+- **Keyset pagination for messages:** `get_messages_page()` paginates a run's messages by a stable `(timestamp, message_id)` cursor instead of skip/limit, backed by a new `{run_id, chat_name, timestamp, message_id}` compound index so the sort is fully index-covered.
+
+### Changed
+- **Anti-repetition similarity now runs server-side:** historical-discussion similarity is computed via MongoDB `$vectorSearch` over the `discussion_embeddings` index (top-k, with a `run_id` pre-filter inside the stage) instead of pulling up to 1000 full embeddings to the client and scoring them in Python. Embeddings never leave the server.
+- **Discussion embeddings stored as BSON Binary (FLOAT32):** discussion embeddings are now persisted as Binary subtype 9 (≈2× smaller than a float array), matching the RAG chunk storage format. Documents are built through the `DiscussionDocument` model as the single source of truth, and read/list paths project the embedding out.
+- **Durable write concern:** `runs`, `newsletters`, and `users` records are now written with `w:"majority"` so they survive a primary failover; caches and ephemeral state keep the default. The scheduled-newsletter change-stream watcher reads from the primary explicitly.
+- **Atomic run completion:** a run's status and metrics are now written in a single update, removing the window where a run could be `completed` but metrics-less.
+
+### Fixed
+- **Diagnostics persistence was silently broken:** `update_run_diagnostics` read `.modified_count` on a boolean return value, raising an `AttributeError` that the surrounding fail-soft handler swallowed, so diagnostic reports were never stored. The repository's `update_one`/`delete_one` boolean contract is now honored at the call sites and documented; fail-soft handlers were narrowed to `PyMongoError` so a programmer error propagates instead of being hidden.
+- **Extraction-cache `created_at` was overwritten on every re-cache:** it now uses `$setOnInsert` so `created_at` is the true first-cached time, with a separate `updated_at` tracking the latest write.
+
 ## [1.17.0] - 2026-06-16
 
 ### Added
@@ -297,7 +314,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.1...HEAD
+[1.17.1]: https://github.com/eladlaor/langrag/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/eladlaor/langrag/compare/v1.16.2...v1.17.0
 [1.16.2]: https://github.com/eladlaor/langrag/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/eladlaor/langrag/compare/v1.16.0...v1.16.1

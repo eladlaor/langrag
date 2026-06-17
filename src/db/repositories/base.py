@@ -8,6 +8,7 @@ import logging
 from typing import Any, TypeVar, Generic
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pydantic import BaseModel
+from pymongo import WriteConcern
 
 from constants import DEFAULT_MAX_QUERY_RESULTS
 
@@ -26,16 +27,20 @@ class BaseRepository(Generic[T]):
     - Query helpers
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase, collection_name: str):
+    def __init__(self, db: AsyncIOMotorDatabase, collection_name: str, write_concern: WriteConcern | None = None):
         """
         Initialize repository with database and collection.
 
         Args:
             db: AsyncIOMotorDatabase instance
             collection_name: Name of the MongoDB collection
+            write_concern: Optional per-collection write concern. Durable-record
+                repositories pass WriteConcern(w="majority") so the write
+                survives a primary failover; omitting it keeps the driver
+                default (w:1), which is correct for caches and ephemeral state.
         """
         self.db = db
-        self.collection: AsyncIOMotorCollection = db[collection_name]
+        self.collection: AsyncIOMotorCollection = db.get_collection(collection_name, write_concern=write_concern) if write_concern is not None else db[collection_name]
         self.collection_name = collection_name
 
     async def create(self, document: dict[str, Any]) -> str:
@@ -172,7 +177,12 @@ class BaseRepository(Generic[T]):
             upsert: Create document if not exists
 
         Returns:
-            True if document was modified
+            True when the document was modified OR upserted, False otherwise.
+
+            This boolean is the load-bearing contract: callers must treat the
+            return value as a bool, NOT as a pymongo ``UpdateResult``. The
+            pymongo result is intentionally collapsed here so the abstraction
+            does not leak the driver type back to repositories.
         """
         try:
             result = await self.collection.update_one(query, update, upsert=upsert)

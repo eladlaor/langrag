@@ -95,10 +95,13 @@ class ExtractionCacheRepository(BaseRepository):
             # Count encrypted messages
             encrypted_count = sum(1 for msg in messages if msg.get("encrypted", False))
 
-            document = {"cache_key": cache_key, DbFieldKeys.CHAT_NAME: chat_name, "chat_name_normalized": self._normalize_chat_name(chat_name), DbFieldKeys.ROOM_ID: room_id, "start_date": start_date, "end_date": end_date, "messages": messages, "message_count": len(messages), "encrypted_count": encrypted_count, "extraction_metadata": extraction_metadata or {}, "created_at": now, "expires_at": now + timedelta(days=ttl_days)}
+            # created_at is set ONLY on first insert ($setOnInsert) so it keeps
+            # meaning "first cached at" across re-caches; updated_at tracks the
+            # latest write. Everything else (including the refreshed TTL) is $set.
+            fields_to_set = {"cache_key": cache_key, DbFieldKeys.CHAT_NAME: chat_name, "chat_name_normalized": self._normalize_chat_name(chat_name), DbFieldKeys.ROOM_ID: room_id, "start_date": start_date, "end_date": end_date, "messages": messages, "message_count": len(messages), "encrypted_count": encrypted_count, "extraction_metadata": extraction_metadata or {}, "updated_at": now, "expires_at": now + timedelta(days=ttl_days)}
 
-            # Upsert to handle re-caching
-            await self.update_one({"cache_key": cache_key}, {"$set": document}, upsert=True)
+            # Upsert to handle re-caching.
+            await self.update_one({"cache_key": cache_key}, {"$set": fields_to_set, "$setOnInsert": {"created_at": now}}, upsert=True)
 
             logger.info(f"Cached extraction: {cache_key} " f"({len(messages)} messages, {encrypted_count} encrypted, TTL={ttl_days}d)")
 

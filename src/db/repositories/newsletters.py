@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import WriteConcern
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_NEWSLETTERS, CURRENT_SCHEMA_VERSION_NEWSLETTER, FileFormat, NewsletterStatus, NewsletterVersionType, FILE_EXT_JSON, FILE_EXT_MD, FILE_EXT_HTML, SCHEMA_VERSION_FIELD
+from constants import COLLECTION_NEWSLETTERS, CURRENT_SCHEMA_VERSION_NEWSLETTER, FileFormat, NewsletterStatus, NewsletterVersionType, FILE_EXT_JSON, FILE_EXT_MD, FILE_EXT_HTML, SCHEMA_VERSION_FIELD, WRITE_CONCERN_MAJORITY
 from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys, ContentResultKeys
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,9 @@ class NewslettersRepository(BaseRepository):
     """
 
     def __init__(self, db: AsyncIOMotorDatabase):
-        super().__init__(db, COLLECTION_NEWSLETTERS)
+        # Durable record: majority write concern so a persisted newsletter
+        # survives a primary failover on multi-node Atlas.
+        super().__init__(db, COLLECTION_NEWSLETTERS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))
 
     async def create_newsletter(
         self,

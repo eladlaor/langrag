@@ -4,51 +4,11 @@ MongoDB Index Definitions
 Defines indexes for all collections to optimize query performance.
 Run ensure_indexes() on application startup.
 
-Vector Search Index (Manual Setup Required):
--------------------------------------------
-For semantic search via embedding_service.py, you need to create a
-vector search index on the 'discussions' collection. This must be done
-manually through MongoDB Atlas UI or mongosh:
-
-1. Via MongoDB Atlas UI:
-   - Go to Atlas > Database > Browse Collections > discussions
-   - Click "Search Indexes" tab
-   - Create Search Index with this definition:
-
-   {
-     "name": "discussion_embeddings",
-     "definition": {
-       "mappings": {
-         "dynamic": true,
-         "fields": {
-           "embedding": {
-             "dimensions": 1536,
-             "similarity": "cosine",
-             "type": "knnVector"
-           }
-         }
-       }
-     }
-   }
-
-2. Via mongosh:
-   db.discussions.createSearchIndex({
-     name: "discussion_embeddings",
-     definition: {
-       mappings: {
-         dynamic: true,
-         fields: {
-           embedding: {
-             dimensions: 1536,
-             similarity: "cosine",
-             type: "knnVector"
-           }
-         }
-       }
-     }
-   })
-
-Note: Vector search requires MongoDB Atlas or mongot sidecar service.
+All vector search indexes (rag_chunks, discussions, agent_memories) are created
+programmatically by ensure_indexes() using the modern vectorSearch syntax with
+scalar quantization. There is no manual Atlas-UI / mongosh setup step: indexes
+are code. Vector search requires MongoDB Atlas or the mongot sidecar; when it is
+unavailable the per-index builders log and continue.
 """
 
 import asyncio
@@ -66,11 +26,14 @@ from constants import (
     COLLECTION_DISCUSSIONS,
     COLLECTION_RAG_CHUNKS,
     DEFAULT_EMBEDDING_DIMENSION,
+    DISCUSSION_VECTOR_INDEX_NAME,
+    MIN_SUPPORTED_SCHEMA_VERSIONS,
     RAG_LEXICAL_INDEX_NAME,
     RAG_VECTOR_INDEX_NAME,
     RAG_VECTOR_INDEX_NAME_LEGACY,
+    SCHEMA_VERSION_FIELD,
 )
-from custom_types.field_keys import AgentMemoryKeys, RAGChunkKeys
+from custom_types.field_keys import AgentMemoryKeys, DbFieldKeys, RAGChunkKeys
 
 # Legacy on-disk text index that no longer has a queryer in the codebase.
 # Kept here so ensure_indexes() can drop it idempotently from existing
@@ -120,6 +83,12 @@ INDEXES = {
         {"keys": [("run_id", ASCENDING), ("chat_name", ASCENDING)]},
         # Query by run + timestamp (for chronological ordering)
         {"keys": [("run_id", ASCENDING), ("timestamp", ASCENDING)]},
+        # ESR-correct compound for get_messages_by_run and get_messages_page:
+        # equality on run_id (+ optional chat_name), then the (timestamp,
+        # message_id) sort key. message_id is included so keyset pagination's
+        # tiebreaker sort is fully index-covered (no residual in-memory SORT on
+        # equal-timestamp groups) and its $or cursor predicate is index-backed.
+        {"keys": [("run_id", ASCENDING), ("chat_name", ASCENDING), ("timestamp", ASCENDING), ("message_id", ASCENDING)]},
         # Lookup by original Matrix event ID
         {"keys": [("matrix_event_id", ASCENDING)]},
         # Query by discussion (deprecated - kept for backward compatibility)
@@ -326,6 +295,43 @@ INDEXES = {
 }
 
 
+async def ensure_schema_versions(db: AsyncIOMotorDatabase) -> None:
+    """Fail fast if any stored document carries a schema_version BELOW the
+    minimum supported version for its collection.
+
+    There is no read-path migration ladder: documents are expected to be at the
+    current schema version (migrations are applied offline/eager via scripts).
+    This guard refuses to start the process if it finds a document whose
+    explicit schema_version is below MIN_SUPPORTED_SCHEMA_VERSIONS, so a stale
+    document can never be silently misread by code that assumes the current
+    shape. On a clean or up-to-date database this is a cheap, count-only no-op.
+
+    A document MISSING the field entirely is NOT treated as stale: the stamp was
+    introduced additively, so pre-versioning documents read back correctly via
+    model defaults. Treating them as stale would block startup on every existing
+    deployment for no correctness benefit. Only an explicit, too-low version
+    indicates a document that genuinely predates a non-additive shape change.
+    """
+    try:
+        for collection_name, min_version in MIN_SUPPORTED_SCHEMA_VERSIONS.items():
+            collection = db[collection_name]
+            stale_count = await collection.count_documents({SCHEMA_VERSION_FIELD: {"$lt": min_version}})
+            if stale_count:
+                raise RuntimeError(
+                    f"Schema-version guard: {stale_count} document(s) in "
+                    f"'{collection_name}' are below the minimum supported "
+                    f"schema_version ({min_version}). There is no read-path "
+                    f"migration; run the offline migration script for this "
+                    f"collection before starting."
+                )
+        logger.info("Schema-version guard passed for all versioned collections")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.error(f"Schema-version guard failed to run: {e}")
+        raise RuntimeError(f"Schema-version guard failed: {e}") from e
+
+
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     """
     Create all indexes for all collections.
@@ -342,6 +348,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         db: AsyncIOMotorDatabase instance
     """
     try:
+        # Refuse to start against documents older than the minimum supported
+        # schema version (no lazy migration exists to upgrade them on read).
+        await ensure_schema_versions(db)
+
         for collection_name, indexes in INDEXES.items():
             collection = db[collection_name]
             logger.info(f"Ensuring indexes for collection: {collection_name}")
@@ -362,6 +372,9 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
         # Create vector search index for RAG chunks (idempotent)
         await _ensure_vector_search_index(db)
+        # Create vector search index for discussions (idempotent). Same modern
+        # vectorSearch syntax; replaces the former manual Atlas-UI setup step.
+        await _ensure_discussion_vector_index(db)
         # Create lexical Atlas Search index for hybrid retrieval via $rankFusion.
         # Required when hybrid_enabled=True; otherwise best-effort.
         from config import get_settings  # local import to avoid cycles at module load
@@ -396,7 +409,7 @@ def _resolve_target_index_dimensions() -> int:
     then the model's native dimension from EMBEDDING_MODEL_DIMENSIONS.
     """
     from config import get_settings
-    from constants import DEFAULT_EMBEDDING_DIMENSION, EMBEDDING_MODEL_DIMENSIONS
+    from constants import EMBEDDING_MODEL_DIMENSIONS
 
     settings = get_settings()
     if settings.rag_embedding.dimensions is not None:
@@ -420,10 +433,13 @@ def _extract_vector_index_dimensions(idx_info: dict) -> int | None:
     return None
 
 
-def _validate_embedding_dims_against_index(index_dims: int | None) -> None:
+def _validate_embedding_dims_against_index(index_dims: int | None, index_name: str = RAG_VECTOR_INDEX_NAME) -> None:
     """Fail-fast if the configured RAG embedding dimensions don't match the
     vector index. Mismatched dims silently break HNSW queries; we refuse to
     start in that state so the operator does a deliberate re-ingest.
+
+    index_name only affects the error message; both the RAG chunk index and the
+    discussions index are built from the same resolved embedding dimensions.
     """
     if index_dims is None:
         return
@@ -443,8 +459,8 @@ def _validate_embedding_dims_against_index(index_dims: int | None) -> None:
 
     if configured_dims != index_dims:
         raise RuntimeError(
-            f"Embedding dimension mismatch: vector index '{RAG_VECTOR_INDEX_NAME}' "
-            f"was built with numDimensions={index_dims}, but the configured RAG "
+            f"Embedding dimension mismatch: vector index '{index_name}' "
+            f"was built with numDimensions={index_dims}, but the configured "
             f"embedding produces {configured_dims}-dim vectors. HNSW requires dim "
             f"equality; queries against this index would return zero recall. "
             f"Either revert the embedding model/dimensions config or run a full "
@@ -550,6 +566,64 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
             f"Could not create vector search index '{RAG_VECTOR_INDEX_NAME}': {e}. "
             f"RAG vector search will not work until this index is created. "
             f"If using local MongoDB, ensure the mongot sidecar service is running."
+        )
+
+
+async def _ensure_discussion_vector_index(db: AsyncIOMotorDatabase) -> None:
+    """
+    Create the vector search index on the discussions collection if it doesn't
+    already exist. Mirrors _ensure_vector_search_index (rag_chunks): modern
+    `fields`/vectorSearch syntax with scalar quantization, plus `filter` entries
+    on run_id and chat_name so anti-repetition similarity can pre-filter inside
+    the $vectorSearch stage rather than with a post-$match.
+
+    Idempotent and best-effort: when mongot/Atlas is unavailable (e.g. local dev
+    without the sidecar) it logs and continues, like the RAG chunk index.
+    """
+    collection = db[COLLECTION_DISCUSSIONS]
+
+    try:
+        existing_index_dims: int | None = None
+        existing_indexes = []
+        async for idx in collection.list_search_indexes():
+            name = idx.get("name", "")
+            existing_indexes.append(name)
+            if name == DISCUSSION_VECTOR_INDEX_NAME:
+                existing_index_dims = _extract_vector_index_dimensions(idx)
+
+        if DISCUSSION_VECTOR_INDEX_NAME in existing_indexes:
+            logger.debug(f"Vector search index '{DISCUSSION_VECTOR_INDEX_NAME}' already exists")
+            _validate_embedding_dims_against_index(existing_index_dims, DISCUSSION_VECTOR_INDEX_NAME)
+            return
+
+        target_dims = _resolve_target_index_dimensions()
+        search_index = SearchIndexModel(
+            definition={
+                "fields": [
+                    {
+                        "type": "vector",
+                        "path": DbFieldKeys.EMBEDDING,
+                        "numDimensions": target_dims,
+                        "similarity": "cosine",
+                        "quantization": "scalar",
+                    },
+                    {"type": "filter", "path": DbFieldKeys.RUN_ID},
+                    {"type": "filter", "path": DbFieldKeys.CHAT_NAME},
+                ]
+            },
+            name=DISCUSSION_VECTOR_INDEX_NAME,
+            type="vectorSearch",
+        )
+
+        await collection.create_search_index(search_index)
+        logger.info(f"Created vector search index: {DISCUSSION_VECTOR_INDEX_NAME}")
+        await _wait_for_search_index_ready(collection, DISCUSSION_VECTOR_INDEX_NAME)
+
+    except Exception as e:
+        logger.warning(
+            f"Could not create vector search index '{DISCUSSION_VECTOR_INDEX_NAME}': {e}. "
+            f"Discussion semantic search / anti-repetition will not work until this "
+            f"index is created. If using local MongoDB, ensure the mongot sidecar is running."
         )
 
 

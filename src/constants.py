@@ -450,10 +450,27 @@ COLLECTION_ACCESS_REQUESTS = "access_requests"
 # repository logs a warning so the truncation is never silent.
 DEFAULT_MAX_QUERY_RESULTS = 10000
 
+# Write concern for durable records that MUST survive a primary failover on a
+# multi-node Atlas/replica-set deployment: the write is acknowledged only once a
+# majority of voting members have it. Applied per-collection to runs,
+# newsletters, and users. Caches and ephemeral/derivable state (extraction_cache,
+# translation_cache, room_id_map, llm_response_cache) deliberately stay on the
+# driver default (w:1): losing a cache entry on failover is cheap and
+# regenerable, and majority acks would add latency to hot write paths.
+WRITE_CONCERN_MAJORITY = "majority"
+
 # Schema version stamps written on every persisted document. Per-collection so
-# each document type can evolve its schema independently without forcing
-# lockstep migrations. Read by future lazy-migration code; bump the matching
-# constant when a doc type's shape changes in a non-additive way.
+# each document type can evolve its schema independently.
+#
+# Migration model: there is NO read-path upgrade ladder. Any schema migration is
+# performed OFFLINE/EAGER by an explicit one-time script (see scripts/), not
+# rewritten lazily on read. The startup guard (ensure_schema_versions, called
+# from ensure_indexes) enforces this contract: it refuses to start if any stored
+# document carries an EXPLICIT schema_version BELOW the current constant, so a
+# stale document can never be silently misread. A document missing the field is
+# treated as pre-versioning (reads fine via model defaults), not stale. Bump the
+# matching constant when a doc type's shape changes in a non-additive way, and
+# ship the migration script alongside it.
 SCHEMA_VERSION_FIELD = "schema_version"
 CURRENT_SCHEMA_VERSION_RUN = 1
 CURRENT_SCHEMA_VERSION_DISCUSSION = 1
@@ -468,6 +485,23 @@ CURRENT_SCHEMA_VERSION_USER_API_KEY = 1
 CURRENT_SCHEMA_VERSION_AGENT_SESSION = 1
 CURRENT_SCHEMA_VERSION_AGENT_MEMORY = 1
 CURRENT_SCHEMA_VERSION_ACCESS_REQUEST = 1
+
+# Minimum supported schema_version per collection, enforced at startup by
+# ensure_schema_versions(). With no read-path migration ladder, the minimum
+# supported version equals the current version for every collection: a document
+# below it cannot be safely read and must be migrated offline first. Only
+# collections that actually stamp schema_version are listed.
+MIN_SUPPORTED_SCHEMA_VERSIONS: dict[str, int] = {
+    COLLECTION_RUNS: CURRENT_SCHEMA_VERSION_RUN,
+    COLLECTION_DISCUSSIONS: CURRENT_SCHEMA_VERSION_DISCUSSION,
+    COLLECTION_MESSAGES: CURRENT_SCHEMA_VERSION_MESSAGE,
+    COLLECTION_NEWSLETTERS: CURRENT_SCHEMA_VERSION_NEWSLETTER,
+    COLLECTION_RAG_CHUNKS: CURRENT_SCHEMA_VERSION_RAG_CHUNK,
+    COLLECTION_USERS: CURRENT_SCHEMA_VERSION_USER,
+    COLLECTION_USER_API_KEYS: CURRENT_SCHEMA_VERSION_USER_API_KEY,
+    COLLECTION_AGENT_SESSIONS: CURRENT_SCHEMA_VERSION_AGENT_SESSION,
+    COLLECTION_AGENT_MEMORIES: CURRENT_SCHEMA_VERSION_AGENT_MEMORY,
+}
 
 # Agent memory Atlas Search indexes (paired via $rankFusion).
 AGENT_MEMORY_VECTOR_INDEX_NAME = "agent_memory_embeddings"
@@ -492,6 +526,11 @@ RAG_VECTOR_INDEX_NAME_LEGACY = "rag_chunk_embeddings"
 # RAG lexical (Atlas Search) index over rag_chunks.content for hybrid retrieval
 # via $rankFusion (MongoDB 8.1+).
 RAG_LEXICAL_INDEX_NAME = "rag_chunks_lexical"
+
+# Vector search index on the discussions collection, created on startup (same
+# modern vectorSearch syntax + scalar quantization as the RAG chunk index).
+# Used by anti-repetition similarity and the discussion-search endpoint.
+DISCUSSION_VECTOR_INDEX_NAME = "discussion_embeddings"
 
 # Default weights for $rankFusion hybrid retrieval (vector + lexical).
 RAG_HYBRID_VECTOR_WEIGHT = 0.7
