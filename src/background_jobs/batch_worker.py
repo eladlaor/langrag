@@ -41,8 +41,10 @@ from constants import (
     CONTENT_TYPE_JSON,
     OUTPUT_DIR_PERIODIC_NEWSLETTER,
     OUTPUT_BASE_DIR_NAME,
+    WEBHOOK_EVENT_BATCH_JOB_COMPLETED,
     WorkflowNames,
 )
+from custom_types.field_keys import BatchJobKeys
 from graphs.state_keys import ParallelOrchestratorStateKeys as OrchestratorKeys
 from utils.output_paths import build_run_output_dir
 
@@ -78,16 +80,16 @@ async def send_webhook_notification(webhook_url: str, job_id: str, status: str, 
         True if notification sent successfully
     """
     payload = {
-        "event": "batch_job_completed",
-        "job_id": job_id,
-        "status": status,
+        "event": WEBHOOK_EVENT_BATCH_JOB_COMPLETED,
+        BatchJobKeys.JOB_ID: job_id,
+        BatchJobKeys.STATUS: status,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
     if output_dir:
-        payload["output_dir"] = output_dir
+        payload[BatchJobKeys.OUTPUT_DIR] = output_dir
     if error_message:
-        payload["error_message"] = error_message
+        payload[BatchJobKeys.ERROR_MESSAGE] = error_message
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT_BATCH_WORKER) as client:
@@ -136,8 +138,8 @@ async def process_batch_job(job: dict) -> tuple[bool, str | None, str | None]:
     Returns:
         Tuple of (success, output_dir, error_message)
     """
-    job_id = job.get("job_id")
-    request = job.get("request", {})
+    job_id = job.get(BatchJobKeys.JOB_ID)
+    request = job.get(BatchJobKeys.REQUEST, {})
 
     logger.info(f"Processing batch job: {job_id}")
     logger.info(f"  Data source: {request.get('data_source_name')}")
@@ -214,7 +216,7 @@ async def process_job_async(job: dict) -> None:
     Handling claiming, processing, and status updates.
     Using native async operations (LangGraph 1.0+).
     """
-    job_id = job.get("job_id")
+    job_id = job.get(BatchJobKeys.JOB_ID)
     manager = _get_manager()
 
     try:
@@ -237,8 +239,8 @@ async def process_job_async(job: dict) -> None:
             logger.error(f"Batch job failed: {job_id} - {error_message}")
 
         # Sending notifications
-        webhook_url = job.get("webhook_url")
-        notification_email = job.get("notification_email")
+        webhook_url = job.get(BatchJobKeys.WEBHOOK_URL)
+        notification_email = job.get(BatchJobKeys.NOTIFICATION_EMAIL)
         final_status = BatchJobStatus.COMPLETED if success else BatchJobStatus.FAILED
 
         if webhook_url:

@@ -49,7 +49,7 @@ from custom_types.api_schemas import (
     RAGSessionResponse,
     RAGSourceStats,
 )
-from custom_types.field_keys import RAGApiKeyKeys
+from custom_types.field_keys import RAGApiKeyKeys, RAGConversationKeys, RAGEvaluationKeys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
 from db.repositories.rag_evaluations import EvaluationsRepository
@@ -229,12 +229,12 @@ async def list_sessions(request: Request, limit: int = 20, skip: int = 0, key_re
     sessions = await manager.list_sessions(owner=key_record[RAGApiKeyKeys.OWNER], limit=limit, skip=skip)
     return [
         RAGSessionResponse(
-            session_id=s.get("session_id", ""),
-            title=s.get("title"),
-            content_sources=s.get("content_sources", []),
-            created_at=str(s.get("created_at", "")),
-            updated_at=str(s.get("updated_at", "")),
-            message_count=s.get("message_count", 0),
+            session_id=s.get(RAGConversationKeys.SESSION_ID, ""),
+            title=s.get(RAGConversationKeys.TITLE),
+            content_sources=s.get(RAGConversationKeys.CONTENT_SOURCES, []),
+            created_at=str(s.get(RAGConversationKeys.CREATED_AT, "")),
+            updated_at=str(s.get(RAGConversationKeys.UPDATED_AT, "")),
+            message_count=s.get(RAGConversationKeys.MESSAGE_COUNT, 0),
         )
         for s in sessions
     ]
@@ -536,12 +536,12 @@ async def get_evaluations(request: Request, session_id: str) -> list[RAGEvaluati
     evaluations = await repo.get_session_evaluations(session_id)
     return [
         RAGEvaluationResponse(
-            evaluation_id=e.get("evaluation_id", ""),
-            session_id=e.get("session_id", ""),
-            scores=e.get("scores", {}),
-            overall_passed=e.get("overall_passed", False),
-            status=e.get("status", "pending"),
-            duration_ms=e.get("evaluation_duration_ms", 0),
+            evaluation_id=e.get(RAGEvaluationKeys.EVALUATION_ID, ""),
+            session_id=e.get(RAGEvaluationKeys.SESSION_ID, ""),
+            scores=e.get(RAGEvaluationKeys.SCORES, {}),
+            overall_passed=e.get(RAGEvaluationKeys.OVERALL_PASSED, False),
+            status=e.get(RAGEvaluationKeys.STATUS, "pending"),
+            duration_ms=e.get(RAGEvaluationKeys.EVALUATION_DURATION_MS, 0),
         )
         for e in evaluations
     ]

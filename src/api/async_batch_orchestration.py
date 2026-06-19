@@ -30,6 +30,7 @@ from custom_types.api_schemas import (
     BatchJobListResponse,
 )
 from db.batch_jobs import BatchJobManager, BatchJobStatus
+from custom_types.field_keys import BatchJobKeys
 from constants import (
     ROUTE_BATCH_JOBS_BY_ID,
     ROUTE_BATCH_JOBS,
@@ -60,23 +61,23 @@ def _format_datetime(dt) -> str | None:
 def _job_to_response(job: dict) -> BatchJobStatusResponse:
     """Convert MongoDB job document to response model."""
     try:
-        request = job.get("request", {})
+        request = job.get(BatchJobKeys.REQUEST, {})
         return BatchJobStatusResponse(
-            job_id=job.get("job_id"),
-            status=job.get("status"),
-            created_at=_format_datetime(job.get("created_at")),
-            updated_at=_format_datetime(job.get("updated_at")),
-            started_at=_format_datetime(job.get("started_at")),
-            completed_at=_format_datetime(job.get("completed_at")),
+            job_id=job.get(BatchJobKeys.JOB_ID),
+            status=job.get(BatchJobKeys.STATUS),
+            created_at=_format_datetime(job.get(BatchJobKeys.CREATED_AT)),
+            updated_at=_format_datetime(job.get(BatchJobKeys.UPDATED_AT)),
+            started_at=_format_datetime(job.get(BatchJobKeys.STARTED_AT)),
+            completed_at=_format_datetime(job.get(BatchJobKeys.COMPLETED_AT)),
             data_source_name=request.get("data_source_name"),
             start_date=request.get("start_date"),
             end_date=request.get("end_date"),
-            output_dir=job.get("output_dir"),
-            error_message=job.get("error_message"),
-            openai_batch_id=job.get("openai_batch_id"),
+            output_dir=job.get(BatchJobKeys.OUTPUT_DIR),
+            error_message=job.get(BatchJobKeys.ERROR_MESSAGE),
+            openai_batch_id=job.get(BatchJobKeys.OPENAI_BATCH_ID),
         )
     except Exception as e:
-        logger.error(f"Unexpected error converting job to response: {e}, job_id={job.get('job_id')}")
+        logger.error(f"Unexpected error converting job to response: {e}, job_id={job.get(BatchJobKeys.JOB_ID)}")
         raise RuntimeError(f"Failed to convert job to response: {e}") from e
 
 
@@ -184,8 +185,8 @@ async def cancel_batch_job(job_id: str):
             raise HTTPException(status_code=404, detail=f"Batch job not found: {job_id}")
 
         # Check if job can be cancelled
-        if job.get("status") in (BatchJobStatus.COMPLETED, BatchJobStatus.FAILED, BatchJobStatus.CANCELLED):
-            raise HTTPException(status_code=400, detail=f"Cannot cancel job with status: {job.get('status')}")
+        if job.get(BatchJobKeys.STATUS) in (BatchJobStatus.COMPLETED, BatchJobStatus.FAILED, BatchJobStatus.CANCELLED):
+            raise HTTPException(status_code=400, detail=f"Cannot cancel job with status: {job.get(BatchJobKeys.STATUS)}")
 
         # Update status to cancelled
         await batch_manager.update_status(job_id, BatchJobStatus.CANCELLED)

@@ -18,6 +18,12 @@ import json
 import logging
 from pathlib import Path
 
+from constants import (
+    RESULT_KEY_NEWSLETTER_SUMMARY_PATH,
+    RESULT_KEY_MARKDOWN_PATH,
+    RESULT_KEY_HTML_PATH,
+    RESULT_KEY_TRANSLATED_PATH,
+)
 from custom_types.newsletter_formats.langtalks.renderer import LangTalksRenderer
 from custom_types.newsletter_formats.langtalks.schema import (
     LlmResponseLangTalksNewsletterContent,
@@ -221,10 +227,10 @@ class NewsletterAssembler:
         logger.info(f"Newsletter assembled and saved: {json_path}")
 
         return {
-            "json_path": str(json_path),
-            "html_path": str(html_path),
-            "md_path": str(md_path),
-            "translated_path": str(translated_path),
+            RESULT_KEY_NEWSLETTER_SUMMARY_PATH: str(json_path),
+            RESULT_KEY_HTML_PATH: str(html_path),
+            RESULT_KEY_MARKDOWN_PATH: str(md_path),
+            RESULT_KEY_TRANSLATED_PATH: str(translated_path),
         }
 
 

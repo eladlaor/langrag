@@ -84,7 +84,7 @@ class GroupDiscussions(BaseModel):
     parsed_messages: list[Message] = []
     separate_discussions: list[Discussion] = []
     discussion_summaries: dict[str, DiscussionSummarizedContent] = Field(description="The summaries of the discussions", default_factory=dict)
-    ranked_discussions: dict[DiscussionTypes, str] = Field(description="Ranking of each discussion - the value being the discussion id", default=[])
+    ranked_discussions: dict[DiscussionTypes, str] = Field(description="Ranking of each discussion - the value being the discussion id", default_factory=dict)
     number_of_messages: int | None = 0
 
 

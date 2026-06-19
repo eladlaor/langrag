@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import inspect
 
-from unittest.mock import AsyncMock, patch
 
-import pytest
 
 import agent.memory.hybrid_memory_search as hms
 

@@ -26,7 +26,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from constants import APP_VERSION, CookieSameSite, ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD, SimilarityThreshold, VisionDescribeScope
+from constants import ANTHROPIC_LLM_PROVIDER, APP_VERSION, CookieSameSite, DEFAULT_LLM_PROVIDER, ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD, GEMINI_LLM_PROVIDER, SimilarityThreshold, VisionDescribeScope
 
 
 # ============================================================================
@@ -195,17 +195,17 @@ class LLMSettings(BaseSettings):
             Model identifier string
         """
         model_map = {
-            "openai": {
+            DEFAULT_LLM_PROVIDER: {
                 "default": self.openai_default_model,
                 "mini": self.openai_mini_model,
                 "ranking": self.openai_ranking_model,
             },
-            "anthropic": {
+            ANTHROPIC_LLM_PROVIDER: {
                 "default": self.anthropic_default_model,
                 "mini": self.anthropic_mini_model,
                 "ranking": self.anthropic_ranking_model,
             },
-            "gemini": {
+            GEMINI_LLM_PROVIDER: {
                 "default": self.gemini_default_model,
                 "mini": self.gemini_mini_model,
                 "ranking": self.gemini_ranking_model,
@@ -519,8 +519,6 @@ class RAGSettings(BaseSettings):
     vector_search_top_k: int = Field(default=20, description="Top-K candidates from vector search before reranking")
     vector_search_num_candidates_multiplier: int = Field(default=15, ge=1, description="Multiplier applied to top_k to derive $vectorSearch numCandidates for both the vector-only and hybrid ($rankFusion) RAG retrieval paths. Bumped from 10 -> 15 to widen the HNSW candidate pool and improve recall at the cost of a small extra mongot scan.")
     rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
-    mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0, description="RAG MMR diversity weight (0-1). Higher favors relevance, lower favors diversity. 1.0 = pure relevance (no diversity rerank). Server default, overridable per user.")
-    enable_mmr_diversity: bool = Field(default=True, description="When false, RAG retrieval skips MMR and returns fused top-k by relevance (equivalent to lambda=1.0).")
     hybrid_enabled: bool = Field(default=True, description="When true, retrieve via MongoDB 8.1+ $rankFusion (server-side RRF over vector + lexical) instead of vector-only search. Requires the lexical Atlas Search index 'rag_chunks_lexical' to be built (created automatically on startup by ensure_indexes()).")
     min_similarity_score: float = Field(default=0.5, description="Minimum NORMALIZED Atlas vectorSearchScore (1+cosine)/2, in [0,1], NOT raw cosine. Compared directly against $meta:'vectorSearchScore' by both the vector-only and hybrid retrieval paths. With text-embedding-3-small, normalized question->passage scores cluster in the 0.5-0.75 range; values >=0.7 starve retrieval. Override per deployment.")
     max_conversation_history: int = Field(default=10, description="Maximum number of previous messages to include as conversation context")

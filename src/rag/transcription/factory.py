@@ -4,13 +4,9 @@ Transcription Provider Factory
 Factory for creating transcription provider instances based on configuration.
 """
 
-import logging
-
 from config import get_settings
 from constants import TranscriptionProvider
 from rag.transcription.interface import TranscriptionProviderInterface
-
-logger = logging.getLogger(__name__)
 
 
 class TranscriptionProviderFactory:

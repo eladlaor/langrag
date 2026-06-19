@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.3] - 2026-06-19
+
+### Changed
+- **No-hardcoded-strings policy enforced across the data layer, scheduler, API, and graphs:** 34 inline string literals that drove behavior (MongoDB document keys, batch-job and schedule field names, cache-document keys, the batch-completion webhook event, HITL selection-UI field names, LLM-provider name keys, env-var names, and timestamp formats) were replaced with imported constants and new field-key classes (`BatchJobKeys`, `ScheduleDocumentKeys`, `AntiRepetitionKeys`, `CacheDocumentKeys`, `SelectionUIFieldKeys`). Behavior is unchanged; the values are byte-for-byte identical, now sourced from a single definition.
+- **Internal cleanup:** removed unused module loggers, redundant inline imports, a duplicate `RAGSettings` field, dead code, and unused test imports. No runtime behavior change.
+
+### Fixed
+- **Scheduled-newsletter run-time update crashed:** `update_after_run` parsed the configured run time with brittle inline indexing that raised on the post-run next-run recompute, so a schedule could complete a run but fail to record its next fire time. The run time is now parsed once into hour/minute and applied directly.
+- **LLM-response cache never hit and never wrote:** `CacheService` called the cache repository with parameter names and a return shape that did not match the repository contract (`key`/`value`/`ttl_seconds` and a `{"value": ...}` wrapper that the repository never produced), so every read missed and every write used the wrong fields. The call sites now match the repository's `cache_key`/`response_data`/`ttl_hours` signature and read the response payload directly, restoring the LLM-response cache.
+- **Gemini empty-response handling:** the Gemini structured-output and JSON-output paths called `json.loads` on a possibly-empty response, surfacing an opaque JSON-decode error instead of the real cause. They now fail fast with a clear `LLMResponseError` naming the call purpose when the model returns empty content, and the empty-content and configuration/validation errors are re-raised unwrapped instead of being remapped to a generic `LLMError`.
+
 ## [1.17.2] - 2026-06-19
 
 ### Added
@@ -330,7 +341,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.2...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.3...HEAD
+[1.17.3]: https://github.com/eladlaor/langrag/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/eladlaor/langrag/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/eladlaor/langrag/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/eladlaor/langrag/compare/v1.16.2...v1.17.0

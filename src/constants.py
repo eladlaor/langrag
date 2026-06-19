@@ -957,12 +957,40 @@ CONTENT_TYPE_JSON = "application/json"
 
 
 # ============================================================================
+# WEBHOOK EVENT TYPE CONSTANTS
+# ============================================================================
+
+# `event` field on the webhook payload the batch worker POSTs on job completion
+# (background_jobs.batch_worker.send_webhook_notification).
+WEBHOOK_EVENT_BATCH_JOB_COMPLETED = "batch_job_completed"
+
+
+# ============================================================================
+# TIMESTAMP FORMAT CONSTANTS
+# ============================================================================
+
+# strftime patterns for the HITL selection UI (date/time of first message in a
+# discussion). DD.MM.YY and HH:MM, matching the RankedDiscussionItem schema.
+TIMESTAMP_DATE_FORMAT = "%d.%m.%y"
+TIMESTAMP_TIME_FORMAT = "%H:%M"
+
+
+# ============================================================================
 # ENVIRONMENT VARIABLE NAME CONSTANTS
 # ============================================================================
 
 ENV_APP_BASE_URL = "APP_BASE_URL"
 ENV_DEFAULT_EMAIL_RECIPIENT = "DEFAULT_EMAIL_RECIPIENT"
 ENV_BEEPER_ACCESS_TOKEN = "BEEPER_ACCESS_TOKEN"
+
+# LLM provider API keys (fail-fast required at startup; see main.py).
+ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
+ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+
+# Deployment environment selector (e.g. "development", "production"). Compared
+# against ENVIRONMENT_PRODUCTION to gate HSTS and other prod-only behavior.
+ENV_ENVIRONMENT = "ENVIRONMENT"
+ENVIRONMENT_PRODUCTION = "production"
 
 # UI login gate (resolved via the LANGRAG_LOGIN_ prefix in config).
 # ENV_LOGIN_PASSWORD is deprecated: individual email+password accounts replaced
@@ -1359,6 +1387,7 @@ class RunType(StrEnum):
 RESULT_KEY_NEWSLETTER_SUMMARY_PATH = "newsletter_summary_path"
 RESULT_KEY_MARKDOWN_PATH = "markdown_path"
 RESULT_KEY_HTML_PATH = "html_path"
+RESULT_KEY_TRANSLATED_PATH = "translated_path"
 
 
 # ============================================================================

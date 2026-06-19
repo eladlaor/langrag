@@ -68,6 +68,9 @@ class ParallelOrchestratorState(TypedDict):
     # === Image Extraction Configuration ===
     enable_image_extraction: bool | None  # Extract images from messages (requires VISION_ENABLED=true)
 
+    # === Batch API Configuration ===
+    use_batch_api: bool | None  # Route translation through the OpenAI Batch API in the background worker
+
     # === Discussion Merging Configuration ===
     enable_discussion_merging: bool | None  # Enable merging of similar discussions (default: True for multi-chat)
     similarity_threshold: str | None  # "strict" | "moderate" | "aggressive" (default: "moderate")

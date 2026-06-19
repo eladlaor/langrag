@@ -17,7 +17,6 @@ NOTE: Skipped automatically if no newsletter chunks are ingested or MongoDB is u
 
 import json
 import logging
-import os
 from pathlib import Path
 
 import pytest

@@ -7,7 +7,6 @@ invent new behaviour — every code path is exercised by the REST API too,
 so eval results apply identically.
 """
 
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,8 +16,6 @@ from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
 from rag.generation.rag_chain import generate_answer, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
-
-logger = logging.getLogger(__name__)
 
 
 def _parse_iso_date(value: str | None, label: str) -> datetime | None:

@@ -9,7 +9,6 @@ inside score_response must NOT propagate out of the node.
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from graphs.state_keys import RAGConversationStateKeys as Keys
 

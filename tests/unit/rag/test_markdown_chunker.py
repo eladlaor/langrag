@@ -4,7 +4,6 @@ Unit tests for MarkdownChunker.
 Tests chunking logic: section splitting, overlap, section type classification, metadata.
 """
 
-import pytest
 
 from rag.chunking.markdown_chunker import MarkdownChunker
 from constants import ContentSourceType

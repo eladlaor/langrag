@@ -60,7 +60,7 @@ from custom_types.field_keys import DiscussionKeys, DbFieldKeys, NewsletterStruc
 from observability import langfuse_span, extract_trace_context
 from utils.async_json_io import load_json_async
 from utils.run_diagnostics import get_diagnostics
-from constants import NodeNames, MessageRole, OUTPUT_FILENAME_AGGREGATED_LINKS, DIAGNOSTIC_CATEGORY_LINK_ENRICHMENT, NO_CONTENT_FOR_SECTION
+from constants import NodeNames, MessageRole, OUTPUT_FILENAME_AGGREGATED_LINKS, DIAGNOSTIC_CATEGORY_LINK_ENRICHMENT, NO_CONTENT_FOR_SECTION, TIMESTAMP_TIME_FORMAT, TIMESTAMP_DATE_FORMAT
 
 
 # Configure logging
@@ -401,8 +401,8 @@ def convert_newsletter_json_to_markdown(newsletter_data: dict[str, Any]) -> str:
                 timestamp = primary[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
                 if isinstance(timestamp, (int, float)):
                     dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)  # Convert from milliseconds
-                    time_str = dt.strftime("%H:%M")
-                    date_str = dt.strftime("%d.%m.%y")
+                    time_str = dt.strftime(TIMESTAMP_TIME_FORMAT)
+                    date_str = dt.strftime(TIMESTAMP_DATE_FORMAT)
                     chat_name = primary.get(NewsletterStructureKeys.CHAT_NAME, "LangTalks Community")
                     markdown += f"\n📅 הדיון המלא התחיל בתאריך: {chat_name} | {time_str} | {date_str}\n"
 
@@ -421,8 +421,8 @@ def convert_newsletter_json_to_markdown(newsletter_data: dict[str, Any]) -> str:
                     timestamp = discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
                     if isinstance(timestamp, (int, float)):
                         dt = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-                        time_str = dt.strftime("%H:%M")
-                        date_str = dt.strftime("%d.%m.%y")
+                        time_str = dt.strftime(TIMESTAMP_TIME_FORMAT)
+                        date_str = dt.strftime(TIMESTAMP_DATE_FORMAT)
                         chat_name = discussion.get(NewsletterStructureKeys.CHAT_NAME, "LangTalks Community")
                         markdown += f"\n📅 הדיון המלא התחיל בתאריך: {chat_name} | {time_str} | {date_str}\n"
 

@@ -23,7 +23,7 @@ from config import get_settings
 from utils.llm import get_llm_caller
 from utils.llm.prompts.ranking.rank_discussions import VALIDATE_REPETITION_PROMPT
 from constants import LlmInputPurposes, RepetitionScore
-from custom_types.field_keys import DiscussionKeys, RankingResultKeys, DbFieldKeys, MergeGroupKeys
+from custom_types.field_keys import DiscussionKeys, RankingResultKeys, DbFieldKeys, MergeGroupKeys, AntiRepetitionKeys
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def _format_repetition_validation_prompt(current_discussion: dict[str, Any], top
 Title: {current_discussion.get(DiscussionKeys.TITLE, 'Untitled')}
 Summary: {current_discussion.get(DiscussionKeys.NUTSHELL, 'No summary')}
 Chat: {current_discussion.get(DbFieldKeys.CHAT_NAME, 'Unknown')}
-Messages: {current_discussion.get('num_messages', 0)}"""
+Messages: {current_discussion.get(DiscussionKeys.NUM_MESSAGES, 0)}"""
 
     # Format top matches
     matches_text = []
@@ -134,7 +134,7 @@ async def check_repetition_hybrid(current_discussion: dict[str, Any], run_ids_to
 
         if not candidates:
             logger.info("No similar historical discussions found via vector search")
-            return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: "No historical discussions available for comparison", "similar_historical": [], "penalty_applied": 0.0}
+            return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: "No historical discussions available for comparison", AntiRepetitionKeys.SIMILAR_HISTORICAL: [], AntiRepetitionKeys.PENALTY_APPLIED: 0.0}
 
         # Step 3: Shape candidates for the validation prompt (already filtered,
         # scored, and sorted by the DB; just project to the display shape).
@@ -144,7 +144,7 @@ async def check_repetition_hybrid(current_discussion: dict[str, Any], run_ids_to
                 DiscussionKeys.TITLE: c[DiscussionKeys.TITLE],
                 DiscussionKeys.NUTSHELL: c[DiscussionKeys.NUTSHELL],
                 DbFieldKeys.CHAT_NAME: c.get(DbFieldKeys.CHAT_NAME, "Unknown"),
-                "newsletter_date": c.get("created_at", datetime.now(UTC)).strftime("%Y-%m-%d"),
+                "newsletter_date": c.get(DbFieldKeys.CREATED_AT, datetime.now(UTC)).strftime("%Y-%m-%d"),
                 "similarity": c["similarity"],
             }
             for c in candidates
@@ -154,7 +154,7 @@ async def check_repetition_hybrid(current_discussion: dict[str, Any], run_ids_to
 
         # Step 4: If no matches, no repetition
         if not top_matches:
-            return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: "No similar historical discussions found", "similar_historical": [], "penalty_applied": 0.0}
+            return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: "No similar historical discussions found", AntiRepetitionKeys.SIMILAR_HISTORICAL: [], AntiRepetitionKeys.PENALTY_APPLIED: 0.0}
 
         # Step 5: LLM validates semantic overlap (only top-K, not all 200 historical)
         prompt = _format_repetition_validation_prompt(current_discussion, top_matches)
@@ -169,13 +169,13 @@ async def check_repetition_hybrid(current_discussion: dict[str, Any], run_ids_to
 
         repetition_score = response.get(RankingResultKeys.REPETITION_SCORE, RepetitionScore.NONE)
 
-        result = {RankingResultKeys.REPETITION_SCORE: repetition_score, MergeGroupKeys.REASONING: response.get(MergeGroupKeys.REASONING, ""), "similar_historical": top_matches, "penalty_applied": penalty_map.get(repetition_score, 0.0)}
+        result = {RankingResultKeys.REPETITION_SCORE: repetition_score, MergeGroupKeys.REASONING: response.get(MergeGroupKeys.REASONING, ""), AntiRepetitionKeys.SIMILAR_HISTORICAL: top_matches, AntiRepetitionKeys.PENALTY_APPLIED: penalty_map.get(repetition_score, 0.0)}
 
-        logger.info(f"Repetition check complete: {result[RankingResultKeys.REPETITION_SCORE]}, " f"penalty={result['penalty_applied']}, " f"top_similarity={top_matches[0]['similarity']:.2f}")
+        logger.info(f"Repetition check complete: {result[RankingResultKeys.REPETITION_SCORE]}, " f"penalty={result[AntiRepetitionKeys.PENALTY_APPLIED]}, " f"top_similarity={top_matches[0]['similarity']:.2f}")
 
         return result
 
     except Exception as e:
         logger.error(f"Hybrid repetition check failed: {e}, returning no repetition", exc_info=True)
         # Fail-soft: assume no repetition on error
-        return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: f"Repetition check failed: {str(e)}", "similar_historical": [], "penalty_applied": 0.0}
+        return {RankingResultKeys.REPETITION_SCORE: RepetitionScore.NONE, MergeGroupKeys.REASONING: f"Repetition check failed: {str(e)}", AntiRepetitionKeys.SIMILAR_HISTORICAL: [], AntiRepetitionKeys.PENALTY_APPLIED: 0.0}

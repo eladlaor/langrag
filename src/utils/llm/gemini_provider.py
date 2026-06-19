@@ -204,13 +204,15 @@ class GeminiProvider(PromptInputBuilderMixin, LLMProviderInterface):
             )
 
             content = response.text
+            if not content:
+                raise LLMResponseError(f"Gemini structured-output call returned empty content (purpose={purpose}); cannot parse JSON")
             self._update_langfuse_output(content, getattr(response, "usage_metadata", None))
             return json.loads(content)
 
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             raise LLMResponseError(f"Failed to parse Gemini response as JSON: {e}") from e
-        except (ConfigurationError, ValidationError):
+        except (LLMResponseError, ConfigurationError, ValidationError):
             raise
         except Exception as e:
             self._update_langfuse_error(e)
@@ -243,12 +245,16 @@ class GeminiProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
             response = await client.aio.models.generate_content(model=model, contents=contents, config=config)
             content = response.text
+            if not content:
+                raise LLMResponseError(f"Gemini structured-output call returned empty content (purpose={purpose}); cannot parse JSON")
             self._update_langfuse_output(content, getattr(response, "usage_metadata", None))
             return json.loads(content)
 
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             raise LLMResponseError(f"Failed to parse Gemini response as JSON ({purpose}): {e}") from e
+        except (LLMResponseError, ConfigurationError, ValidationError):
+            raise
         except Exception as e:
             self._update_langfuse_error(e)
             raise LLMError(f"Unexpected error in Gemini call_with_structured_output_generic ({purpose}): {e}") from e
@@ -280,12 +286,16 @@ class GeminiProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
             response = await client.aio.models.generate_content(model=model, contents=contents, config=config)
             content = response.text
+            if not content:
+                raise LLMResponseError(f"Gemini JSON-output call returned empty content (purpose={purpose}); cannot parse JSON")
             self._update_langfuse_output(content, getattr(response, "usage_metadata", None))
             return json.loads(content)
 
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             raise LLMResponseError(f"Failed to parse Gemini response as JSON ({purpose}): {e}") from e
+        except (LLMResponseError, ConfigurationError, ValidationError):
+            raise
         except Exception as e:
             self._update_langfuse_error(e)
             raise LLMError(f"Unexpected error in Gemini call_with_json_output ({purpose}): {e}") from e

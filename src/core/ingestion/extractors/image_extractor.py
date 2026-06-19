@@ -55,12 +55,12 @@ def _extract_mxc_url(content: dict) -> _ImageUrlInfo:
     if isinstance(file_obj, dict):
         url = file_obj.get(MatrixEncryptedFileKeys.URL, "")
         if url and url.startswith("mxc://"):
-            key_obj = file_obj.get("key", {})
+            key_obj = file_obj.get(MatrixEncryptedFileKeys.KEY, {})
             return _ImageUrlInfo(
                 url=url,
-                key=key_obj.get("k") if isinstance(key_obj, dict) else None,
-                iv=file_obj.get("iv"),
-                sha256=file_obj.get("hashes", {}).get("sha256") if isinstance(file_obj.get("hashes"), dict) else None,
+                key=key_obj.get(MatrixEncryptedFileKeys.K) if isinstance(key_obj, dict) else None,
+                iv=file_obj.get(MatrixEncryptedFileKeys.IV),
+                sha256=file_obj.get(MatrixEncryptedFileKeys.HASHES, {}).get(MatrixEncryptedFileKeys.SHA256) if isinstance(file_obj.get(MatrixEncryptedFileKeys.HASHES), dict) else None,
             )
 
     return _ImageUrlInfo()

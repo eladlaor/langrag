@@ -33,7 +33,6 @@ the CI eval gate (src/rag/evaluation/gate.py) alongside the LLM-judge metrics.
 
 from __future__ import annotations
 
-import logging
 import re
 from datetime import UTC, datetime, timedelta
 from collections.abc import Iterable
@@ -43,8 +42,6 @@ from constants import (
     RAG_REFUSAL_NO_CONTENT,
     RAG_REFUSAL_OUT_OF_RANGE,
 )
-
-logger = logging.getLogger(__name__)
 
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Zא-תא-ת])|\n+")

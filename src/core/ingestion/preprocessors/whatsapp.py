@@ -37,7 +37,7 @@ from custom_types.exceptions import (
     FileValidationError,
     LLMResponseError,
 )
-from custom_types.field_keys import DiscussionKeys, DecryptionResultKeys, PollContentKeys, PollDbKeys
+from custom_types.field_keys import DiscussionKeys, DecryptionResultKeys, PollContentKeys, PollDbKeys, MessageSourceKeys
 from utils.llm import get_llm_caller
 from custom_types.common import LlmResponseSeparateDiscussions
 
@@ -108,7 +108,6 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
     async def preprocess_data(self, data_source_type: str, preprocessing_operations: list[str], **kwargs) -> list[Any]:
         try:
-            import asyncio
             preprocess_results = []
 
             for preprocessing_operation in preprocessing_operations:
@@ -152,7 +151,6 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             should_clean_message_ids = kwargs.get("should_clean_message_ids", True)  # Default to cleaning message IDs
 
             now_utc = datetime.now(UTC)
-            logging.info(f"Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
             logging.info(f"Current UTC time: {now_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
 
             try:
@@ -286,14 +284,14 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
             # Validate that all reply references point to existing messages
             valid_message_ids = {msg[DiscussionKeys.ID] for msg in all_parsed_messages}  # Using a set for O(1) lookups
-            replies_to_older_messages = [msg for msg in all_parsed_messages if msg.get("replies_to") and msg["replies_to"] not in valid_message_ids]
+            replies_to_older_messages = [msg for msg in all_parsed_messages if msg.get(MessageSourceKeys.REPLIES_TO) and msg[MessageSourceKeys.REPLIES_TO] not in valid_message_ids]
 
             if replies_to_older_messages:
-                broken_thread_refs = {msg["replies_to"] for msg in replies_to_older_messages}
+                broken_thread_refs = {msg[MessageSourceKeys.REPLIES_TO] for msg in replies_to_older_messages}
                 logging.info(f"Replaced out-of-window reply references with a placeholder: {len(replies_to_older_messages)} message(s) across {len(broken_thread_refs)} unique broken thread reference(s)")
                 for msg in replies_to_older_messages:
-                    original_reference = msg["replies_to"]
-                    msg["replies_to"] = older_message_placeholder
+                    original_reference = msg[MessageSourceKeys.REPLIES_TO]
+                    msg[MessageSourceKeys.REPLIES_TO] = older_message_placeholder
                     logging.debug(f"Message {msg[DiscussionKeys.ID]} references message {original_reference} not in dataset.")
 
             logging.info("Reply references validation complete. Filtering out decryption error messages if requested...")
@@ -343,26 +341,26 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
 
                     # Preserve original event_id before replacing with short ID
                     original_event_id = message[DiscussionKeys.ID]
-                    cleaned_message["matrix_event_id"] = original_event_id
+                    cleaned_message[MessageSourceKeys.MATRIX_EVENT_ID] = original_event_id
 
                     # Replace ID with short ID
                     cleaned_message[DiscussionKeys.ID] = id_mapping[original_event_id]
 
                     # Update replies_to to use the new short IDs
-                    if message.get("replies_to") is not None:
-                        if message["replies_to"] == older_message_placeholder:
+                    if message.get(MessageSourceKeys.REPLIES_TO) is not None:
+                        if message[MessageSourceKeys.REPLIES_TO] == older_message_placeholder:
                             # Keep the older-message placeholder as is
-                            cleaned_message["replies_to"] = older_message_placeholder
-                        elif message["replies_to"] in id_mapping:
-                            cleaned_message["replies_to"] = id_mapping[message["replies_to"]]
+                            cleaned_message[MessageSourceKeys.REPLIES_TO] = older_message_placeholder
+                        elif message[MessageSourceKeys.REPLIES_TO] in id_mapping:
+                            cleaned_message[MessageSourceKeys.REPLIES_TO] = id_mapping[message[MessageSourceKeys.REPLIES_TO]]
                         else:
                             # This is a fallback - should rarely happen after our earlier fix
-                            logging.warning(f"Message {message[DiscussionKeys.ID]} references non-existent message {message['replies_to']}")
-                            cleaned_message["replies_to"] = older_message_placeholder
+                            logging.warning(f"Message {message[DiscussionKeys.ID]} references non-existent message {message[MessageSourceKeys.REPLIES_TO]}")
+                            cleaned_message[MessageSourceKeys.REPLIES_TO] = older_message_placeholder
                     else:
                         # Remove null replies_to fields
-                        if "replies_to" in cleaned_message:
-                            del cleaned_message["replies_to"]
+                        if MessageSourceKeys.REPLIES_TO in cleaned_message:
+                            del cleaned_message[MessageSourceKeys.REPLIES_TO]
 
                     cleaned_messages.append(cleaned_message)
 
@@ -516,12 +514,12 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             translated_messages = []
             for msg in all_messages:
                 result_msg = msg.copy()
-                event_id = msg.get("matrix_event_id")
+                event_id = msg.get(MessageSourceKeys.MATRIX_EVENT_ID)
 
                 if event_id and event_id in cached_translations_map:
-                    result_msg["content"] = cached_translations_map[event_id]
+                    result_msg[MessageSourceKeys.CONTENT] = cached_translations_map[event_id]
                 elif event_id and event_id in freshly_translated_map:
-                    result_msg["content"] = freshly_translated_map[event_id]
+                    result_msg[MessageSourceKeys.CONTENT] = freshly_translated_map[event_id]
                 # else: message content remains as-is (untranslated fallback)
 
                 translated_messages.append(result_msg)
@@ -966,13 +964,13 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 options.append({PollDbKeys.OPTION_ID: answer_id, PollDbKeys.OPTION_TEXT: answer_text, PollDbKeys.VOTE_COUNT: count})
 
             return {
-                "matrix_event_id": matrix_event_id,
-                "sender": sender_id,
-                "timestamp": timestamp,
-                "question": question_text,
-                "options": options,
-                "total_votes": total_votes,
-                "unique_voter_count": unique_voter_count,
+                PollDbKeys.MATRIX_EVENT_ID: matrix_event_id,
+                PollDbKeys.SENDER: sender_id,
+                PollDbKeys.TIMESTAMP: timestamp,
+                PollDbKeys.QUESTION: question_text,
+                PollDbKeys.OPTIONS: options,
+                PollDbKeys.TOTAL_VOTES: total_votes,
+                PollDbKeys.UNIQUE_VOTER_COUNT: unique_voter_count,
             }
         except Exception as e:
             logging.error(f"Failed to extract poll struct from {matrix_event_id}: {e}")
@@ -1071,7 +1069,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                         replies_to = relates_to.get(MATRIX_KEY_IN_REPLY_TO, {}).get(DecryptionResultKeys.EVENT_ID)
 
                 # Create structured message
-                structured_msg = {DiscussionKeys.ID: msg_id, "timestamp": timestamp, "sender_id": sender_id, "replies_to": replies_to, "content": body}
+                structured_msg = {DiscussionKeys.ID: msg_id, MessageSourceKeys.TIMESTAMP: timestamp, MessageSourceKeys.SENDER_ID: sender_id, MessageSourceKeys.REPLIES_TO: replies_to, MessageSourceKeys.CONTENT: body}
 
                 # Flag messages that arrived still-encrypted (decryption failed
                 # upstream). Their "body" is empty or ciphertext, not real text;
@@ -1106,7 +1104,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 return {"total_message_count": 0, "messages_by_day": {}, "messages_by_sender": {}, "date_range": {"start_date": None, "end_date": None}}
 
             # Sort messages by timestamp
-            sorted_messages = sorted(messages, key=lambda msg: msg.get("timestamp", 0))
+            sorted_messages = sorted(messages, key=lambda msg: msg.get(MessageSourceKeys.TIMESTAMP, 0))
 
             # Initialize tracking variables
             messages_by_day = {}
@@ -1117,10 +1115,10 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
             # Process each message
             for msg in sorted_messages:
                 # Skip messages without timestamp
-                if "timestamp" not in msg:
+                if MessageSourceKeys.TIMESTAMP not in msg:
                     continue
 
-                timestamp = msg["timestamp"]
+                timestamp = msg[MessageSourceKeys.TIMESTAMP]
 
                 # Convert timestamp to date string
                 date_obj = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
@@ -1129,7 +1127,7 @@ class DataPreprocessorWhatsappChatsBase(DataPreprocessorInterface):
                 # Update counts
                 messages_by_day[date_str] = messages_by_day.get(date_str, 0) + 1
 
-                sender_id = msg.get("sender_id", "unknown")
+                sender_id = msg.get(MessageSourceKeys.SENDER_ID, "unknown")
                 messages_by_sender[sender_id] = messages_by_sender.get(sender_id, 0) + 1
 
                 # Update timestamp range

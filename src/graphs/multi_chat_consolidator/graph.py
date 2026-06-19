@@ -59,6 +59,8 @@ from constants import (
     OUTPUT_FILENAME_RANKED_DISCUSSIONS,
     HITL_KEY_PHASE_2_READY,
     TAG_NEWSLETTER,
+    TIMESTAMP_DATE_FORMAT,
+    TIMESTAMP_TIME_FORMAT,
 )
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 from graphs.single_chat_analyzer.state import SingleChatState, create_single_chat_state
@@ -81,7 +83,7 @@ from graphs.multi_chat_consolidator.linkedin_draft_creator import deliver_to_lin
 from db.run_tracker import get_tracker
 from observability.metrics import with_metrics, get_metrics_client
 from api.sse import with_logging
-from custom_types.field_keys import DeliveryResultKeys, DiscussionKeys, MergeGroupKeys, OutputPathKeys, RankingResultKeys, WorkerResultKeys
+from custom_types.field_keys import DeliveryResultKeys, DiscussionKeys, MergeGroupKeys, OutputPathKeys, RankingResultKeys, SelectionUIFieldKeys, WorkerResultKeys
 
 
 # Configure logging
@@ -424,7 +426,7 @@ async def aggregate_results(state: ParallelOrchestratorState, config: RunnableCo
     if chat_errors:
         logger.warning(f"Failed chats ({failed_chats}):")
         for error in chat_errors:
-            logger.warning(f"  - {error.get(SingleChatKeys.CHAT_NAME, 'unknown')}: {error.get('error', 'unknown error')}")
+            logger.warning(f"  - {error.get(SingleChatKeys.CHAT_NAME, 'unknown')}: {error.get(WorkerResultKeys.ERROR, 'unknown error')}")
 
     # Fail-fast: If ALL chats failed, raise error
     if successful_chats == 0:
@@ -812,13 +814,13 @@ def prepare_discussion_selection(state: ParallelOrchestratorState, config: Runna
             RankingResultKeys.RANK: disc.get(RankingResultKeys.RANK),
             DiscussionKeys.TITLE: original_disc.get(DiscussionKeys.TITLE, disc.get(DiscussionKeys.TITLE, "")),
             DiscussionKeys.GROUP_NAME: original_disc.get(DiscussionKeys.SOURCE_CHAT, original_disc.get(DiscussionKeys.GROUP_NAME, "")),
-            "first_message_date": format_timestamp(disc.get(DiscussionKeys.FIRST_MESSAGE_TIMESTAMP, 0), "%d.%m.%y"),
-            "first_message_time": format_timestamp(disc.get(DiscussionKeys.FIRST_MESSAGE_TIMESTAMP, 0), "%H:%M"),
+            SelectionUIFieldKeys.FIRST_MESSAGE_DATE: format_timestamp(disc.get(DiscussionKeys.FIRST_MESSAGE_TIMESTAMP, 0), TIMESTAMP_DATE_FORMAT),
+            SelectionUIFieldKeys.FIRST_MESSAGE_TIME: format_timestamp(disc.get(DiscussionKeys.FIRST_MESSAGE_TIMESTAMP, 0), TIMESTAMP_TIME_FORMAT),
             DiscussionKeys.NUM_MESSAGES: disc.get(DiscussionKeys.NUM_MESSAGES, 0),
             DiscussionKeys.NUM_UNIQUE_PARTICIPANTS: disc.get(DiscussionKeys.NUM_UNIQUE_PARTICIPANTS, 0),
             DiscussionKeys.NUTSHELL: original_disc.get(DiscussionKeys.NUTSHELL, ""),
-            "relevance_score": disc.get(RankingResultKeys.IMPORTANCE_SCORE, 0),
-            "reasoning": disc.get(MergeGroupKeys.REASONING, ""),
+            SelectionUIFieldKeys.RELEVANCE_SCORE: disc.get(RankingResultKeys.IMPORTANCE_SCORE, 0),
+            SelectionUIFieldKeys.REASONING: disc.get(MergeGroupKeys.REASONING, ""),
         }
 
         # Add merged discussion metadata if present

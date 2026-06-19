@@ -33,7 +33,7 @@ from constants import (
     SCHEDULER_JOB_ID_PREFIX,
     SummaryFormats,
 )
-from custom_types.field_keys import DbFieldKeys
+from custom_types.field_keys import DbFieldKeys, ScheduleDocumentKeys
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ def _job_id_for(schedule_id: str) -> str:
 
 
 def _schedule_doc_id_as_str(doc: dict) -> str:
-    raw = doc.get("_id")
+    raw = doc.get(ScheduleDocumentKeys.DOCUMENT_ID)
     return str(raw) if raw is not None else ""
 
 
@@ -69,13 +69,13 @@ async def run_scheduled_newsletter(schedule: dict) -> None:
     state = {
         OrchestratorKeys.START_DATE: start_date.strftime("%Y-%m-%d"),
         OrchestratorKeys.END_DATE: end_date.strftime("%Y-%m-%d"),
-        OrchestratorKeys.DATA_SOURCE_NAME: schedule.get("data_source_name"),
-        OrchestratorKeys.WHATSAPP_CHAT_NAMES: schedule.get("whatsapp_chat_names_to_include", []),
-        OrchestratorKeys.DESIRED_LANGUAGE: schedule.get("desired_language_for_summary", DEFAULT_LANGUAGE),
-        OrchestratorKeys.SUMMARY_FORMAT: schedule.get("summary_format", SummaryFormats.LANGTALKS_FORMAT),
-        OrchestratorKeys.CONSOLIDATE_CHATS: schedule.get("consolidate_chats", True),
+        OrchestratorKeys.DATA_SOURCE_NAME: schedule.get(ScheduleDocumentKeys.DATA_SOURCE_NAME),
+        OrchestratorKeys.CHAT_NAMES: schedule.get(ScheduleDocumentKeys.WHATSAPP_CHAT_NAMES_TO_INCLUDE, []),
+        OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY: schedule.get(ScheduleDocumentKeys.DESIRED_LANGUAGE_FOR_SUMMARY, DEFAULT_LANGUAGE),
+        OrchestratorKeys.SUMMARY_FORMAT: schedule.get(ScheduleDocumentKeys.SUMMARY_FORMAT, SummaryFormats.LANGTALKS_FORMAT),
+        OrchestratorKeys.CONSOLIDATE_CHATS: schedule.get(ScheduleDocumentKeys.CONSOLIDATE_CHATS, True),
         OrchestratorKeys.OUTPUT_ACTIONS: [OutputAction.SAVE_LOCAL, OutputAction.SEND_EMAIL],
-        OrchestratorKeys.EMAIL_RECIPIENTS: schedule.get("email_recipients", []),
+        OrchestratorKeys.EMAIL_RECIPIENTS: schedule.get(ScheduleDocumentKeys.EMAIL_RECIPIENTS, []),
         OrchestratorKeys.CHAT_RESULTS: [],
         OrchestratorKeys.CHAT_ERRORS: [],
     }
@@ -120,7 +120,7 @@ async def _execute_schedule_by_id(schedule_id: str) -> None:
         logger.info(f"Schedule disabled before execution, skipping: {schedule_id}")
         return
 
-    schedule_name = schedule.get("name", "unnamed")
+    schedule_name = schedule.get(ScheduleDocumentKeys.NAME, "unnamed")
     try:
         logger.info(f"Executing schedule: {schedule_name} (ID: {schedule_id})")
         await run_scheduled_newsletter(schedule)
@@ -163,7 +163,7 @@ def _register_schedule_job(scheduler: AsyncIOScheduler, schedule: dict) -> None:
         trigger=DateTrigger(run_date=next_run),
         args=[schedule_id],
         id=job_id,
-        name=f"Newsletter schedule: {schedule.get('name', schedule_id)}",
+        name=f"Newsletter schedule: {schedule.get(ScheduleDocumentKeys.NAME, schedule_id)}",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -255,7 +255,7 @@ async def _change_stream_watcher() -> None:
 async def _apply_change(scheduler: AsyncIOScheduler, change: dict[str, Any]) -> None:
     op = change.get("operationType")
     doc_key = change.get("documentKey", {})
-    raw_id = doc_key.get("_id")
+    raw_id = doc_key.get(ScheduleDocumentKeys.DOCUMENT_ID)
     schedule_id = str(raw_id) if raw_id is not None else ""
     if not schedule_id:
         logger.warning(f"Change event with no documentKey._id: op={op}")

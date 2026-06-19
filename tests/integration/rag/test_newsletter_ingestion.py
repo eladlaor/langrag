@@ -13,7 +13,6 @@ NOTE: These tests are skipped when run outside Docker (MongoDB not reachable).
 import uuid
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from constants import ContentSourceType, NewsletterVersionType, COLLECTION_RAG_CHUNKS
 from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys, RAGChunkKeys as Keys

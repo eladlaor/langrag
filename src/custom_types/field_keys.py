@@ -239,6 +239,13 @@ class MatrixEncryptedFileKeys:
     FILE = "file"
     URL = "url"
     FILENAME = "filename"
+    # Nested encryption-key fields (content.file.key.k, content.file.iv,
+    # content.file.hashes.sha256) used to decrypt AES-CTR encrypted media.
+    KEY = "key"
+    K = "k"
+    IV = "iv"
+    HASHES = "hashes"
+    SHA256 = "sha256"
 
 
 class ExtractionCacheKeys:
@@ -351,6 +358,7 @@ class RAGConversationKeys:
     CONTENT = "content"
     CITATIONS = "citations"
     EVALUATION_ID = "evaluation_id"
+    MESSAGE_COUNT = "message_count"
     CREATED_AT = "created_at"
     UPDATED_AT = "updated_at"
 
@@ -618,3 +626,81 @@ class WorkerResultKeys:
     ERROR = "error"
     ERROR_TYPE = "error_type"
     DISCUSSION_COUNT = "discussion_count"
+
+
+class BatchJobKeys:
+    """Keys for batch-job documents in the batch_jobs MongoDB collection.
+
+    Written by db.batch_jobs.BatchJobManager and read by the batch worker
+    (background_jobs.batch_worker) and the async-batch API
+    (api.async_batch_orchestration). REQUEST is the embedded original
+    PeriodicNewsletterRequest dict.
+    """
+
+    JOB_ID = "job_id"
+    STATUS = "status"
+    CREATED_AT = "created_at"
+    UPDATED_AT = "updated_at"
+    STARTED_AT = "started_at"
+    COMPLETED_AT = "completed_at"
+    OUTPUT_DIR = "output_dir"
+    ERROR_MESSAGE = "error_message"
+    OPENAI_BATCH_ID = "openai_batch_id"
+    REQUEST = "request"
+    WEBHOOK_URL = "webhook_url"
+    NOTIFICATION_EMAIL = "notification_email"
+
+
+class ScheduleDocumentKeys:
+    """Keys for schedule documents in the scheduled_newsletters collection.
+
+    Covers the newsletter-config fields read by the scheduler
+    (scheduler.newsletter_scheduler) and the schedules API (api.schedules)
+    when building orchestrator state. Operational fields (enabled, next_run,
+    last_run, ...) are accessed via DbFieldKeys; DOCUMENT_ID is the MongoDB
+    primary key.
+    """
+
+    DOCUMENT_ID = "_id"
+    NAME = "name"
+    DATA_SOURCE_NAME = "data_source_name"
+    WHATSAPP_CHAT_NAMES_TO_INCLUDE = "whatsapp_chat_names_to_include"
+    DESIRED_LANGUAGE_FOR_SUMMARY = "desired_language_for_summary"
+    SUMMARY_FORMAT = "summary_format"
+    CONSOLIDATE_CHATS = "consolidate_chats"
+    EMAIL_RECIPIENTS = "email_recipients"
+
+
+class AntiRepetitionKeys:
+    """Keys for the hybrid anti-repetition result dict
+    (core.retrieval.history.anti_repetition_hybrid)."""
+
+    SIMILAR_HISTORICAL = "similar_historical"
+    PENALTY_APPLIED = "penalty_applied"
+
+
+class CacheDocumentKeys:
+    """Keys for LLM-response cache documents in the llm_response_cache
+    collection (db.repositories.cache.CacheRepository)."""
+
+    CACHE_KEY = "cache_key"
+    OPERATION_TYPE = "operation_type"
+    INPUT_HASH = "input_hash"
+    RESPONSE_DATA = "response_data"
+    CREATED_AT = "created_at"
+    EXPIRES_AT = "expires_at"
+
+
+class SelectionUIFieldKeys:
+    """Keys for the HITL discussion-selection JSON built by the consolidator
+    graph (graphs.multi_chat_consolidator.graph).
+
+    Values MUST stay byte-for-byte identical to the RankedDiscussionItem
+    Pydantic schema (custom_types.api_schemas) and the matching TS interface;
+    the selection UI deserializes against those field names.
+    """
+
+    FIRST_MESSAGE_DATE = "first_message_date"
+    FIRST_MESSAGE_TIME = "first_message_time"
+    RELEVANCE_SCORE = "relevance_score"
+    REASONING = "reasoning"

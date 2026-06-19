@@ -5,7 +5,6 @@ MMR-based reranking for retrieved chunks to ensure diversity in the context wind
 Uses embedding cosine similarity to penalize redundant chunks.
 """
 
-import logging
 import math
 from typing import Any
 
@@ -13,8 +12,6 @@ from bson.binary import Binary
 
 from custom_types.field_keys import RAGChunkKeys as Keys
 from constants import RAG_SEARCH_SCORE_FIELD
-
-logger = logging.getLogger(__name__)
 
 
 def rerank_chunks_mmr(

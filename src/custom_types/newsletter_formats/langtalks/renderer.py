@@ -25,6 +25,8 @@ from constants import (
     LANGTALKS_NEWSLETTER_SIGNUP_URL,
     MS_TO_SECONDS_MULTIPLIER,
     DISPLAY_TIMEZONE,
+    TIMESTAMP_TIME_FORMAT,
+    TIMESTAMP_DATE_FORMAT,
     get_langtalks_i18n,
 )
 from custom_types.field_keys import NewsletterStructureKeys
@@ -133,7 +135,7 @@ class LangTalksRenderer:
             Tuple of (time_str "HH:MM", date_str "DD.MM.YY")
         """
         dt = datetime.fromtimestamp(timestamp_ms / MS_TO_SECONDS_MULTIPLIER, tz=ZoneInfo(DISPLAY_TIMEZONE))
-        return dt.strftime("%H:%M"), dt.strftime("%d.%m.%y")
+        return dt.strftime(TIMESTAMP_TIME_FORMAT), dt.strftime(TIMESTAMP_DATE_FORMAT)
 
     def _strip_chat_prefix(self, chat_name: str) -> str:
         """Remove 'LangTalks - ' prefix from chat name if present."""

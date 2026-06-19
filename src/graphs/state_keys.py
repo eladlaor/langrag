@@ -168,6 +168,10 @@ class ParallelOrchestratorStateKeys:
     # === Image Extraction Configuration ===
     ENABLE_IMAGE_EXTRACTION = "enable_image_extraction"
 
+    # === Batch API Configuration ===
+    # Routes translation through the OpenAI Batch API in the background worker.
+    USE_BATCH_API = "use_batch_api"
+
     # === Discussion Merging Configuration ===
     ENABLE_DISCUSSION_MERGING = "enable_discussion_merging"
     SIMILARITY_THRESHOLD = "similarity_threshold"

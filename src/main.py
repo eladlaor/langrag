@@ -45,6 +45,10 @@ from constants import (
     APP_NAME,
     APP_VERSION,
     APP_DESCRIPTION,
+    ENV_OPENAI_API_KEY,
+    ENV_ANTHROPIC_API_KEY,
+    ENV_ENVIRONMENT,
+    ENVIRONMENT_PRODUCTION,
 )
 
 
@@ -68,7 +72,7 @@ async def lifespan(app: FastAPI):
     # fallbacks, producing degraded newsletters with no clear signal.
     import os as _os
 
-    _required_api_keys = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+    _required_api_keys = (ENV_OPENAI_API_KEY, ENV_ANTHROPIC_API_KEY)
     _missing_keys = [k for k in _required_api_keys if not _os.getenv(k)]
     if _missing_keys:
         raise RuntimeError(f"Required API keys missing from environment: {_missing_keys}. Set them in .env and ensure docker-compose passes them through before starting the service.")
@@ -213,7 +217,7 @@ if settings.google.enabled:
 # Security headers middleware
 from api.security_headers import add_security_headers
 
-is_production = os.getenv("ENVIRONMENT", "development") == "production"
+is_production = os.getenv(ENV_ENVIRONMENT, "development") == ENVIRONMENT_PRODUCTION
 add_security_headers(
     app,
     enable_hsts=is_production,  # Only enforce HTTPS in production

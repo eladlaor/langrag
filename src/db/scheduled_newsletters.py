@@ -25,7 +25,7 @@ from constants import (
     SCHEDULE_DEFAULT_RUN_TIME,
     ScheduleRunStatus,
 )
-from custom_types.field_keys import DbFieldKeys
+from custom_types.field_keys import DbFieldKeys, ScheduleDocumentKeys
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +124,7 @@ class ScheduledNewsletterManager:
 
             result = await self._collection.insert_one(schedule)
             schedule_id = str(result.inserted_id)
-            logger.info(f"Created schedule: {schedule_id} (name: {schedule.get('name')})")
+            logger.info(f"Created schedule: {schedule_id} (name: {schedule.get(ScheduleDocumentKeys.NAME)})")
             return schedule_id
         except Exception as e:
             logger.error(f"Failed to create schedule: {e}")
@@ -175,10 +175,11 @@ class ScheduledNewsletterManager:
                 logger.warning(f"Schedule not found: {schedule_id}")
                 return
 
-            next_run = self._calculate_next_run(schedule.get(SCHEDULE_FIELD_INTERVAL_DAYS, 7), schedule.get(SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME))
+            run_time_str = schedule.get(SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME)
+            hour, minute = map(int, run_time_str.split(":"))
 
-            # Add interval_days to next_run (since _calculate_next_run starts from today)
-            next_run = datetime.now(UTC).replace(hour=int(schedule.get(SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME).split(":")[0]), minute=int(schedule.get(SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME).split(":")[1]), second=0, microsecond=0) + timedelta(days=schedule.get(SCHEDULE_FIELD_INTERVAL_DAYS, 7))
+            # Next run = today at the scheduled time, advanced by the configured interval.
+            next_run = datetime.now(UTC).replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=schedule.get(SCHEDULE_FIELD_INTERVAL_DAYS, 7))
 
             update_doc = {"$set": {DbFieldKeys.LAST_RUN: datetime.now(UTC), DbFieldKeys.LAST_RUN_STATUS: ScheduleRunStatus.SUCCESS if success else ScheduleRunStatus.FAILED, DbFieldKeys.LAST_RUN_ERROR: error_message, DbFieldKeys.NEXT_RUN: next_run, DbFieldKeys.UPDATED_AT: datetime.now(UTC)}, "$inc": {DbFieldKeys.RUN_COUNT: 1}}
 
@@ -198,7 +199,7 @@ class ScheduledNewsletterManager:
         await self._ensure_initialized()
 
         try:
-            cursor = self._collection.find({}).sort("created_at", -1)
+            cursor = self._collection.find({}).sort(DbFieldKeys.CREATED_AT, -1)
             schedules = await cursor.to_list(1000)
 
             # Convert ObjectId to string for JSON serialization

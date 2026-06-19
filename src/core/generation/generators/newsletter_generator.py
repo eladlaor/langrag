@@ -369,6 +369,11 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
             # Translate using LLM
             from constants import LlmInputPurposes
 
+            # Imported locally: graphs/__init__ eagerly pulls in the full LangGraph
+            # stack, so a module-level import here would make core.generation depend
+            # on the graphs package (a layering inversion) at import time.
+            from graphs.state_keys import SingleChatStateKeys
+
             client = get_llm_caller()
             response = await client.call_with_structured_output(
                 purpose=LlmInputPurposes.TRANSLATE_SUMMARY,
@@ -388,7 +393,7 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
 
             logger.info(f"Translated summary saved to: {expected_final_translated_file_path}")
 
-            return {"final_translated_file_path": expected_final_translated_file_path}
+            return {SingleChatStateKeys.FINAL_TRANSLATED_FILE_PATH: expected_final_translated_file_path}
 
         except Exception as e:
             error_message = f"Error translating summary: {e}"

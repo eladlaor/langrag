@@ -63,9 +63,9 @@ class CacheService:
         try:
             cache_key = f"{operation}:{content_hash}"
             cached = await self._cache_repo.get_cached(cache_key)
-            if cached and cached.get("value"):
+            if cached is not None:
                 logger.debug(f"Cache hit: {operation}")
-                return cached["value"]
+                return cached
             return None
         except Exception as e:
             # A read error after successful init is an operational fault, not a miss — surface it.
@@ -79,8 +79,14 @@ class CacheService:
 
         try:
             cache_key = f"{operation}:{content_hash}"
-            ttl_seconds = self._ttl_days * 24 * 60 * 60
-            await self._cache_repo.set_cached(key=cache_key, value=value, operation=operation, ttl_seconds=ttl_seconds, metadata=metadata)
+            ttl_hours = self._ttl_days * 24
+            await self._cache_repo.set_cached(
+                cache_key=cache_key,
+                operation_type=operation,
+                input_data=metadata,
+                response_data=value,
+                ttl_hours=ttl_hours,
+            )
             return True
         except Exception as e:
             logger.warning("Cache set failed; value not cached", extra={"operation": operation, "error": str(e)})

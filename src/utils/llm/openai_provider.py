@@ -47,6 +47,9 @@ except ImportError:
     langfuse_context = None
 
 
+logger = logging.getLogger(__name__)
+
+
 def _enforce_strict_schema(schema: dict) -> None:
     """Recursively add 'additionalProperties': false to all object-type schemas.
 
@@ -111,7 +114,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
         except Exception as e:
             error_message = f"Error while initializing OpenAI provider: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     def _get_openai_client(self, **kwargs) -> AsyncOpenAI:
@@ -131,7 +134,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             raise  # Re-raise configuration errors as-is
         except Exception as e:
             error_message = f"Error while initializing OpenAI client: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     # =========================================================================
@@ -152,7 +155,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
             langfuse_context.update_current_observation(model=model, input=messages, metadata=metadata)
         except Exception as trace_err:
-            logging.debug(f"Failed to update Langfuse observation input: {trace_err}")
+            logger.debug(f"Failed to update Langfuse observation input: {trace_err}")
 
     def _update_langfuse_output(self, content: str, usage: Any) -> None:
         """Update Langfuse observation with output and token usage."""
@@ -169,7 +172,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 },
             )
         except Exception as trace_err:
-            logging.debug(f"Failed to update Langfuse observation output: {trace_err}")
+            logger.debug(f"Failed to update Langfuse observation output: {trace_err}")
 
     def _update_langfuse_error(self, error: Exception) -> None:
         """Log error to Langfuse observation."""
@@ -178,7 +181,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         try:
             langfuse_context.update_current_observation(level="ERROR", status_message=str(error))
         except Exception as trace_err:
-            logging.debug(f"Failed to update Langfuse error observation: {trace_err}")
+            logger.debug(f"Failed to update Langfuse error observation: {trace_err}")
 
     @with_retry(max_retries=3, base_delay=1.0)
     @observe(as_type="generation", name="openai_structured_output")
@@ -220,7 +223,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             )
 
             content = response.choices[0].message.content
-            logging.debug(f"Raw content from LLM: {content}")
+            logger.debug(f"Raw content from LLM: {content}")
 
             self._update_langfuse_output(content, response.usage)
 
@@ -230,19 +233,19 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             error_message = f"Failed to parse LLM response as JSON: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMResponseError(error_message) from e
         except openai.APIError as e:
             self._update_langfuse_error(e)
             error_message = f"OpenAI API error in call_with_structured_output: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
         except (ConfigurationError, ValidationError):
             raise  # Re-raise configuration/validation errors as-is
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_with_structured_output: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     @with_retry(max_retries=3, base_delay=1.0)
@@ -286,7 +289,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 "schema": raw_schema,
             }
 
-            logging.info(f"[{purpose}] Making structured output call with model={model}")
+            logger.info(f"[{purpose}] Making structured output call with model={model}")
 
             self._update_langfuse_input(model, messages, purpose, temperature, response_schema)
 
@@ -298,7 +301,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             )
 
             content = response.choices[0].message.content
-            logging.debug(f"[{purpose}] Raw response: {content[:500] if content else 'empty'}...")
+            logger.debug(f"[{purpose}] Raw response: {content[:500] if content else 'empty'}...")
 
             self._update_langfuse_output(content, response.usage)
 
@@ -308,17 +311,17 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             error_message = f"Failed to parse LLM response as JSON ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMResponseError(error_message) from e
         except openai.APIError as e:
             self._update_langfuse_error(e)
             error_message = f"OpenAI API error in call_with_structured_output_generic ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_with_structured_output_generic ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     @with_retry(max_retries=3, base_delay=1.0)
@@ -346,7 +349,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
             client = self._get_openai_client()
 
-            logging.info(f"[{purpose}] Making JSON output call with model={model}")
+            logger.info(f"[{purpose}] Making JSON output call with model={model}")
 
             messages = [{"role": MessageRole.USER, "content": prompt}]
 
@@ -360,7 +363,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             )
 
             content = response.choices[0].message.content
-            logging.debug(f"[{purpose}] Raw response: {content[:500]}...")
+            logger.debug(f"[{purpose}] Raw response: {content[:500]}...")
 
             self._update_langfuse_output(content, response.usage)
 
@@ -370,17 +373,17 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         except json.JSONDecodeError as e:
             self._update_langfuse_error(e)
             error_message = f"Failed to parse LLM response as JSON ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMResponseError(error_message) from e
         except openai.APIError as e:
             self._update_langfuse_error(e)
             error_message = f"OpenAI API error in call_with_json_output ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_with_json_output ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     @with_retry(max_retries=3, base_delay=1.0)
@@ -407,7 +410,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
 
             client = self._get_openai_client()
 
-            logging.info(f"[{purpose}] Making simple call with model={model}")
+            logger.info(f"[{purpose}] Making simple call with model={model}")
 
             messages = [{"role": MessageRole.USER, "content": prompt}]
 
@@ -426,7 +429,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             # rather than letting a None propagate and blow up far from the cause.
             if not content:
                 raise LLMResponseError(f"Simple call returned empty content for purpose={purpose}")
-            logging.debug(f"[{purpose}] Response: {content[:200]}...")
+            logger.debug(f"[{purpose}] Response: {content[:200]}...")
 
             self._update_langfuse_output(content, response.usage)
 
@@ -435,12 +438,12 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         except openai.APIError as e:
             self._update_langfuse_error(e)
             error_message = f"OpenAI API error in call_simple ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_simple ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     @with_retry(max_retries=3, base_delay=1.0)
@@ -497,7 +500,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
                 }
             ]
 
-            logging.info(f"[{purpose}] Making vision call with model={model}")
+            logger.info(f"[{purpose}] Making vision call with model={model}")
 
             self._update_langfuse_input(model, messages, purpose, temperature)
 
@@ -514,7 +517,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             if not content:
                 raise LLMResponseError(f"Vision call returned empty content for purpose={purpose}")
 
-            logging.debug(f"[{purpose}] Vision response: {content[:200]}...")
+            logger.debug(f"[{purpose}] Vision response: {content[:200]}...")
 
             self._update_langfuse_output(content, response.usage)
 
@@ -523,12 +526,12 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
         except openai.APIError as e:
             self._update_langfuse_error(e)
             error_message = f"OpenAI API error in call_with_vision ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
         except Exception as e:
             self._update_langfuse_error(e)
             error_message = f"Unexpected error in call_with_vision ({purpose}): {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
     def _get_input_by_purpose(self, purpose: str, call_type: str, **kwargs) -> dict[str, Any]:
@@ -545,7 +548,7 @@ class OpenAIProvider(PromptInputBuilderMixin, LLMProviderInterface):
             raise  # Re-raise validation errors as-is
         except Exception as e:
             error_message = f"Error in _get_input_by_purpose method: {e}"
-            logging.error(error_message)
+            logger.error(error_message)
             raise LLMError(error_message) from e
 
 

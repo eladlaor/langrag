@@ -6,13 +6,11 @@ and span management to reduce boilerplate in node implementations.
 """
 
 import asyncio
-import logging
 from functools import wraps
 from collections.abc import Callable
 
 from observability import langfuse_span, extract_trace_context
-
-logger = logging.getLogger(__name__)
+from graphs.state_keys import SingleChatStateKeys as Keys
 
 
 def with_trace_span(span_name: str | None = None, include_state_keys: list[str] | None = None):
@@ -53,7 +51,7 @@ def with_trace_span(span_name: str | None = None, include_state_keys: list[str] 
                 ctx = extract_trace_context(config)
                 input_data = {k: state.get(k) for k in include_state_keys}
 
-                with langfuse_span(name=name, trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data=input_data, metadata={"source_name": state.get("data_source_name")}) as span:
+                with langfuse_span(name=name, trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data=input_data, metadata={"source_name": state.get(Keys.DATA_SOURCE_NAME)}) as span:
                     # Inject span into kwargs if function expects it
                     result = await func(state, config, _span=span, **kwargs)
                     if span and isinstance(result, dict):
@@ -68,7 +66,7 @@ def with_trace_span(span_name: str | None = None, include_state_keys: list[str] 
                 ctx = extract_trace_context(config)
                 input_data = {k: state.get(k) for k in include_state_keys}
 
-                with langfuse_span(name=name, trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data=input_data, metadata={"source_name": state.get("data_source_name")}) as span:
+                with langfuse_span(name=name, trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data=input_data, metadata={"source_name": state.get(Keys.DATA_SOURCE_NAME)}) as span:
                     # Inject span into kwargs if function expects it
                     result = func(state, config, _span=span, **kwargs)
                     if span and isinstance(result, dict):

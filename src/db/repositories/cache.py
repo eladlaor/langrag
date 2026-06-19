@@ -13,6 +13,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from constants import COLLECTION_LLM_RESPONSE_CACHE
+from custom_types.field_keys import CacheDocumentKeys
 
 logger = logging.getLogger(__name__)
 
@@ -71,14 +72,14 @@ class CacheRepository(BaseRepository):
         """
         result = await self.find_one(
             {
-                "cache_key": cache_key,
-                "expires_at": {"$gt": datetime.now(UTC)},
+                CacheDocumentKeys.CACHE_KEY: cache_key,
+                CacheDocumentKeys.EXPIRES_AT: {"$gt": datetime.now(UTC)},
             }
         )
 
         if result:
             logger.debug(f"Cache hit for key: {cache_key[:16]}...")
-            return result.get("response_data")
+            return result.get(CacheDocumentKeys.RESPONSE_DATA)
 
         return None
 
@@ -88,7 +89,7 @@ class CacheRepository(BaseRepository):
         operation_type: str,
         input_data: Any,
         response_data: Any,
-        ttl_hours: int = None,
+        ttl_hours: int | None = None,
     ) -> str:
         """
         Store a response in cache.
@@ -107,17 +108,17 @@ class CacheRepository(BaseRepository):
         expires_at = datetime.now(UTC) + timedelta(hours=ttl)
 
         document = {
-            "cache_key": cache_key,
-            "operation_type": operation_type,
-            "input_hash": hashlib.sha256(json.dumps(input_data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16],  # Short hash for debugging
-            "response_data": response_data,
-            "created_at": datetime.now(UTC),
-            "expires_at": expires_at,
+            CacheDocumentKeys.CACHE_KEY: cache_key,
+            CacheDocumentKeys.OPERATION_TYPE: operation_type,
+            CacheDocumentKeys.INPUT_HASH: hashlib.sha256(json.dumps(input_data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16],  # Short hash for debugging
+            CacheDocumentKeys.RESPONSE_DATA: response_data,
+            CacheDocumentKeys.CREATED_AT: datetime.now(UTC),
+            CacheDocumentKeys.EXPIRES_AT: expires_at,
         }
 
         # Upsert to handle duplicate keys
         await self.update_one(
-            {"cache_key": cache_key},
+            {CacheDocumentKeys.CACHE_KEY: cache_key},
             {"$set": document},
             upsert=True,
         )
@@ -127,20 +128,20 @@ class CacheRepository(BaseRepository):
 
     async def invalidate(self, cache_key: str) -> bool:
         """Invalidate a specific cache entry."""
-        return await self.delete_one({"cache_key": cache_key})
+        return await self.delete_one({CacheDocumentKeys.CACHE_KEY: cache_key})
 
     async def invalidate_by_operation(self, operation_type: str) -> int:
         """Invalidate all cache entries for an operation type."""
-        return await self.delete_many({"operation_type": operation_type})
+        return await self.delete_many({CacheDocumentKeys.OPERATION_TYPE: operation_type})
 
     async def get_cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         total = await self.count()
-        expired = await self.count({"expires_at": {"$lt": datetime.now(UTC)}})
+        expired = await self.count({CacheDocumentKeys.EXPIRES_AT: {"$lt": datetime.now(UTC)}})
 
         # Count by operation type
         pipeline = [
-            {"$group": {"_id": "$operation_type", "count": {"$sum": 1}}},
+            {"$group": {"_id": f"${CacheDocumentKeys.OPERATION_TYPE}", "count": {"$sum": 1}}},
         ]
         cursor = self.collection.aggregate(pipeline)
         by_type = {doc["_id"]: doc["count"] async for doc in cursor}

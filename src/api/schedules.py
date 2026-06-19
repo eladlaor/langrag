@@ -23,7 +23,8 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from constants import HTTP_DETAIL_INTERNAL_ERROR, SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME, ScheduleRunStatus, DEFAULT_LANGUAGE, SummaryFormats
+from constants import HTTP_DETAIL_INTERNAL_ERROR, SCHEDULE_FIELD_RUN_TIME, SCHEDULE_FIELD_INTERVAL_DAYS, SCHEDULE_DEFAULT_RUN_TIME, ScheduleRunStatus, DEFAULT_LANGUAGE, SummaryFormats
+from custom_types.field_keys import DbFieldKeys, ScheduleDocumentKeys
 from db.scheduled_newsletters import _get_schedule_manager
 
 logger = logging.getLogger(__name__)
@@ -141,23 +142,23 @@ class ScheduleResponse(BaseModel):
     def from_db(cls, doc: dict) -> "ScheduleResponse":
         """Create response from MongoDB document."""
         return cls(
-            id=doc["_id"],
-            name=doc["name"],
-            interval_days=doc["interval_days"],
+            id=doc[ScheduleDocumentKeys.DOCUMENT_ID],
+            name=doc[ScheduleDocumentKeys.NAME],
+            interval_days=doc[SCHEDULE_FIELD_INTERVAL_DAYS],
             run_time=doc.get(SCHEDULE_FIELD_RUN_TIME, SCHEDULE_DEFAULT_RUN_TIME),
-            data_source_name=doc["data_source_name"],
-            whatsapp_chat_names_to_include=doc["whatsapp_chat_names_to_include"],
-            email_recipients=doc["email_recipients"],
-            desired_language_for_summary=doc.get("desired_language_for_summary", DEFAULT_LANGUAGE),
-            summary_format=doc.get("summary_format", SummaryFormats.LANGTALKS_FORMAT),
-            consolidate_chats=doc.get("consolidate_chats", True),
-            enabled=doc.get("enabled", True),
-            created_at=doc["created_at"],
-            updated_at=doc.get("updated_at", doc["created_at"]),
-            last_run=doc.get("last_run"),
-            last_run_status=doc.get("last_run_status"),
-            next_run=doc["next_run"],
-            run_count=doc.get("run_count", 0),
+            data_source_name=doc[ScheduleDocumentKeys.DATA_SOURCE_NAME],
+            whatsapp_chat_names_to_include=doc[ScheduleDocumentKeys.WHATSAPP_CHAT_NAMES_TO_INCLUDE],
+            email_recipients=doc[ScheduleDocumentKeys.EMAIL_RECIPIENTS],
+            desired_language_for_summary=doc.get(ScheduleDocumentKeys.DESIRED_LANGUAGE_FOR_SUMMARY, DEFAULT_LANGUAGE),
+            summary_format=doc.get(ScheduleDocumentKeys.SUMMARY_FORMAT, SummaryFormats.LANGTALKS_FORMAT),
+            consolidate_chats=doc.get(ScheduleDocumentKeys.CONSOLIDATE_CHATS, True),
+            enabled=doc.get(DbFieldKeys.ENABLED, True),
+            created_at=doc[DbFieldKeys.CREATED_AT],
+            updated_at=doc.get(DbFieldKeys.UPDATED_AT, doc[DbFieldKeys.CREATED_AT]),
+            last_run=doc.get(DbFieldKeys.LAST_RUN),
+            last_run_status=doc.get(DbFieldKeys.LAST_RUN_STATUS),
+            next_run=doc[DbFieldKeys.NEXT_RUN],
+            run_count=doc.get(DbFieldKeys.RUN_COUNT, 0),
         )
 
 

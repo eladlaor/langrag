@@ -66,10 +66,11 @@ from constants import (
     NodeNames,
     MESSAGING_PLATFORM_WHATSAPP,
     EXTRACTION_STRATEGY_GROUP_CHAT,
-    DEFAULT_LANGUAGE,
+    ENGLISH_LANGUAGE_CODES,
     DIR_NAME_EXTRACTED,
     DIR_NAME_PREPROCESSED,
     DIR_NAME_TRANSLATED,
+    DIR_NAME_DECRYPTED_MESSAGES,
     DIR_NAME_SEPARATE_DISCUSSIONS,
     DIR_NAME_DISCUSSIONS_RANKING,
     DIR_NAME_NEWSLETTER,
@@ -174,7 +175,7 @@ def setup_directories(state: SingleChatState, config: RunnableConfig | None = No
 
     # Defining expected file paths
     expected_files = {
-        Keys.EXPECTED_EXTRACTED_FILE: os.path.join(dirs[Keys.EXTRACTION_DIR], "decrypted_messages", f"decrypted_{secure_chat_name}_{date_suffix}.json"),
+        Keys.EXPECTED_EXTRACTED_FILE: os.path.join(dirs[Keys.EXTRACTION_DIR], DIR_NAME_DECRYPTED_MESSAGES, f"decrypted_{secure_chat_name}_{date_suffix}.json"),
         Keys.EXPECTED_PREPROCESSED_FILE: os.path.join(dirs[Keys.PREPROCESS_DIR], OUTPUT_FILENAME_MESSAGES_PROCESSED),
         Keys.EXPECTED_TRANSLATED_FILE: os.path.join(dirs[Keys.TRANSLATION_DIR], OUTPUT_FILENAME_MESSAGES_TRANSLATED),
         Keys.EXPECTED_SEPARATE_DISCUSSIONS_FILE: os.path.join(dirs[Keys.SEPARATE_DISCUSSIONS_DIR], OUTPUT_FILENAME_SEPARATE_DISCUSSIONS),
@@ -760,8 +761,6 @@ async def enrich_with_links(state: SingleChatState, config: RunnableConfig | Non
         # Storing enriched newsletter to MongoDB (async)
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         if mongodb_run_id:
-            import re
-
             chat_slug = re.sub(r"[^a-z0-9]+", "_", state[Keys.CHAT_NAME].lower()).strip("_")
             newsletter_id = f"{mongodb_run_id}_nl_{chat_slug}"
 
@@ -827,7 +826,7 @@ async def translate_final_summary(state: SingleChatState, config: RunnableConfig
         desired_language = state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY]
 
         # Skipping if already in English
-        if desired_language.lower() == DEFAULT_LANGUAGE:
+        if desired_language.lower() in ENGLISH_LANGUAGE_CODES:
             if span:
                 span.update(output={"skipped": True, "reason": "already_english"})
             return {Keys.FINAL_TRANSLATED_FILE_PATH: None}
@@ -868,8 +867,6 @@ async def translate_final_summary(state: SingleChatState, config: RunnableConfig
         # Storing translated newsletter to MongoDB (async)
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         if mongodb_run_id and expected_file:  # Only if translation was performed
-            import re
-
             chat_slug = re.sub(r"[^a-z0-9]+", "_", state[Keys.CHAT_NAME].lower()).strip("_")
             newsletter_id = f"{mongodb_run_id}_nl_{chat_slug}"
 
