@@ -45,7 +45,7 @@ async def _ensure_agent_indexes():
 async def db():
     """Yield a Motor database handle backed by the real MongoDB service.
 
-    The `db.connection` module memoizes a single `AsyncIOMotorClient` for the
+    The `db.connection` module memoizes a single `AsyncMongoClient` for the
     process. Under pytest-asyncio's per-test event loop policy, that cached
     client outlives its loop and the second test fails with "Event loop is
     closed". Reset the singletons each test so every test gets a client

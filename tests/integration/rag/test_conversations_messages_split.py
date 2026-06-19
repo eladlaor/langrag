@@ -321,7 +321,7 @@ class TestConversationsMessagesSplit:
 
         session_doc = await db[COLLECTION_RAG_CONVERSATIONS].find_one({ConvKeys.SESSION_ID: sid})
         assert ConvKeys.MESSAGES not in session_doc, "embedded array must be unset after migration"
-        migrated = await db[COLLECTION_RAG_MESSAGES].find({MsgKeys.SESSION_ID: sid}).to_list(length=None)
+        migrated = await db[COLLECTION_RAG_MESSAGES].find({MsgKeys.SESSION_ID: sid}).to_list()
         assert len(migrated) == 2
         assert {m[MsgKeys.CONTENT] for m in migrated} == {"legacy 1", "legacy 2"}
 

@@ -10,12 +10,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import WriteConcern
 from pymongo.errors import DuplicateKeyError
 
+from config import get_settings
 from constants import COLLECTION_USERS, CURRENT_SCHEMA_VERSION_USER, SCHEMA_VERSION_FIELD, WRITE_CONCERN_MAJORITY
-from custom_types.db_schemas import AuthProvider, UserDailyUsage, UserQuotas, UserRole
+from custom_types.db_schemas import AuthProvider, RagPreferences, UserDailyUsage, UserQuotas, UserRole
 from custom_types.field_keys import UserKeys as Keys
 from db.repositories.base import BaseRepository
 
@@ -38,7 +39,7 @@ def normalize_email(email: str) -> str:
 class UsersRepository(BaseRepository):
     """Repository for community-admin user records."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         # Durable record: majority write concern so an account (and its
         # disabled/role state) survives a primary failover on multi-node Atlas.
         super().__init__(db, COLLECTION_USERS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))
@@ -281,3 +282,64 @@ class UsersRepository(BaseRepository):
             {Keys.USER_ID: user_id},
             {"$set": {Keys.DAILY_USAGE: usage.model_dump()}},
         )
+
+    async def get_rag_preferences(self, user_id: str) -> RagPreferences:
+        """Return the user's saved RAG preferences, or the live config default.
+
+        Absence of the sub-document (lazy-migration regime) resolves to the
+        *current* server config (`rag.mmr_lambda` / `rag.enable_mmr_diversity`),
+        not the model's static defaults — so an operator who changes the env
+        default sees it reflected here for unset users.
+        """
+        try:
+            user = await self.find_by_user_id(user_id)
+            if user is None:
+                raise ValueError(f"get_rag_preferences: user not found: user_id={user_id}")
+            raw = user.get(Keys.RAG_PREFERENCES)
+            if not raw:
+                rag = get_settings().rag
+                return RagPreferences(mmr_lambda=rag.mmr_lambda, enable_mmr_diversity=rag.enable_mmr_diversity)
+            return RagPreferences(**raw)
+        except Exception as e:
+            logger.error(
+                "get_rag_preferences failed",
+                extra={"event": "get_rag_preferences_failed", "function": "get_rag_preferences", "user_id": user_id, "error": str(e)},
+            )
+            raise
+
+    async def set_rag_preferences(
+        self,
+        user_id: str,
+        mmr_lambda: float,
+        enable_mmr_diversity: bool,
+    ) -> RagPreferences:
+        """Persist the user's RAG preferences and return the stored value.
+
+        Validation (the `[0, 1]` bound on `mmr_lambda`) is enforced by the
+        `RagPreferences` model itself, so an out-of-range value fails fast here
+        with a pydantic `ValidationError` before any write.
+        """
+        try:
+            # Existence check is separate from the write: update_one reports
+            # modified_count, which is 0 when the new value equals the stored
+            # one (a no-op re-save from the debounced UI), so it cannot stand
+            # in for "user exists".
+            existing = await self.find_by_user_id(user_id)
+            if existing is None:
+                raise ValueError(f"set_rag_preferences: user not found: user_id={user_id}")
+            prefs = RagPreferences(mmr_lambda=mmr_lambda, enable_mmr_diversity=enable_mmr_diversity)
+            await self.update_one(
+                {Keys.USER_ID: user_id},
+                {"$set": {Keys.RAG_PREFERENCES: prefs.model_dump()}},
+            )
+            logger.info(
+                "set_rag_preferences",
+                extra={"event": "set_rag_preferences", "function": "set_rag_preferences", "user_id": user_id, "mmr_lambda": mmr_lambda, "enable_mmr_diversity": enable_mmr_diversity},
+            )
+            return prefs
+        except Exception as e:
+            logger.error(
+                "set_rag_preferences failed",
+                extra={"event": "set_rag_preferences_failed", "function": "set_rag_preferences", "user_id": user_id, "error": str(e)},
+            )
+            raise

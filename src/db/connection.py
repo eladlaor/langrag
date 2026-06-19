@@ -2,7 +2,7 @@
 MongoDB Connection Management
 
 Provides connection pooling and database client management for MongoDB 8.x.
-Uses motor (async driver) for FastAPI compatibility.
+Uses PyMongo's native async client (AsyncMongoClient) for FastAPI compatibility.
 
 Connection URL priority:
 1. MONGODB_URI environment variable (recommended for Docker)
@@ -12,15 +12,16 @@ Connection URL priority:
 import asyncio
 import logging
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 
 from config import get_settings
 
 logger = logging.getLogger(__name__)
 
 # Global client instances (connection pool)
-_client: AsyncIOMotorClient | None = None
-_database: AsyncIOMotorDatabase | None = None
+_client: AsyncMongoClient | None = None
+_database: AsyncDatabase | None = None
 _db_init_lock: asyncio.Lock = asyncio.Lock()
 _sync_client = None
 _sync_database = None
@@ -49,7 +50,7 @@ def get_database_name() -> str:
     return settings.database.database
 
 
-async def get_database() -> AsyncIOMotorDatabase:
+async def get_database() -> AsyncDatabase:
     """
     Get the MongoDB database instance.
 
@@ -58,7 +59,7 @@ async def get_database() -> AsyncIOMotorDatabase:
     concurrent initialization from parallel graph workers.
 
     Returns:
-        AsyncIOMotorDatabase instance
+        AsyncDatabase instance
     """
     global _client, _database
 
@@ -79,7 +80,7 @@ async def get_database() -> AsyncIOMotorDatabase:
 
             from observability.metrics import MongoPoolMetricsListener, PoolClientLabel
 
-            _client = AsyncIOMotorClient(
+            _client = AsyncMongoClient(
                 url,
                 maxPoolSize=settings.database.max_pool_size,
                 minPoolSize=settings.database.min_pool_size,
@@ -105,7 +106,7 @@ async def get_database() -> AsyncIOMotorDatabase:
     return _database
 
 
-async def get_client() -> AsyncIOMotorClient:
+async def get_client() -> AsyncMongoClient:
     """Return the shared async MongoDB client (for multi-document transactions).
 
     Ensures the connection pool is initialized first via get_database(), then
@@ -131,7 +132,7 @@ async def close_connection() -> None:
     global _client, _database
 
     if _client is not None:
-        _client.close()
+        await _client.close()
         _client = None
         _database = None
         logger.info("MongoDB connection closed")

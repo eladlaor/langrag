@@ -41,6 +41,7 @@ import {
   AgentSessionSummary,
   CreateSessionRequest,
   CreateSessionResponse,
+  RagPreferences,
 } from "../types/agent";
 
 class ApiError extends Error {
@@ -640,6 +641,27 @@ export const agentApi = {
     if (!response.ok) {
       throw new ApiError(response.status, `HTTP ${response.status}`);
     }
+  },
+
+  async getRagPreferences(apiKey: string): Promise<RagPreferences> {
+    const response = await fetch(`${API_BASE_URL}/api/agent/rag-preferences`, {
+      credentials: FETCH_CREDENTIALS,
+      headers: _withApiKey(apiKey),
+    });
+    return handleResponse<RagPreferences>(response);
+  },
+
+  async setRagPreferences(
+    apiKey: string,
+    prefs: RagPreferences
+  ): Promise<RagPreferences> {
+    const response = await fetch(`${API_BASE_URL}/api/agent/rag-preferences`, {
+      method: "PUT",
+      credentials: FETCH_CREDENTIALS,
+      headers: _withApiKey(apiKey, { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON }),
+      body: JSON.stringify(prefs),
+    });
+    return handleResponse<RagPreferences>(response);
   },
 };
 

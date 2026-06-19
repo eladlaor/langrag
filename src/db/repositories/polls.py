@@ -8,7 +8,7 @@ Polls are stored as first-class entities with structured question, options, and 
 import logging
 from datetime import datetime, UTC
 from typing import Any
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from constants import COLLECTION_POLLS
@@ -28,7 +28,7 @@ class PollsRepository(BaseRepository):
     - Links to runs and chats
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_POLLS)
 
     async def create_poll(
@@ -80,6 +80,57 @@ class PollsRepository(BaseRepository):
         }
 
         return await self.create(document)
+
+    async def create_polls_bulk(self, polls: list[dict[str, Any]]) -> int:
+        """Upsert many polls in one bulk_write.
+
+        Mirrors DiscussionsRepository.create_discussions_bulk and
+        MessagesRepository.upsert_batch: a single ordered=False bulk upsert keyed
+        on poll_id (a re-run patches rather than duplicates). created_at is
+        insert-only via $setOnInsert; updated_at is refreshed on every write.
+
+        Fail-fast: a bulk write error propagates (with per-op details) instead of
+        being masked as a partial count, which is indistinguishable from "fewer
+        polls existed" and silently loses data.
+
+        Args:
+            polls: Pre-built poll dicts carrying the PollDbKeys fields produced by
+                RunTracker.store_polls (poll_id, run_id, chat_name,
+                data_source_name, sender, timestamp, question, matrix_event_id,
+                options, total_votes, unique_voter_count).
+
+        Returns:
+            Number of documents inserted or modified.
+        """
+        if not polls:
+            return 0
+
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
+
+        now = datetime.now(UTC)
+        operations = []
+        for poll in polls:
+            # created_at is insert-only so a re-ingest keeps "first stored at";
+            # updated_at tracks the latest write. Everything else is $set.
+            set_fields = {k: v for k, v in poll.items() if k != PollDbKeys.CREATED_AT}
+            set_fields[PollDbKeys.UPDATED_AT] = now
+            operations.append(
+                UpdateOne(
+                    {PollDbKeys.POLL_ID: poll[PollDbKeys.POLL_ID]},
+                    {"$set": set_fields, "$setOnInsert": {PollDbKeys.CREATED_AT: now}},
+                    upsert=True,
+                )
+            )
+
+        try:
+            result = await self.collection.bulk_write(operations, ordered=False)
+        except BulkWriteError as e:
+            logger.error(f"Bulk upsert of {len(operations)} polls failed: {e.details}")
+            raise
+        total = result.upserted_count + result.modified_count
+        logger.info(f"Bulk-upserted {total} polls (inserted={result.upserted_count}, updated={result.modified_count})")
+        return total
 
     async def get_polls_by_run(self, run_id: str, chat_name: str | None = None) -> list[dict[str, Any]]:
         """

@@ -16,7 +16,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import (
     AGENT_EPISODIC_MEMORY_TTL_DAYS,
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 class AgentMemoriesRepository(BaseRepository):
     """Repository for agent long-term memories."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_AGENT_MEMORIES)
 
     async def create_memory(

@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import COLLECTION_RAG_CHUNKS, DEFAULT_MAX_QUERY_RESULTS
 from custom_types.field_keys import RAGChunkKeys as Keys
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ChunksRepository(BaseRepository):
     """Repository for RAG content chunks."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_RAG_CHUNKS)
 
     async def store_chunks(self, chunks: list[dict[str, Any]]) -> int:
@@ -84,7 +84,7 @@ class ChunksRepository(BaseRepository):
             {"$sort": {"_id": 1}},
             {"$limit": DEFAULT_MAX_QUERY_RESULTS},
         ]
-        results = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
+        results = await self.collection.aggregate(pipeline).to_list(DEFAULT_MAX_QUERY_RESULTS)
         return {doc["_id"]: doc["count"] for doc in results}
 
     async def list_ingested_sources(self, content_source: str | None = None) -> list[dict]:
@@ -117,7 +117,7 @@ class ChunksRepository(BaseRepository):
         ]
         # One doc per distinct source_id; $limit + bounded to_list guard against
         # an unexpectedly large source catalog materializing fully into memory.
-        results = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
+        results = await self.collection.aggregate(pipeline).to_list(DEFAULT_MAX_QUERY_RESULTS)
         return [
             {
                 Keys.SOURCE_ID: doc["_id"],

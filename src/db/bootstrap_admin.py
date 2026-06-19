@@ -11,7 +11,7 @@ is empty but the bootstrap credentials are not configured, startup raises so
 the operator notices immediately rather than booting an unreachable UI.
 """
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from config import get_settings
 from constants import ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD
@@ -23,7 +23,7 @@ from rag.auth.passwords import hash_password
 logger = get_logger(__name__)
 
 
-async def ensure_bootstrap_admin(db: AsyncIOMotorDatabase) -> None:
+async def ensure_bootstrap_admin(db: AsyncDatabase) -> None:
     """Seed the first admin when the users collection is empty.
 
     No-op when any user already exists. Raises RuntimeError when the database

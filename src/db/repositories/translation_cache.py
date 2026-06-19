@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import UpdateOne
 
 from db.repositories.base import BaseRepository
@@ -41,7 +41,7 @@ class TranslationCacheRepository(BaseRepository):
     Edit Detection: SHA256 content_hash — if content changed, message is re-translated.
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_TRANSLATION_CACHE)
         self._settings = get_settings()
 
@@ -192,7 +192,7 @@ class TranslationCacheRepository(BaseRepository):
                 {"$sort": {"count": -1}},
                 {"$limit": DEFAULT_MAX_QUERY_RESULTS},
             ]
-            by_chat_language = await self.collection.aggregate(pipeline).to_list(length=DEFAULT_MAX_QUERY_RESULTS)
+            by_chat_language = await self.collection.aggregate(pipeline).to_list(DEFAULT_MAX_QUERY_RESULTS)
 
             now = datetime.now(UTC)
             expired_count = await self.count({DbFieldKeys.EXPIRES_AT: {"$lt": now}})

@@ -10,12 +10,12 @@ from datetime import datetime, UTC
 from typing import Any
 
 from bson.binary import Binary, BinaryVectorDtype
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from constants import COLLECTION_DISCUSSIONS, DEFAULT_EMBEDDING_MODEL, DISCUSSION_VECTOR_INDEX_NAME
 from custom_types.db_schemas import DiscussionDocument
-from custom_types.field_keys import DbFieldKeys
+from custom_types.field_keys import DbFieldKeys, DiscussionKeys
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class DiscussionsRepository(BaseRepository):
     # vector-search index and similarity queries do.
     _EXCLUDE_EMBEDDING_PROJECTION = {DbFieldKeys.EMBEDDING: 0}
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_DISCUSSIONS)
 
     async def create_discussion(
@@ -137,6 +137,101 @@ class DiscussionsRepository(BaseRepository):
             document[DbFieldKeys.EMBEDDING_TIMESTAMP] = embedding_timestamp
 
         return await self.create(document)
+
+    @staticmethod
+    def _attach_embedding(document: dict[str, Any], embedding: list[float] | None, embedding_model: str) -> None:
+        """Attach an embedding to a built discussion document as BSON Binary.
+
+        Stored as subtype-9 FLOAT32 BinData for parity with rag_chunks (~2x
+        smaller than a 1536-element BSON array, and the representation the
+        scalar-quantized $vectorSearch index expects). No-op when embedding is
+        None (fail-soft embedding: the discussion is still stored, just without
+        a vector — it simply won't surface in similarity search until re-embedded).
+        """
+        if embedding:
+            document[DbFieldKeys.EMBEDDING] = Binary.from_vector(list(embedding), dtype=BinaryVectorDtype.FLOAT32)
+            document[DbFieldKeys.EMBEDDING_MODEL] = embedding_model
+            document[DbFieldKeys.EMBEDDING_TIMESTAMP] = datetime.now(UTC)
+
+    async def create_discussions_bulk(
+        self,
+        discussions: list[dict[str, Any]],
+        generate_embeddings: bool = True,
+    ) -> int:
+        """Upsert many discussions in one bulk_write, embedding them in one batch.
+
+        Replaces the former per-discussion loop (one OpenAI call + one insert
+        each) with a single batched embedding call and a single ordered=False
+        bulk upsert. Keyed on discussion_id so a re-run patches rather than
+        duplicates.
+
+        Fail-fast: a bulk write error propagates (with per-op details) instead
+        of being masked as a partial count. Embedding remains fail-soft per
+        discussion — a None embedding stores the discussion without a vector.
+
+        Args:
+            discussions: Pre-built discussion dicts. Each MUST carry the keys
+                produced by RunTracker.store_discussions: discussion_id, run_id,
+                chat_name, title, nutshell, message_ids, ranking_score,
+                first_message_timestamp, metadata.
+            generate_embeddings: When True, embed `title. nutshell` per discussion.
+
+        Returns:
+            Number of documents inserted or modified.
+        """
+        if not discussions:
+            return 0
+
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
+
+        embeddings: list[list[float] | None] = [None] * len(discussions)
+        embedding_model = DEFAULT_EMBEDDING_MODEL
+        if generate_embeddings:
+            try:
+                from utils.embedding import EmbeddingProviderFactory
+
+                embedder = EmbeddingProviderFactory.create()
+                texts = [f"{d.get(DbFieldKeys.TITLE, '')}. {d.get(DbFieldKeys.NUTSHELL, '')}" for d in discussions]
+                # Single batched OpenAI call for the whole chat's discussions,
+                # offloaded since embed_texts_batch is synchronous.
+                embeddings = await asyncio.to_thread(embedder.embed_texts_batch, texts)
+            except Exception as e:
+                # Fail-soft embedding: store the discussions without vectors.
+                logger.error(f"Batch embedding failed for {len(discussions)} discussions; storing without vectors (fail-soft): {e}")
+                embeddings = [None] * len(discussions)
+
+        operations = []
+        for disc, embedding in zip(discussions, embeddings):
+            document = DiscussionDocument(
+                discussion_id=disc[DbFieldKeys.DISCUSSION_ID],
+                run_id=disc[DbFieldKeys.RUN_ID],
+                chat_name=disc[DbFieldKeys.CHAT_NAME],
+                title=disc.get(DbFieldKeys.TITLE, ""),
+                nutshell=disc.get(DbFieldKeys.NUTSHELL, ""),
+                message_ids=disc.get(DbFieldKeys.MESSAGE_IDS, []),
+                message_count=len(disc.get(DbFieldKeys.MESSAGE_IDS, [])),
+                ranking_score=disc.get(DbFieldKeys.RANKING_SCORE, 0.0),
+                first_message_timestamp=disc.get(DiscussionKeys.FIRST_MESSAGE_TIMESTAMP),
+                metadata=disc.get(DbFieldKeys.METADATA, {}),
+            ).model_dump(exclude=_EMBEDDING_FIELDS)
+            self._attach_embedding(document, embedding, embedding_model)
+            operations.append(
+                UpdateOne(
+                    {DbFieldKeys.DISCUSSION_ID: document[DbFieldKeys.DISCUSSION_ID]},
+                    {"$set": document},
+                    upsert=True,
+                )
+            )
+
+        try:
+            result = await self.collection.bulk_write(operations, ordered=False)
+        except BulkWriteError as e:
+            logger.error(f"Bulk upsert of {len(operations)} discussions failed: {e.details}")
+            raise
+        total = result.upserted_count + result.modified_count
+        logger.info(f"Bulk-upserted {total} discussions (inserted={result.upserted_count}, updated={result.modified_count})")
+        return total
 
     async def get_discussion(self, discussion_id: str) -> dict[str, Any] | None:
         """Get a discussion by its ID."""
@@ -260,7 +355,7 @@ class DiscussionsRepository(BaseRepository):
                 },
             ]
 
-            results = await self.collection.aggregate(pipeline).to_list(length=top_k)
+            results = await self.collection.aggregate(pipeline).to_list(top_k)
             logger.info(f"Vector-searched {len(results)} similar discussions across {len(run_ids)} run_ids (raw_cosine_min_score={min_score:.2f})")
             return results
 

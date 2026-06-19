@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import COLLECTION_ACCESS_REQUESTS, CURRENT_SCHEMA_VERSION_ACCESS_REQUEST, SCHEMA_VERSION_FIELD
 from custom_types.db_schemas import AccessRequestStatus
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class AccessRequestsRepository(BaseRepository):
     """Repository for self-signup access requests."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_ACCESS_REQUESTS)
 
     async def create_request(

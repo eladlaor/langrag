@@ -56,6 +56,8 @@ class RetrievalPipeline:
         date_end: datetime | None = None,
         top_k: int | None = None,
         rerank_top_k: int | None = None,
+        mmr_lambda: float | None = None,
+        enable_mmr: bool | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -68,6 +70,12 @@ class RetrievalPipeline:
             date_end: Optional inclusive upper bound on source date range
             top_k: Override for vector search top-K (default from config)
             rerank_top_k: Override for rerank top-K (default from config)
+            mmr_lambda: MMR relevance/diversity weight in [0, 1]. None falls back to
+                the config default (rag.mmr_lambda). Higher favors relevance.
+            enable_mmr: Whether to apply MMR diversity reranking. None falls back to
+                the config default (rag.enable_mmr_diversity). When MMR is skipped
+                (disabled, or effective lambda >= 1.0), the fused top-k is returned
+                by relevance order, which is mathematically identical to lambda=1.0.
 
         Returns:
             Dict with:
@@ -83,6 +91,25 @@ class RetrievalPipeline:
         search_top_k = top_k or self._settings.vector_search_top_k
         final_top_k = rerank_top_k or self._settings.rerank_top_k
 
+        # Resolve the effective MMR settings: explicit arg (from a saved user
+        # preference) wins, else the config default. (The per-user saved setting
+        # is resolved by callers and passed in as the explicit arg.)
+        effective_lambda = mmr_lambda if mmr_lambda is not None else self._settings.mmr_lambda
+        effective_enable_mmr = enable_mmr if enable_mmr is not None else self._settings.enable_mmr_diversity
+
+        # Fail-fast on an out-of-range lambda rather than silently clamping; a
+        # bad value almost always means a caller bug we want surfaced.
+        if not 0.0 <= effective_lambda <= 1.0:
+            raise ValueError(
+                f"retrieve: effective mmr_lambda must be in [0.0, 1.0], got {effective_lambda}"
+            )
+
+        # Skip the MMR rerank entirely when diversity is disabled or lambda is
+        # pure-relevance (>= 1.0): both are mathematically identical to taking
+        # the fused top-k by relevance, and skipping is cheaper.
+        skip_mmr = (not effective_enable_mmr) or effective_lambda >= 1.0
+
+
         source_label = ",".join(sorted(content_sources)) if content_sources else "any"
         date_filter_used = date_start is not None or date_end is not None
         retrieval_mode = "hybrid" if self._settings.hybrid_enabled else "vector"
@@ -94,7 +121,11 @@ class RetrievalPipeline:
             "date_end": date_end.isoformat() if date_end else None,
             "top_k": top_k,
             "rerank_top_k": rerank_top_k,
+            "mmr_lambda": effective_lambda,
+            "mmr_applied": not skip_mmr,
             "retrieval_mode": retrieval_mode,
+            "effective_lambda": effective_lambda,
+            "enable_mmr": effective_enable_mmr,
         }
 
         with langfuse_span("rag_retrieve", trace_id=trace_id, input_data=span_input) as span, \
@@ -140,13 +171,22 @@ class RetrievalPipeline:
                 "freshness_warning": False,
                 "oldest_source_date": None,
                 "newest_source_date": None,
+                "mmr_lambda": effective_lambda,
+                "mmr_applied": False,
+                "effective_lambda": effective_lambda,
+                "enable_mmr": effective_enable_mmr,
             }
 
-        reranked = rerank_chunks_mmr(
-            chunks=retrieved,
-            query_embedding=query_embedding,
-            top_k=final_top_k,
-        )
+        if skip_mmr:
+            # Fused results already arrive in relevance order; take the top-k.
+            reranked = retrieved[:final_top_k]
+        else:
+            reranked = rerank_chunks_mmr(
+                chunks=retrieved,
+                query_embedding=query_embedding,
+                top_k=final_top_k,
+                lambda_param=effective_lambda,
+            )
 
         context, citations = self._format_context(reranked)
         freshness_warning, oldest, newest = self._evaluate_freshness(reranked)
@@ -163,6 +203,8 @@ class RetrievalPipeline:
                 "oldest_source_date": oldest.isoformat() if oldest else None,
                 "newest_source_date": newest.isoformat() if newest else None,
                 "retrieval_mode": retrieval_mode,
+                "mmr_lambda": effective_lambda,
+                "mmr_applied": not skip_mmr,
             })
 
         logger.info(
@@ -188,6 +230,10 @@ class RetrievalPipeline:
             "freshness_warning": freshness_warning,
             "oldest_source_date": oldest,
             "newest_source_date": newest,
+            "mmr_lambda": effective_lambda,
+            "mmr_applied": not skip_mmr,
+            "effective_lambda": effective_lambda,
+            "enable_mmr": effective_enable_mmr,
         }
 
     @staticmethod

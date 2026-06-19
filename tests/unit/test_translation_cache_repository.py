@@ -51,7 +51,7 @@ def test_compute_content_hash_handles_empty_string():
 
 @pytest.fixture
 def mock_db():
-    """Create a mock AsyncIOMotorDatabase."""
+    """Create a mock AsyncDatabase."""
     db = MagicMock()
     collection = AsyncMock()
     db.__getitem__ = MagicMock(return_value=collection)

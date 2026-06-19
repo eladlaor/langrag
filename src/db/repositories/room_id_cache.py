@@ -10,7 +10,7 @@ import re
 from datetime import datetime, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from custom_types.field_keys import DbFieldKeys
@@ -34,7 +34,7 @@ class RoomIdCacheRepository(BaseRepository):
     - Cache miss: 3-6 minutes (searches 1903 rooms via Matrix API)
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_ROOM_ID_MAP)
 
     async def get_room_id(self, chat_name: str) -> str | None:
@@ -156,7 +156,7 @@ class RoomIdCacheRepository(BaseRepository):
             # Get most accessed
             pipeline = [{"$sort": {"access_count": -1}}, {"$limit": 5}, {"$project": {"chat_name": 1, "access_count": 1, "last_accessed_at": 1}}]
 
-            top_accessed = await self.collection.aggregate(pipeline).to_list(length=None)
+            top_accessed = await self.collection.aggregate(pipeline).to_list()
 
             stats = {"total_entries": total_entries, "top_accessed": top_accessed}
 

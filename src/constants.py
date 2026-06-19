@@ -102,6 +102,10 @@ ROUTE_AUTH_GOOGLE_CALLBACK = "/auth/google/callback"
 ROUTE_AUTH_ACCESS_REQUESTS = "/auth/access-requests"
 ROUTE_AUTH_CONFIG = "/auth/config"
 
+# Per-user RAG preferences (saved MMR diversity setting). GET resolves the
+# saved value (or config default when unset); PUT persists a new value.
+ROUTE_USER_RAG_PREFERENCES = "/users/me/rag-preferences"
+
 # Structured machine-readable code returned in the signup 403 body when the
 # email is not on the allowlist. The frontend branches on this to show the
 # invite-only rejection screen.
@@ -404,6 +408,7 @@ HTTP_STATUS_FORBIDDEN = 403
 HTTP_STATUS_NOT_FOUND = 404
 HTTP_STATUS_CONFLICT = 409
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
+HTTP_STATUS_UNPROCESSABLE_ENTITY = 422
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
 
 # Generic client-facing detail for 5xx responses. Internal exception text
@@ -424,6 +429,14 @@ COLLECTION_BATCH_JOBS = "batch_jobs"
 COLLECTION_NEWSLETTERS = "newsletters"
 COLLECTION_SCHEDULED_NEWSLETTERS = "scheduled_newsletters"
 COLLECTION_EXTRACTION_CACHE = "extraction_cache"
+# Companion collection holding the message arrays for extraction-cache entries,
+# sharded across chunk documents. The parent extraction_cache doc holds only
+# metadata + a chunk_count; messages live here so a wide date range over a busy
+# chat can never push a single document toward the 16MB BSON ceiling.
+COLLECTION_EXTRACTION_CACHE_CHUNKS = "extraction_cache_chunks"
+# Number of messages per extraction-cache chunk document. Sized well under the
+# 16MB BSON limit even for large messages (media metadata, long content).
+EXTRACTION_CACHE_CHUNK_SIZE = 2000
 COLLECTION_ROOM_ID_MAP = "room_id_map"
 COLLECTION_IMAGES = "images"
 COLLECTION_TRANSLATION_CACHE = "translation_cache"
@@ -444,11 +457,18 @@ COLLECTION_AGENT_MEMORIES = "agent_memories"
 COLLECTION_ACCESS_REQUESTS = "access_requests"
 
 # Safety ceiling for queries that would otherwise materialize an unbounded result
-# set into memory (Motor's cursor.to_list(length=None)). Callers that legitimately
+# set into memory (Motor's cursor.to_list()). Callers that legitimately
 # want everything still pass an explicit limit; this only guards the "no limit"
 # default so a single query can never OOM the process. When the cap is hit the
 # repository logs a warning so the truncation is never silent.
 DEFAULT_MAX_QUERY_RESULTS = 10000
+
+# Default page bound for get_messages_by_run when the caller does not pass an
+# explicit limit. Kept deliberately small (matches get_messages_page's page_size)
+# so the convenience default cannot silently materialize tens of MB of message
+# docs into a list. Callers that genuinely need the full run must page through
+# get_messages_page (keyset pagination), not raise this default.
+DEFAULT_MESSAGES_QUERY_LIMIT = 1000
 
 # Write concern for durable records that MUST survive a primary failover on a
 # multi-node Atlas/replica-set deployment: the write is acknowledged only once a
@@ -526,6 +546,14 @@ RAG_VECTOR_INDEX_NAME_LEGACY = "rag_chunk_embeddings"
 # RAG lexical (Atlas Search) index over rag_chunks.content for hybrid retrieval
 # via $rankFusion (MongoDB 8.1+).
 RAG_LEXICAL_INDEX_NAME = "rag_chunks_lexical"
+
+# $vectorSearch numCandidates bounds, shared by the vector-only and hybrid RAG
+# retrieval paths so they stay symmetric. The floor keeps HNSW recall stable
+# for small top_k (MongoDB guidance: numCandidates >= ~10-20x limit AND a
+# practical minimum of ~100-200); the ceiling is a latency guardrail so a large
+# top_k can't blow up the mongot scan.
+RAG_VECTOR_SEARCH_MIN_NUM_CANDIDATES = 150
+RAG_VECTOR_SEARCH_MAX_NUM_CANDIDATES = 1000
 
 # Vector search index on the discussions collection, created on startup (same
 # modern vectorSearch syntax + scalar quantization as the RAG chunk index).
@@ -1381,3 +1409,34 @@ HITL_KEY_TIMEOUT_DEADLINE = "timeout_deadline"
 CONSOLIDATED_CHAT_SENTINEL = "__consolidated__"
 UNKNOWN_CHAT_NAME = "unknown"
 NO_CONTENT_FOR_SECTION = "No content for this section"
+
+
+# ============================================================================
+# MONGODB BACKUP → GCS
+# ============================================================================
+# Single source of truth for the backup sidecar. The shell scripts in
+# scripts/backup/ receive these as environment variables, injected by the
+# `mongo-backup` Compose service which references the same values. See
+# knowledge/plans/MONGODB_BACKUP_GCS.md.
+
+# GCS destination (project langrag-499615, region europe-west1).
+BACKUP_GCS_BUCKET = "langrag-499615-langrag-backups"
+BACKUP_GCS_DAILY_PREFIX = "langrag/daily/"
+BACKUP_GCS_MONTHLY_PREFIX = "langrag/monthly/"
+
+# Database being dumped (matches DatabaseSettings.database default).
+BACKUP_DATABASE_NAME = "langrag"
+
+# In-Docker-network Mongo target: service DNS name `mongodb`, replica set
+# `langrag-mongodb` (per docker-compose.yml). NOT `rs0`.
+BACKUP_MONGO_HOST = "mongodb"
+BACKUP_MONGO_PORT = 27017
+BACKUP_MONGO_REPLICA_SET = "langrag-mongodb"
+
+# Archive naming: langrag-YYYYMMDDTHHMMSSZ.archive.gz
+BACKUP_ARCHIVE_PREFIX = "langrag-"
+BACKUP_ARCHIVE_SUFFIX = ".archive.gz"
+
+# Retention (enforced by the GCS lifecycle rule, mirrored here for reference).
+BACKUP_DAILY_RETENTION_DAYS = 30
+BACKUP_MONTHLY_RETENTION_DAYS = 365

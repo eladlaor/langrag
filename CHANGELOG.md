@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-06-19
+
+### Added
+- **Extraction-cache message auto-split (16MB BSON ceiling protection):** the extraction-cache parent document no longer embeds the message array inline. Messages are now sharded across a companion `extraction_cache_chunks` collection (2000 messages per chunk), so a wide date range over a busy chat can never push a single document toward MongoDB's 16MB BSON limit. The split is transparent to callers: reads re-attach a fully assembled `messages` list onto the parent. Write ordering is crash-safe (chunks written first, parent `chunk_count` flipped last) and reads fail safe (a chunk-count or length mismatch is treated as a cache miss, never served truncated). The chunk collection carries its own unique `{cache_key, chunk_index}` index and a TTL on the same clock as the parent; legacy inline-array parents are read back directly until they expire.
+- **Bulk poll persistence:** `PollsRepository.create_polls_bulk` upserts a whole batch of polls in one `ordered=False` bulk write keyed on `poll_id` (mirroring the discussions and messages bulk paths). `RunTracker.store_polls` now routes through it instead of a per-poll `create()` loop, and is fail-fast: a write error propagates with per-op details rather than being masked as a partial count that is indistinguishable from "fewer polls existed".
+- **Query-plan regression test:** new Docker-gated integration suite (`tests/integration/db/test_query_plans.py`) runs each hot query through `.explain("executionStats")` and asserts the winning plan is index-backed (IXSCAN, never COLLSCAN) with a sane examined/returned ratio, turning the index reasoning in `src/db/indexes.py` into runtime-verified evidence. The mongot vector path is covered by a lighter queryable-index assertion that skips when mongot is absent.
+- **Customer-configurable RAG MMR balance (relevance vs diversity):** the RAG chunk reranker's MMR `lambda` was a hardcoded `0.7` unreachable from config, API, or UI. It is now configurable: a server default that is **overridable per request on the public RAG API** and **persisted per user as a UI default in the agent console**. New `rag.mmr_lambda` and `rag.enable_mmr_diversity` config fields (env `RAG_MMR_LAMBDA` / `RAG_ENABLE_MMR_DIVERSITY`) set the default; `RetrievalPipeline.retrieve` resolves the effective value as explicit arg, then config default, validates the range fail-fast (`ValueError` outside `[0,1]`), and skips the MMR rerank entirely when diversity is disabled or `lambda >= 1.0` (returning the fused top-k, which is mathematically identical and cheaper). The per-user value is persisted as an optional `rag_preferences` sub-document on the `users` doc (lazy-migration: absence resolves to the live config default, no batch migration), read/written via `UsersRepository.get_rag_preferences` / `set_rag_preferences`. New auth-scoped endpoints `GET`/`PUT /api/agent/rag-preferences` expose it (422 on out-of-range lambda), the public RAG chat body and the `rag_query`/`rag_search` MCP tools accept an optional per-request `mmr_lambda`, and the agent chat UI gains a raw lambda slider (0.0 to 1.0, step 0.05, "precise vs diverse") that hydrates from the saved value on mount and persists debounced. The effective lambda is recorded on the retrieval Langfuse span and result payload for observability.
+
+### Changed
+- **Bounded default for `get_messages_by_run`:** the convenience default limit dropped from 10000 to a deliberately small `DEFAULT_MESSAGES_QUERY_LIMIT` (1000) so the no-limit path cannot silently materialize tens of MB of message docs into a list; callers needing a full busy run must page through `get_messages_page` (keyset) rather than raise the default.
+- **`drop_all_indexes` now also tears down mongot search/vector indexes:** the previous implementation dropped only btree indexes, silently leaving stale `$vectorSearch`/lexical definitions behind. It now best-effort drops the registered search/vector indexes per collection as well, so "drop all" means all.
+- **`slm_classification` is now an enum on `MessageDocument`:** the SLM pre-filter verdict field is typed as `MessageClassification` instead of a bare `str`, closing the last inline-string gap on that field.
+
+### Fixed
+- **Extraction-cache `encrypted_count` was always zero:** the count summed a non-existent `"encrypted"` boolean key, so every cached entry recorded zero still-encrypted messages. It now counts on the Matrix event type (`m.room.encrypted`), the same predicate the extractor uses.
+
 ## [1.17.1] - 2026-06-17
 
 ### Added
@@ -314,7 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.1...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.2...HEAD
+[1.17.2]: https://github.com/eladlaor/langrag/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/eladlaor/langrag/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/eladlaor/langrag/compare/v1.16.2...v1.17.0
 [1.16.2]: https://github.com/eladlaor/langrag/compare/v1.16.1...v1.16.2

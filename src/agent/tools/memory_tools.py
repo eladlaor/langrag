@@ -13,7 +13,8 @@ wire the production store.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
+from collections.abc import Callable
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.types import interrupt

@@ -52,6 +52,37 @@ async def test_unique_email_constraint(db, unique_email):
         await repo.delete_one({UserKeys.USER_ID: user_id})
 
 
+async def test_rag_preferences_round_trip(db, unique_email):
+    """PUT-then-GET semantics: a written value reads back; unset falls back to defaults."""
+    repo = UsersRepository(db)
+    user_id = await repo.create_user(email=unique_email, communities=[])
+    try:
+        # Unset → config-backed defaults.
+        defaults = await repo.get_rag_preferences(user_id)
+        assert defaults.mmr_lambda == 0.7
+        assert defaults.enable_mmr_diversity is True
+
+        # Write, then read back the exact value.
+        await repo.set_rag_preferences(user_id, mmr_lambda=0.3, enable_mmr_diversity=False)
+        fetched = await repo.get_rag_preferences(user_id)
+        assert fetched.mmr_lambda == 0.3
+        assert fetched.enable_mmr_diversity is False
+
+        # Re-saving the identical value must succeed (modified_count == 0 is a
+        # no-op write, not a missing user). Regression for the debounced-UI case.
+        again = await repo.set_rag_preferences(user_id, mmr_lambda=0.3, enable_mmr_diversity=False)
+        assert again.mmr_lambda == 0.3
+    finally:
+        await repo.delete_one({UserKeys.USER_ID: user_id})
+
+
+async def test_set_rag_preferences_unknown_user_raises(db):
+    """Writing prefs for a non-existent user fails fast."""
+    repo = UsersRepository(db)
+    with pytest.raises(ValueError, match="user not found"):
+        await repo.set_rag_preferences("does-not-exist", mmr_lambda=0.5, enable_mmr_diversity=True)
+
+
 async def test_set_daily_usage(db, unique_email):
     repo = UsersRepository(db)
     user_id = await repo.create_user(email=unique_email, communities=[])

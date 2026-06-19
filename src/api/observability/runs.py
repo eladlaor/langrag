@@ -958,7 +958,7 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
                 pipeline.append({"$project": {"_id": 0, DbFieldKeys.DISCUSSION_ID: 1, DbFieldKeys.RUN_ID: 1, DbFieldKeys.CHAT_NAME: 1, DbFieldKeys.TITLE: 1, DbFieldKeys.NUTSHELL: 1, DbFieldKeys.CREATED_AT: 1, "similarity_score": 1}})
 
                 collection = db[COLLECTION_DISCUSSIONS]
-                results = await collection.aggregate(pipeline).to_list(length=limit)
+                results = await collection.aggregate(pipeline).to_list(limit)
                 search_method = SearchMethod.VECTOR
 
                 logger.info(f"Vector search returned {len(results)} results")
@@ -1011,7 +1011,7 @@ async def get_run_stats():
 
         # Get runs grouped by data source
         pipeline = [{"$group": {"_id": "$data_source_name", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]
-        source_counts = await runs_collection.aggregate(pipeline).to_list(length=20)
+        source_counts = await runs_collection.aggregate(pipeline).to_list(20)
         runs_by_source = {item["_id"]: item["count"] for item in source_counts if item["_id"]}
 
         # Get recent runs

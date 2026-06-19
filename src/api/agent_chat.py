@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, AsyncIterator
+from typing import Any
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -28,6 +29,7 @@ from constants import (
 from custom_types.db_schemas import MemoryNamespace
 from db.connection import get_database
 from db.repositories.agent_sessions import AgentSessionsRepository
+from db.repositories.users import UsersRepository
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,21 @@ class MemoryItem(BaseModel):
     namespace: str
     content: str
     importance: float
+
+
+class RagPreferencesResponse(BaseModel):
+    """The caller's saved RAG retrieval preferences (or config-backed defaults)."""
+
+    mmr_lambda: float = Field(..., description="MMR relevance/diversity weight (0-1).")
+    enable_mmr_diversity: bool = Field(..., description="Whether MMR diversity reranking is applied.")
+
+
+class RagPreferencesUpdate(BaseModel):
+    """Body for PUT /agent/rag-preferences. Validated at the API boundary so an
+    out-of-range lambda returns 422 before any DB write."""
+
+    mmr_lambda: float = Field(..., ge=0.0, le=1.0, description="MMR relevance/diversity weight (0-1).")
+    enable_mmr_diversity: bool = Field(..., description="Whether MMR diversity reranking is applied.")
 
 
 # ----------------------------------------------------------------------
@@ -262,6 +279,39 @@ async def delete_memory_endpoint(
     for ns in MemoryNamespace:
         await store.adelete((user.user_id, str(ns)), memory_id)
     return Response(status_code=204)
+
+
+@router.get("/rag-preferences", response_model=RagPreferencesResponse)
+async def get_rag_preferences(
+    user: UserContext = Depends(require_user),
+) -> RagPreferencesResponse:
+    """Return the caller's saved RAG preferences, or config-backed defaults."""
+    db = await get_database()
+    repo = UsersRepository(db)
+    prefs = await repo.get_rag_preferences(user.user_id)
+    return RagPreferencesResponse(
+        mmr_lambda=prefs.mmr_lambda,
+        enable_mmr_diversity=prefs.enable_mmr_diversity,
+    )
+
+
+@router.put("/rag-preferences", response_model=RagPreferencesResponse)
+async def put_rag_preferences(
+    payload: RagPreferencesUpdate,
+    user: UserContext = Depends(require_user),
+) -> RagPreferencesResponse:
+    """Persist the caller's RAG preferences and echo the stored value back."""
+    db = await get_database()
+    repo = UsersRepository(db)
+    prefs = await repo.set_rag_preferences(
+        user_id=user.user_id,
+        mmr_lambda=payload.mmr_lambda,
+        enable_mmr_diversity=payload.enable_mmr_diversity,
+    )
+    return RagPreferencesResponse(
+        mmr_lambda=prefs.mmr_lambda,
+        enable_mmr_diversity=prefs.enable_mmr_diversity,
+    )
 
 
 @router.post("/chat/stream")

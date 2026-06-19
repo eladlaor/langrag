@@ -193,7 +193,7 @@ class BatchJobManager:
         try:
             cursor = self._collection.find({"status": BatchJobStatus.QUEUED}, {"_id": 0}).sort("created_at", 1).limit(limit)
 
-            jobs = await cursor.to_list(length=limit)
+            jobs = await cursor.to_list(limit)
             return jobs
 
         except Exception as e:
@@ -286,7 +286,7 @@ class BatchJobManager:
 
             cursor = self._collection.find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit)
 
-            jobs = await cursor.to_list(length=limit)
+            jobs = await cursor.to_list(limit)
             return jobs
 
         except Exception as e:

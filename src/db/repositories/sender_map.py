@@ -11,7 +11,7 @@ Key: (data_source_name, chat_name) — one sender map per chat.
 import logging
 from datetime import datetime, UTC
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from constants import COLLECTION_SENDER_MAPS
@@ -29,7 +29,7 @@ class SenderMapRepository(BaseRepository):
     new senders are appended, existing mappings never change.
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_SENDER_MAPS)
 
     async def get_sender_map(

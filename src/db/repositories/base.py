@@ -6,7 +6,8 @@ Provides common CRUD operations for all repositories.
 
 import logging
 from typing import Any, TypeVar, Generic
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
+from pymongo.asynchronous.collection import AsyncCollection
 from pydantic import BaseModel
 from pymongo import WriteConcern
 
@@ -27,12 +28,12 @@ class BaseRepository(Generic[T]):
     - Query helpers
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase, collection_name: str, write_concern: WriteConcern | None = None):
+    def __init__(self, db: AsyncDatabase, collection_name: str, write_concern: WriteConcern | None = None):
         """
         Initialize repository with database and collection.
 
         Args:
-            db: AsyncIOMotorDatabase instance
+            db: AsyncDatabase instance
             collection_name: Name of the MongoDB collection
             write_concern: Optional per-collection write concern. Durable-record
                 repositories pass WriteConcern(w="majority") so the write
@@ -40,7 +41,7 @@ class BaseRepository(Generic[T]):
                 default (w:1), which is correct for caches and ephemeral state.
         """
         self.db = db
-        self.collection: AsyncIOMotorCollection = db.get_collection(collection_name, write_concern=write_concern) if write_concern is not None else db[collection_name]
+        self.collection: AsyncCollection = db.get_collection(collection_name, write_concern=write_concern) if write_concern is not None else db[collection_name]
         self.collection_name = collection_name
 
     async def create(self, document: dict[str, Any]) -> str:
@@ -145,7 +146,7 @@ class BaseRepository(Generic[T]):
             effective_limit = limit if limit else DEFAULT_MAX_QUERY_RESULTS
             cursor = cursor.limit(effective_limit)
 
-            results = await cursor.to_list(length=effective_limit)
+            results = await cursor.to_list(effective_limit)
 
             # Surface (never silently hide) the case where the safety ceiling
             # clipped a "no explicit limit" query — it means a caller needs to

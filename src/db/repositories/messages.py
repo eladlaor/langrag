@@ -7,13 +7,19 @@ Manages raw message records extracted from WhatsApp chats.
 import logging
 from datetime import datetime, UTC
 from typing import Any
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
-from constants import COLLECTION_MESSAGES, CURRENT_SCHEMA_VERSION_MESSAGE, SCHEMA_VERSION_FIELD
+from constants import COLLECTION_MESSAGES, CURRENT_SCHEMA_VERSION_MESSAGE, DEFAULT_MESSAGES_QUERY_LIMIT, SCHEMA_VERSION_FIELD
 from custom_types.field_keys import DbFieldKeys
 
 logger = logging.getLogger(__name__)
+
+# MongoDB server error code for a duplicate-key violation.
+_DUPLICATE_KEY_ERROR_CODE = 11000
+
+# Reusable chronological sort key for message queries.
+_SORT_BY_TIMESTAMP_ASC = [(DbFieldKeys.TIMESTAMP, 1)]
 
 
 class MessagesRepository(BaseRepository):
@@ -27,7 +33,7 @@ class MessagesRepository(BaseRepository):
     - Reply relationships
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_MESSAGES)
 
     async def create_message(
@@ -80,7 +86,7 @@ class MessagesRepository(BaseRepository):
     ) -> list[str]:
         """Bulk insert messages."""
         for msg in messages:
-            msg["created_at"] = datetime.now(UTC)
+            msg[DbFieldKeys.CREATED_AT] = datetime.now(UTC)
             msg.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
         return await self.create_many(messages)
 
@@ -101,31 +107,40 @@ class MessagesRepository(BaseRepository):
         if not messages:
             return 0
 
-        try:
-            from datetime import datetime
-            from pymongo import UpdateOne
+        from pymongo import UpdateOne
+        from pymongo.errors import BulkWriteError
 
-            operations = []
-            now = datetime.now(UTC)
-            for doc in messages:
-                doc.setdefault("created_at", now)
-                doc.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
-                doc["updated_at"] = now
-                operations.append(
-                    UpdateOne(
-                        {key_field: doc[key_field]},
-                        {"$set": doc},
-                        upsert=True,
-                    )
+        operations = []
+        now = datetime.now(UTC)
+        for doc in messages:
+            # created_at and schema_version are insert-only: a re-ingest of an
+            # existing message (the translated pass) must NOT reset them. Pull
+            # them out of $set and into $setOnInsert.
+            set_fields = {k: v for k, v in doc.items() if k not in (DbFieldKeys.CREATED_AT, SCHEMA_VERSION_FIELD)}
+            set_fields[DbFieldKeys.UPDATED_AT] = now
+            on_insert = {
+                DbFieldKeys.CREATED_AT: doc.get(DbFieldKeys.CREATED_AT, now),
+                SCHEMA_VERSION_FIELD: doc.get(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE),
+            }
+            operations.append(
+                UpdateOne(
+                    {key_field: doc[key_field]},
+                    {"$set": set_fields, "$setOnInsert": on_insert},
+                    upsert=True,
                 )
+            )
 
+        # Fail-fast: a partial/total write failure must propagate (with the
+        # per-op error details) rather than be masked as "0 upserted", which is
+        # indistinguishable from empty input and silently loses data.
+        try:
             result = await self.collection.bulk_write(operations, ordered=False)
-            total = result.upserted_count + result.modified_count
-            logger.info(f"Upserted {total} messages (inserted={result.upserted_count}, updated={result.modified_count})")
-            return total
-        except Exception as e:
-            logger.error(f"Failed to upsert messages batch: {e}")
-            return 0
+        except BulkWriteError as e:
+            logger.error(f"Bulk upsert of {len(operations)} messages failed: {e.details}")
+            raise
+        total = result.upserted_count + result.modified_count
+        logger.info(f"Upserted {total} messages (inserted={result.upserted_count}, updated={result.modified_count})")
+        return total
 
     async def insert_batch(self, messages: list[dict[str, Any]]) -> int:
         """
@@ -141,23 +156,40 @@ class MessagesRepository(BaseRepository):
         if not messages:
             return 0
 
-        try:
-            # Add created_at if not present
-            for msg in messages:
-                if "created_at" not in msg:
-                    msg["created_at"] = datetime.now(UTC)
-                msg.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
+        from pymongo.errors import BulkWriteError
 
-            # Use ordered=False to continue inserting even if some fail (e.g., duplicates)
+        # Add created_at if not present
+        for msg in messages:
+            if DbFieldKeys.CREATED_AT not in msg:
+                msg[DbFieldKeys.CREATED_AT] = datetime.now(UTC)
+            msg.setdefault(SCHEMA_VERSION_FIELD, CURRENT_SCHEMA_VERSION_MESSAGE)
+
+        # Use ordered=False to continue inserting even if some fail.
+        try:
             result = await self.collection.insert_many(messages, ordered=False)
             return len(result.inserted_ids)
-        except Exception as e:
-            logger.error(f"Failed to insert messages batch: {e}")
-            return 0
+        except BulkWriteError as e:
+            # Duplicate keys (code 11000) are benign on re-ingest: the document
+            # already exists, so treat those as "already stored" and report the
+            # count that DID insert. ANY other write error is real data loss and
+            # must propagate (fail-fast).
+            write_errors = e.details.get("writeErrors", [])
+            non_duplicate = [we for we in write_errors if we.get("code") != _DUPLICATE_KEY_ERROR_CODE]
+            if non_duplicate:
+                logger.error(f"Bulk insert of {len(messages)} messages hit non-duplicate errors: {non_duplicate}")
+                raise
+            inserted = e.details.get("nInserted", 0)
+            logger.info(f"Inserted {inserted}/{len(messages)} messages ({len(write_errors)} pre-existing, skipped)")
+            return inserted
 
-    async def get_messages_by_run(self, run_id: str, chat_name: str | None = None, limit: int = 10000) -> list[dict[str, Any]]:
+    async def get_messages_by_run(self, run_id: str, chat_name: str | None = None, limit: int = DEFAULT_MESSAGES_QUERY_LIMIT) -> list[dict[str, Any]]:
         """
         Get messages for a run, optionally filtered by chat.
+
+        The default limit is intentionally bounded (DEFAULT_MESSAGES_QUERY_LIMIT)
+        so the convenience path cannot silently materialize a whole busy run into
+        memory. To retrieve an unbounded run, page through get_messages_page
+        (keyset pagination) rather than raising this limit.
 
         Args:
             run_id: Run identifier
@@ -167,11 +199,11 @@ class MessagesRepository(BaseRepository):
         Returns:
             List of message documents sorted by timestamp
         """
-        query = {"run_id": run_id}
+        query = {DbFieldKeys.RUN_ID: run_id}
         if chat_name:
             query[DbFieldKeys.CHAT_NAME] = chat_name
 
-        return await self.find_many(query, sort=[("timestamp", 1)], limit=limit)
+        return await self.find_many(query, sort=_SORT_BY_TIMESTAMP_ASC, limit=limit)
 
     async def get_messages_page(
         self,
@@ -234,7 +266,7 @@ class MessagesRepository(BaseRepository):
         Returns:
             Message count
         """
-        query = {"run_id": run_id}
+        query = {DbFieldKeys.RUN_ID: run_id}
         if chat_name:
             query[DbFieldKeys.CHAT_NAME] = chat_name
 
@@ -251,7 +283,7 @@ class MessagesRepository(BaseRepository):
         """Get all messages in a discussion, sorted by timestamp."""
         return await self.find_many(
             {DbFieldKeys.DISCUSSION_ID: discussion_id},
-            sort=[("timestamp", 1)],
+            sort=_SORT_BY_TIMESTAMP_ASC,
         )
 
     async def get_messages_by_chat_and_range(
@@ -263,10 +295,10 @@ class MessagesRepository(BaseRepository):
         """Get messages from a chat within a time range."""
         return await self.find_many(
             {
-                "chat_name": chat_name,
-                "timestamp": {"$gte": start_timestamp, "$lte": end_timestamp},
+                DbFieldKeys.CHAT_NAME: chat_name,
+                DbFieldKeys.TIMESTAMP: {"$gte": start_timestamp, "$lte": end_timestamp},
             },
-            sort=[("timestamp", 1)],
+            sort=_SORT_BY_TIMESTAMP_ASC,
         )
 
     async def get_message_thread(
@@ -281,8 +313,8 @@ class MessagesRepository(BaseRepository):
 
         # Get all replies
         replies = await self.find_many(
-            {"replies_to": message_id},
-            sort=[("timestamp", 1)],
+            {DbFieldKeys.REPLIES_TO: message_id},
+            sort=_SORT_BY_TIMESTAMP_ASC,
         )
 
         return [root] + replies

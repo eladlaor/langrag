@@ -420,6 +420,38 @@ services:
       - langrag-network
     restart: unless-stopped
 
+  # mongo-backup - daily mongodump of the langrag DB to GCS.
+  # One-shot job, NOT a long-running service: started on demand by the host
+  # systemd timer via `docker compose run --rm mongo-backup`. The `backup`
+  # profile keeps it out of the normal `up`. Env values mirror src/constants.py
+  # (single source of truth). See knowledge/plans/MONGODB_BACKUP_GCS.md.
+  mongo-backup:
+    build:
+      context: .
+      dockerfile: scripts/backup/Dockerfile
+    image: langrag-mongo-backup:latest
+    container_name: langrag-mongo-backup
+    profiles: ["backup"]
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      BACKUP_MONGO_HOST: mongodb
+      BACKUP_MONGO_PORT: "27017"
+      BACKUP_MONGO_REPLICA_SET: langrag-mongodb
+      BACKUP_DATABASE_NAME: langrag
+      BACKUP_GCS_BUCKET: langrag-499615-langrag-backups
+      BACKUP_GCS_DAILY_PREFIX: langrag/daily/
+      BACKUP_GCS_MONTHLY_PREFIX: langrag/monthly/
+      BACKUP_ARCHIVE_PREFIX: langrag-
+      BACKUP_ARCHIVE_SUFFIX: .archive.gz
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/langrag-backup-sa.json
+    volumes:
+      - ./secrets/langrag-backup-sa.json:/secrets/langrag-backup-sa.json:ro
+    networks:
+      - langrag-network
+    restart: "no"
+
   # n8n - Workflow Automation for LinkedIn Integration
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest

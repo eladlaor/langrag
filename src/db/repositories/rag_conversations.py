@@ -22,7 +22,7 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import COLLECTION_RAG_CONVERSATIONS
 from custom_types.field_keys import RAGConversationKeys as Keys
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class ConversationsRepository(BaseRepository):
     """Repository for RAG conversation sessions (metadata; messages live in rag_messages)."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_RAG_CONVERSATIONS)
         self._messages = RAGMessagesRepository(db)
 

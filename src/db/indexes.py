@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import ASCENDING, DESCENDING
 from pymongo.operations import SearchIndexModel
 
@@ -24,6 +24,7 @@ from constants import (
     AGENT_MEMORY_VECTOR_INDEX_NAME,
     COLLECTION_AGENT_MEMORIES,
     COLLECTION_DISCUSSIONS,
+    COLLECTION_MESSAGES,
     COLLECTION_RAG_CHUNKS,
     DEFAULT_EMBEDDING_DIMENSION,
     DISCUSSION_VECTOR_INDEX_NAME,
@@ -39,6 +40,76 @@ from custom_types.field_keys import AgentMemoryKeys, DbFieldKeys, RAGChunkKeys
 # Kept here so ensure_indexes() can drop it idempotently from existing
 # deployments. New deployments will simply skip the drop.
 _LEGACY_DISCUSSIONS_TEXT_INDEX_NAME = "title_text_nutshell_text"
+
+# Auto-generated name of the standalone {run_id: 1} index. It is redundant on
+# both `discussions` and `messages` because run_id is the prefix of their
+# compound indexes (which already serve equality-on-run_id). Dropped
+# idempotently from existing deployments; never recreated.
+_REDUNDANT_RUN_ID_INDEX_NAME = "run_id_1"
+_REDUNDANT_RUN_ID_PREFIX_COLLECTIONS = (COLLECTION_DISCUSSIONS, COLLECTION_MESSAGES)
+
+# Server-side $jsonSchema validators for the high-value collections. They are a
+# belt-and-suspenders complement to the Pydantic models: because the models use
+# extra="allow" and some writers build dicts directly, MongoDB is the only layer
+# that can guarantee shape regardless of which code path inserts. The validators
+# deliberately enforce ONLY the always-present key fields and their bsonType,
+# with additionalProperties: true — they must NOT encode a closed shape, or they
+# would reject the legitimate documents the pipeline writes (two-pass messages,
+# BinData embeddings, open-ended metadata). Applied with validationLevel:
+# "moderate" + validationAction: "error" so existing non-conforming documents
+# are never retroactively rejected, only new/updated conforming ones are guarded.
+_COLLECTION_VALIDATORS: dict[str, dict] = {
+    COLLECTION_MESSAGES: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            # Only fields written by BOTH the raw and translated passes. timestamp
+            # is intentionally NOT required (it can be absent/null mid-pipeline).
+            "required": [SCHEMA_VERSION_FIELD, DbFieldKeys.MESSAGE_ID, DbFieldKeys.RUN_ID, DbFieldKeys.CHAT_NAME, DbFieldKeys.SENDER],
+            "properties": {
+                SCHEMA_VERSION_FIELD: {"bsonType": "int"},
+                DbFieldKeys.MESSAGE_ID: {"bsonType": "string"},
+                DbFieldKeys.RUN_ID: {"bsonType": "string"},
+                DbFieldKeys.CHAT_NAME: {"bsonType": "string"},
+                DbFieldKeys.SENDER: {"bsonType": "string"},
+                DbFieldKeys.TIMESTAMP: {"bsonType": ["long", "int", "null"]},
+            },
+            "additionalProperties": True,
+        }
+    },
+    COLLECTION_DISCUSSIONS: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": [SCHEMA_VERSION_FIELD, DbFieldKeys.DISCUSSION_ID, DbFieldKeys.RUN_ID, DbFieldKeys.CHAT_NAME, DbFieldKeys.MESSAGE_IDS],
+            "properties": {
+                SCHEMA_VERSION_FIELD: {"bsonType": "int"},
+                DbFieldKeys.DISCUSSION_ID: {"bsonType": "string"},
+                DbFieldKeys.RUN_ID: {"bsonType": "string"},
+                DbFieldKeys.CHAT_NAME: {"bsonType": "string"},
+                DbFieldKeys.MESSAGE_IDS: {"bsonType": "array"},
+                # Embedding, when present, is BinData (subtype 9 FLOAT32 vector).
+                DbFieldKeys.EMBEDDING: {"bsonType": ["binData", "null"]},
+            },
+            "additionalProperties": True,
+        }
+    },
+    COLLECTION_RAG_CHUNKS: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "required": [SCHEMA_VERSION_FIELD, RAGChunkKeys.CHUNK_ID, RAGChunkKeys.CONTENT_SOURCE, RAGChunkKeys.CONTENT, RAGChunkKeys.EMBEDDING],
+            "properties": {
+                SCHEMA_VERSION_FIELD: {"bsonType": "int"},
+                RAGChunkKeys.CHUNK_ID: {"bsonType": "string"},
+                RAGChunkKeys.CONTENT_SOURCE: {"bsonType": "string"},
+                RAGChunkKeys.CONTENT: {"bsonType": "string"},
+                # Stored as BSON Binary subtype-9 FLOAT32 vector.
+                RAGChunkKeys.EMBEDDING: {"bsonType": "binData"},
+                RAGChunkKeys.SOURCE_DATE_START: {"bsonType": ["date", "null"]},
+                RAGChunkKeys.SOURCE_DATE_END: {"bsonType": ["date", "null"]},
+            },
+            "additionalProperties": True,
+        }
+    },
+}
 
 # Atlas Search builds indexes asynchronously. Poll the index until mongot
 # reports it as queryable before serving traffic, with a bounded wait so a
@@ -63,8 +134,11 @@ INDEXES = {
     "discussions": [
         # Primary lookup
         {"keys": [("discussion_id", ASCENDING)], "unique": True},
-        # CRITICAL: Query by run_id (used by API endpoints)
-        {"keys": [("run_id", ASCENDING)]},
+        # NOTE: a standalone {run_id} index is intentionally omitted. Equality
+        # on run_id is already served by the {run_id, ranking_score} and
+        # {run_id, chat_name} compounds below (run_id is their prefix), so a
+        # separate single-field index would only add write amplification + RAM.
+        # _drop_redundant_run_id_prefix_indexes() removes it from existing deployments.
         # CRITICAL: Query by run_id + ranking score (for sorted results)
         {"keys": [("run_id", ASCENDING), ("ranking_score", DESCENDING)]},
         # Query by run + chat
@@ -77,8 +151,10 @@ INDEXES = {
     "messages": [
         # Primary lookup
         {"keys": [("message_id", ASCENDING)], "unique": True},
-        # CRITICAL: Query by run_id (used by API endpoints)
-        {"keys": [("run_id", ASCENDING)]},
+        # NOTE: a standalone {run_id} index is intentionally omitted — run_id is
+        # the prefix of every compound below, which already serves equality on
+        # run_id alone. _drop_redundant_run_id_prefix_indexes() removes the
+        # legacy single-field index from existing deployments.
         # CRITICAL: Query by run_id + chat_name (most common query pattern)
         {"keys": [("run_id", ASCENDING), ("chat_name", ASCENDING)]},
         # Query by run + timestamp (for chronological ordering)
@@ -153,6 +229,14 @@ INDEXES = {
         {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
         # Query by creation date (for monitoring)
         {"keys": [("created_at", DESCENDING)]},
+    ],
+    "extraction_cache_chunks": [
+        # Ordered assembly + uniqueness: one chunk per (cache_key, chunk_index).
+        {"keys": [("cache_key", ASCENDING), ("chunk_index", ASCENDING)], "unique": True},
+        # Bulk delete / count of all chunks for a cache_key (invalidation, re-cache).
+        {"keys": [("cache_key", ASCENDING)]},
+        # TTL mirrors the parent so orphaned chunks self-clean on the same clock.
+        {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
     ],
     "polls": [
         # Primary lookup
@@ -295,7 +379,7 @@ INDEXES = {
 }
 
 
-async def ensure_schema_versions(db: AsyncIOMotorDatabase) -> None:
+async def ensure_schema_versions(db: AsyncDatabase) -> None:
     """Fail fast if any stored document carries a schema_version BELOW the
     minimum supported version for its collection.
 
@@ -332,7 +416,7 @@ async def ensure_schema_versions(db: AsyncIOMotorDatabase) -> None:
         raise RuntimeError(f"Schema-version guard failed: {e}") from e
 
 
-async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
+async def ensure_indexes(db: AsyncDatabase) -> None:
     """
     Create all indexes for all collections.
 
@@ -345,7 +429,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     only logs a warning but every /api/rag/chat call 500s at query time.
 
     Args:
-        db: AsyncIOMotorDatabase instance
+        db: AsyncDatabase instance
     """
     try:
         # Refuse to start against documents older than the minimum supported
@@ -369,6 +453,16 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         # deployments. No code path queries $text on discussions anymore;
         # keeping the index just costs RAM on every write.
         await _drop_legacy_discussions_text_index(db)
+
+        # Drop the now-redundant standalone {run_id} indexes on discussions /
+        # messages (their run_id-prefixed compounds already serve those queries).
+        await _drop_redundant_run_id_prefix_indexes(db)
+
+        # Apply server-side $jsonSchema validators on the high-value collections
+        # to enforce document shape regardless of which code path writes (the
+        # Pydantic models use extra="allow", so this is the only layer that
+        # catches drift from non-repo writers).
+        await _ensure_collection_validators(db)
 
         # Create vector search index for RAG chunks (idempotent)
         await _ensure_vector_search_index(db)
@@ -468,7 +562,7 @@ def _validate_embedding_dims_against_index(index_dims: int | None, index_name: s
         )
 
 
-async def _drop_legacy_discussions_text_index(db: AsyncIOMotorDatabase) -> None:
+async def _drop_legacy_discussions_text_index(db: AsyncDatabase) -> None:
     """Drop the legacy compound TEXT index on discussions.(title, nutshell).
 
     The endpoint that used to call $text on this collection has been removed
@@ -491,7 +585,67 @@ async def _drop_legacy_discussions_text_index(db: AsyncIOMotorDatabase) -> None:
         )
 
 
-async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
+async def _ensure_collection_validators(db: AsyncDatabase) -> None:
+    """Apply (or update) the $jsonSchema validators in _COLLECTION_VALIDATORS.
+
+    Uses `collMod` on existing collections and `create` for missing ones, both
+    with validationLevel="moderate" + validationAction="error". Idempotent:
+    re-running simply re-asserts the same validator. Best-effort per collection
+    — a validator that can't be applied logs a warning rather than blocking
+    startup, since the Pydantic layer is still the primary guard.
+    """
+    for collection_name, validator in _COLLECTION_VALIDATORS.items():
+        try:
+            existing = await db.list_collection_names()
+            if collection_name in existing:
+                await db.command(
+                    {
+                        "collMod": collection_name,
+                        "validator": validator,
+                        "validationLevel": "moderate",
+                        "validationAction": "error",
+                    }
+                )
+            else:
+                await db.create_collection(
+                    collection_name,
+                    validator=validator,
+                    validationLevel="moderate",
+                    validationAction="error",
+                )
+            logger.info(f"Applied $jsonSchema validator to {collection_name} (moderate/error)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Could not apply $jsonSchema validator to {collection_name}: {e}. "
+                f"Pydantic-layer validation still applies; fix the validator or run "
+                f"collMod manually."
+            )
+
+
+async def _drop_redundant_run_id_prefix_indexes(db: AsyncDatabase) -> None:
+    """Drop the standalone {run_id: 1} index on `discussions` and `messages`.
+
+    run_id is the prefix of the compound indexes on both collections, so the
+    compounds already serve equality-on-run_id queries. The standalone index is
+    pure overhead (write amplification + RAM) with no query it uniquely serves.
+    Safe to call repeatedly; a missing index is a no-op.
+    """
+    for collection_name in _REDUNDANT_RUN_ID_PREFIX_COLLECTIONS:
+        collection = db[collection_name]
+        try:
+            existing = await collection.index_information()
+            if _REDUNDANT_RUN_ID_INDEX_NAME not in existing:
+                continue
+            await collection.drop_index(_REDUNDANT_RUN_ID_INDEX_NAME)
+            logger.info(f"Dropped redundant index '{_REDUNDANT_RUN_ID_INDEX_NAME}' on {collection_name} (covered by run_id-prefixed compounds)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"Could not drop redundant index '{_REDUNDANT_RUN_ID_INDEX_NAME}' on {collection_name}: {e}. "
+                f"Drop it manually with db.{collection_name}.dropIndex('{_REDUNDANT_RUN_ID_INDEX_NAME}')"
+            )
+
+
+async def _ensure_vector_search_index(db: AsyncDatabase) -> None:
     """
     Create the vector search index on rag_chunks if it doesn't already exist.
 
@@ -569,7 +723,7 @@ async def _ensure_vector_search_index(db: AsyncIOMotorDatabase) -> None:
         )
 
 
-async def _ensure_discussion_vector_index(db: AsyncIOMotorDatabase) -> None:
+async def _ensure_discussion_vector_index(db: AsyncDatabase) -> None:
     """
     Create the vector search index on the discussions collection if it doesn't
     already exist. Mirrors _ensure_vector_search_index (rag_chunks): modern
@@ -681,7 +835,7 @@ async def _drop_legacy_vector_index(collection) -> None:
         )
 
 
-async def _ensure_lexical_search_index(db: AsyncIOMotorDatabase) -> bool:
+async def _ensure_lexical_search_index(db: AsyncDatabase) -> bool:
     """
     Create an Atlas Search lexical index over rag_chunks.content for hybrid
     retrieval. Paired with the vector index via $rankFusion (MongoDB 8.1+).
@@ -733,7 +887,7 @@ async def _ensure_lexical_search_index(db: AsyncIOMotorDatabase) -> bool:
         return False
 
 
-async def _ensure_agent_memory_vector_index(db: AsyncIOMotorDatabase) -> bool:
+async def _ensure_agent_memory_vector_index(db: AsyncDatabase) -> bool:
     """Create the Atlas Vector Search index on agent_memories.embedding.
 
     Filter fields (`user_id`, `namespace`) are declared so the agent retriever
@@ -779,7 +933,7 @@ async def _ensure_agent_memory_vector_index(db: AsyncIOMotorDatabase) -> bool:
         return False
 
 
-async def _ensure_agent_memory_lexical_index(db: AsyncIOMotorDatabase) -> bool:
+async def _ensure_agent_memory_lexical_index(db: AsyncDatabase) -> bool:
     """Create the Atlas Search lexical index on agent_memories.content.
 
     Paired with the vector index above via `$rankFusion` for hybrid memory
@@ -823,14 +977,50 @@ async def _ensure_agent_memory_lexical_index(db: AsyncIOMotorDatabase) -> bool:
         return False
 
 
-async def drop_all_indexes(db: AsyncIOMotorDatabase) -> None:
+# Search/vector (mongot) indexes per collection. drop_indexes() only removes
+# btree indexes, so these would otherwise survive a "drop all" and silently leave
+# stale mongot definitions behind. Kept as a map so drop_all_indexes can tear
+# them down too. Names come from the same constants the create-side helpers use.
+_SEARCH_INDEXES_BY_COLLECTION: dict[str, list[str]] = {
+    COLLECTION_RAG_CHUNKS: [RAG_VECTOR_INDEX_NAME, RAG_VECTOR_INDEX_NAME_LEGACY, RAG_LEXICAL_INDEX_NAME],
+    COLLECTION_DISCUSSIONS: [DISCUSSION_VECTOR_INDEX_NAME],
+    COLLECTION_AGENT_MEMORIES: [AGENT_MEMORY_VECTOR_INDEX_NAME, AGENT_MEMORY_LEXICAL_INDEX_NAME],
+}
+
+
+async def drop_all_indexes(db: AsyncDatabase) -> None:
     """
-    Drop all non-_id indexes. Use with caution.
+    Drop all non-_id indexes, INCLUDING mongot search/vector indexes. Use with caution.
+
+    drop_indexes() alone only removes btree indexes; the search/vector indexes
+    created by the _ensure_*_index helpers live in mongot and must be dropped
+    separately via drop_search_index. We do both here so "drop all" really means
+    all, not "all the btree ones".
 
     Args:
-        db: AsyncIOMotorDatabase instance
+        db: AsyncDatabase instance
     """
     for collection_name in INDEXES.keys():
         collection = db[collection_name]
         await collection.drop_indexes()
-        logger.warning(f"Dropped all indexes for collection: {collection_name}")
+        logger.warning(f"Dropped all btree indexes for collection: {collection_name}")
+
+    # Drop mongot search/vector indexes best-effort: list what actually exists
+    # (names may be absent on a fresh DB or when mongot is unavailable) and drop
+    # only those, per-index guarded so one failure cannot abort the rest. This
+    # mirrors the best-effort posture of the create-side helpers.
+    for collection_name, index_names in _SEARCH_INDEXES_BY_COLLECTION.items():
+        collection = db[collection_name]
+        try:
+            existing = {idx["name"] async for idx in collection.list_search_indexes()}
+        except Exception as e:
+            logger.warning(f"Could not list search indexes for {collection_name} (mongot unavailable?): {e}")
+            continue
+        for index_name in index_names:
+            if index_name not in existing:
+                continue
+            try:
+                await collection.drop_search_index(index_name)
+                logger.warning(f"Dropped search/vector index '{index_name}' on collection: {collection_name}")
+            except Exception as e:
+                logger.warning(f"Failed to drop search/vector index '{index_name}' on {collection_name}: {e}")

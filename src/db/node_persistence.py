@@ -121,13 +121,14 @@ class NodePersistence:
             self._tracker = get_tracker()
         return self._tracker
 
-    async def store_messages(self, messages: list, policy: PersistencePolicy = PersistencePolicy.FAIL_SOFT) -> int | None:
+    async def store_messages(self, messages: list, policy: PersistencePolicy = PersistencePolicy.FAIL_HARD) -> int | None:
         """
         Store messages to MongoDB.
 
         Args:
             messages: List of message dictionaries
-            policy: Persistence policy (default: FAIL_SOFT)
+            policy: Persistence policy (default: FAIL_HARD — messages are
+                source-of-truth corpus data; see the re-audit doc)
 
         Returns:
             Number of messages stored, or None on failure
@@ -137,13 +138,13 @@ class NodePersistence:
 
         return await persist_to_mongodb(operation=f"store_messages({self.chat_name})", persist_func=self.get_tracker().store_messages, run_id=self.run_id, policy=policy, context={"chat_name": self.chat_name, "message_count": len(messages)}, chat_name=self.chat_name, data_source_name=self.data_source_name, messages=messages)
 
-    async def store_discussions(self, discussions: list, policy: PersistencePolicy = PersistencePolicy.FAIL_SOFT) -> int | None:
+    async def store_discussions(self, discussions: list, policy: PersistencePolicy = PersistencePolicy.FAIL_HARD) -> int | None:
         """
         Store discussions to MongoDB.
 
         Args:
             discussions: List of discussion dictionaries
-            policy: Persistence policy (default: FAIL_SOFT)
+            policy: Persistence policy (default: FAIL_HARD — see the re-audit doc)
 
         Returns:
             Number of discussions stored, or None on failure
@@ -153,7 +154,7 @@ class NodePersistence:
 
         return await persist_to_mongodb(operation=f"store_discussions({self.chat_name})", persist_func=self.get_tracker().store_discussions, run_id=self.run_id, policy=policy, context={"chat_name": self.chat_name, "discussion_count": len(discussions)}, chat_name=self.chat_name, discussions=discussions)
 
-    async def store_newsletter(self, json_path: str, md_path: str, version_type: NewsletterVersionType = NewsletterVersionType.ORIGINAL, newsletter_type: NewsletterType = NewsletterType.PER_CHAT, stats: dict | None = None, policy: PersistencePolicy = PersistencePolicy.FAIL_SOFT) -> str | None:
+    async def store_newsletter(self, json_path: str, md_path: str, version_type: NewsletterVersionType = NewsletterVersionType.ORIGINAL, newsletter_type: NewsletterType = NewsletterType.PER_CHAT, stats: dict | None = None, policy: PersistencePolicy | None = None) -> str | None:
         """
         Store newsletter to MongoDB.
 
@@ -163,14 +164,21 @@ class NodePersistence:
             version_type: Version type (original, enriched, translated)
             newsletter_type: Newsletter type (per_chat, consolidated)
             stats: Optional statistics dict
-            policy: Persistence policy (default: FAIL_SOFT for enriched/translated,
-                   but consider FAIL_HARD for original generation)
+            policy: Persistence policy. When None (default), it is resolved by
+                version_type: the ORIGINAL newsletter is source-of-truth and
+                fails HARD; the ENRICHED/TRANSLATED derivatives are regenerable
+                and fail SOFT so a late blip can't abort an otherwise-complete
+                run (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md). Pass
+                an explicit policy to override.
 
         Returns:
             Newsletter ID on success, or None on failure
         """
         if not self.is_enabled:
             return None
+
+        if policy is None:
+            policy = PersistencePolicy.FAIL_HARD if version_type == NewsletterVersionType.ORIGINAL else PersistencePolicy.FAIL_SOFT
 
         return await persist_to_mongodb(
             operation=f"store_newsletter({self.newsletter_id}, {version_type})",

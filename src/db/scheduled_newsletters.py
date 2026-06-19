@@ -16,7 +16,8 @@ import logging
 from datetime import datetime, timedelta, UTC
 
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
+from pymongo.asynchronous.collection import AsyncCollection
 from constants import (
     COLLECTION_SCHEDULED_NEWSLETTERS,
     SCHEDULE_FIELD_INTERVAL_DAYS,
@@ -40,8 +41,8 @@ class ScheduledNewsletterManager:
     """
 
     def __init__(self):
-        self._db: AsyncIOMotorDatabase | None = None
-        self._collection: AsyncIOMotorCollection | None = None
+        self._db: AsyncDatabase | None = None
+        self._collection: AsyncCollection | None = None
         self._initialized = False
 
     async def _ensure_initialized(self) -> bool:
@@ -145,7 +146,7 @@ class ScheduledNewsletterManager:
         try:
             now = datetime.now(UTC)
             cursor = self._collection.find({DbFieldKeys.ENABLED: True, DbFieldKeys.NEXT_RUN: {"$lte": now}})
-            schedules = await cursor.to_list(length=100)
+            schedules = await cursor.to_list(100)
 
             # Convert ObjectId to string for JSON serialization
             for schedule in schedules:
@@ -198,7 +199,7 @@ class ScheduledNewsletterManager:
 
         try:
             cursor = self._collection.find({}).sort("created_at", -1)
-            schedules = await cursor.to_list(length=1000)
+            schedules = await cursor.to_list(1000)
 
             # Convert ObjectId to string for JSON serialization
             for schedule in schedules:

@@ -43,8 +43,7 @@ dependencies = [
     "beautifulsoup4==4.14.2",
     "emoji==2.10.1",
     # Database
-    "pymongo>=4.8.0",
-    "motor>=3.5.0", # Async MongoDB driver for FastAPI
+    "pymongo>=4.13.0", # Native async client (AsyncMongoClient); replaced deprecated Motor
     # Email
     "sendgrid==6.11.0",
     # Configuration

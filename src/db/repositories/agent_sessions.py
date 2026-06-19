@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import (
     COLLECTION_AGENT_SESSIONS,
@@ -36,7 +36,7 @@ DEFAULT_SESSION_TTL_HOURS = 24
 class AgentSessionsRepository(BaseRepository):
     """Repository for agent chat session metadata."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_AGENT_SESSIONS)
 
     async def create_session(

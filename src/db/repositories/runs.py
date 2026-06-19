@@ -7,7 +7,7 @@ Manages pipeline run records for tracking newsletter generation executions.
 import logging
 from datetime import datetime, UTC
 from typing import Any
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import WriteConcern
 
 from db.repositories.base import BaseRepository
@@ -27,7 +27,7 @@ class RunsRepository(BaseRepository):
     - Output paths
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         # Durable record: majority write concern so a completed/failed run
         # survives a primary failover on multi-node Atlas.
         super().__init__(db, COLLECTION_RUNS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))

@@ -33,7 +33,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Importing routers after logging setup
-from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media, google_oauth
+from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media, google_oauth, user_preferences
 from api.auth import require_session
 from api.observability import metrics_router, runs_router
 from constants import (
@@ -256,6 +256,7 @@ app.include_router(runs_router, prefix=API_V1_PREFIX, tags=["observability-runs"
 app.include_router(metrics_router, tags=["observability-metrics"])
 app.include_router(schedules.router, prefix=API_V1_PREFIX, tags=["schedules"], dependencies=_session_gate)
 app.include_router(rag_conversation.router, prefix=API_V1_PREFIX, tags=["rag-conversation"], dependencies=_session_gate)
+app.include_router(user_preferences.router, prefix=API_V1_PREFIX, tags=["user-preferences"], dependencies=_session_gate)
 
 # Agentic chatbot (v1.13.0+): mounted only when AGENT_ENABLED=true so the
 # default deployment is unaffected. See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.

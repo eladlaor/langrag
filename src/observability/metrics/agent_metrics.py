@@ -21,7 +21,7 @@ from time import perf_counter
 
 logger = logging.getLogger(__name__)
 
-_singleton: "_AgentMetrics | None" = None
+_singleton: _AgentMetrics | None = None
 
 
 class _AgentMetrics:

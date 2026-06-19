@@ -127,11 +127,18 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
     async def event_stream():
         try:
             pipeline = RetrievalPipeline()
+            # Per-user MMR lambda is NOT applied on this path: the public RAG
+            # API authenticates via an api-key whose OWNER is a free-form label
+            # (or "local-dev" when auth is disabled), not a users.user_id, so it
+            # carries no users identity to resolve a saved preference from.
+            # Retrieval uses the config default. Wiring per-user lambda here is a
+            # follow-up that requires mapping api-key owners to users rows.
             retrieval_result = await pipeline.retrieve(
                 query=body.query,
                 content_sources=body.content_sources or None,
                 date_start=date_start,
                 date_end=date_end,
+                mmr_lambda=body.mmr_lambda,
             )
 
             context = retrieval_result["context"]
@@ -382,11 +389,16 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
 
     try:
         pipeline = RetrievalPipeline()
+        # Per-user MMR lambda is NOT applied here: the public RAG api-key OWNER
+        # is a free-form label, not a users.user_id, so there is no users
+        # identity to resolve a saved preference from. Config default is used.
+        # See the streaming handler above for the same rationale.
         retrieval_result = await pipeline.retrieve(
             query=body.query,
             content_sources=body.content_sources or None,
             date_start=date_start,
             date_end=date_end,
+            mmr_lambda=body.mmr_lambda,
         )
 
         context = retrieval_result["context"]

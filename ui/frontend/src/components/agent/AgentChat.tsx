@@ -22,6 +22,7 @@ import {
 import { ArtifactPanelRouter } from "./ArtifactPanelRouter";
 import { InterruptDialog } from "./InterruptDialog";
 import { MemoryInspector } from "./MemoryInspector";
+import { RagPreferencesSlider } from "./RagPreferencesSlider";
 import { ToolCallChip } from "./ToolCallChip";
 
 interface Props {
@@ -155,10 +156,12 @@ export const AgentChat: React.FC<Props> = ({ apiKey }) => {
           <span style={{ color: "#6b7280", fontSize: 12 }}>
             {sessions.length} session{sessions.length === 1 ? "" : "s"}
           </span>
+          <div style={{ marginLeft: "auto" }}>
+            <RagPreferencesSlider apiKey={apiKey} />
+          </div>
           <button
             onClick={() => setShowMemory((s) => !s)}
             data-testid="memory-toggle"
-            style={{ marginLeft: "auto" }}
           >
             {showMemory ? "Hide memories" : "What I remember"}
           </button>

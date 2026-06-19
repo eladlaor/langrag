@@ -339,19 +339,21 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
         except Exception as e:
             logger.warning(f"Failed to load messages: {e}")
 
-        # Persist extracted polls to MongoDB (fail-soft)
-        try:
-            polls_file = os.path.join(preprocess_dir, OUTPUT_FILENAME_POLLS)
-            mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
-            if mongodb_run_id and os.path.exists(polls_file):
-                polls = await load_json_async(polls_file)
-                if polls:
-                    from db.run_tracker import get_tracker
-                    tracker = get_tracker()
+        # Persist extracted polls to MongoDB. Fail-hard: a poll write failure
+        # aborts the run (see the re-audit doc).
+        polls_file = os.path.join(preprocess_dir, OUTPUT_FILENAME_POLLS)
+        mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
+        if mongodb_run_id and os.path.exists(polls_file):
+            polls = await load_json_async(polls_file)
+            if polls:
+                from db.run_tracker import get_tracker
+                tracker = get_tracker()
+                try:
                     stored_count = await tracker.store_polls(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, polls=polls)
-                    logger.info(f"Persisted {stored_count}/{len(polls)} polls to MongoDB")
-        except Exception as e:
-            logger.warning(f"Failed to persist polls to MongoDB: {e}")
+                except Exception as e:
+                    logger.error("Failed to persist polls to MongoDB", extra={"event": "store_polls_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "poll_count": len(polls), "error": str(e)})
+                    raise
+                logger.info(f"Persisted {stored_count}/{len(polls)} polls to MongoDB")
 
         result = {Keys.PREPROCESSED_FILE_PATH: expected_file, Keys.MESSAGE_COUNT: message_count}
 
@@ -405,20 +407,23 @@ async def translate_messages(state: SingleChatState, config: RunnableConfig | No
             raise RuntimeError(f"Translation did not create expected file: {expected_file}")
 
         # Persisting messages to MongoDB with complete data (including translations)
-        # Ensuring MongoDB has both original and translated content
+        # Ensuring MongoDB has both original and translated content.
+        # Fail-hard: the persisted message corpus is source-of-truth data, so a
+        # write failure must abort the run rather than silently leave a partial
+        # corpus behind (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
         message_count = None
-        try:
-            messages = await load_json_async(expected_file)
-            message_count = len(messages) if isinstance(messages, list) else 0
+        messages = await load_json_async(expected_file)
+        message_count = len(messages) if isinstance(messages, list) else 0
 
-            # Persisting messages to MongoDB (fail-soft) - async call
-            mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
-            if mongodb_run_id and isinstance(messages, list):
-                tracker = get_tracker()
+        mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
+        if mongodb_run_id and isinstance(messages, list):
+            tracker = get_tracker()
+            try:
                 stored_count = await tracker.store_messages(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, messages=messages)
-                logger.info(f"Persisted {stored_count}/{message_count} TRANSLATED messages to MongoDB")
-        except Exception as e:
-            logger.warning(f"Failed to load/persist translated messages: {e}")
+            except Exception as e:
+                logger.error("Failed to persist TRANSLATED messages to MongoDB", extra={"event": "store_messages_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "message_count": message_count, "error": str(e)})
+                raise
+            logger.info(f"Persisted {stored_count}/{message_count} TRANSLATED messages to MongoDB")
 
         result = {Keys.TRANSLATED_FILE_PATH: expected_file}
 
@@ -541,22 +546,24 @@ async def rank_discussions(state: SingleChatState, config: RunnableConfig | None
         featured_count = 0
         brief_count = 0
 
-        # Persisting ranked discussions to MongoDB (fail-soft) - async call
+        # Persisting ranked discussions to MongoDB. Fail-hard: a discussion
+        # write failure aborts the run (see the re-audit doc).
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         if mongodb_run_id:
+            ranked_discussions = await load_json_async(ranking_file_path)
+
+            # Extracting counts
+            featured_count = len(ranked_discussions.get(RankingResultKeys.FEATURED_DISCUSSION_IDS, [])) if isinstance(ranked_discussions, dict) else 0
+            brief_count = len(ranked_discussions.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])) if isinstance(ranked_discussions, dict) else 0
+
+            tracker = get_tracker()
+            chat_name = state[Keys.CHAT_NAME]
             try:
-                ranked_discussions = await load_json_async(ranking_file_path)
-
-                # Extracting counts
-                featured_count = len(ranked_discussions.get(RankingResultKeys.FEATURED_DISCUSSION_IDS, [])) if isinstance(ranked_discussions, dict) else 0
-                brief_count = len(ranked_discussions.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])) if isinstance(ranked_discussions, dict) else 0
-
-                tracker = get_tracker()
-                chat_name = state[Keys.CHAT_NAME]
                 stored_count = await tracker.store_discussions(run_id=mongodb_run_id, chat_name=chat_name, discussions=ranked_discussions if isinstance(ranked_discussions, list) else [])
-                logger.info(f"Persisted {stored_count} discussions to MongoDB for chat: {chat_name}")
             except Exception as e:
-                logger.warning(f"Failed to persist discussions to MongoDB: {e}")
+                logger.error("Failed to persist discussions to MongoDB", extra={"event": "store_discussions_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "error": str(e)})
+                raise
+            logger.info(f"Persisted {stored_count} discussions to MongoDB for chat: {chat_name}")
 
         result_dict = {Keys.DISCUSSIONS_RANKING_FILE_PATH: ranking_file_path}
 
@@ -763,7 +770,28 @@ async def enrich_with_links(state: SingleChatState, config: RunnableConfig | Non
             stats = {ContentResultKeys.LINKS_ADDED: links_added}
 
             tracker = get_tracker()
-            await tracker.store_newsletter(newsletter_id=newsletter_id, run_id=mongodb_run_id, newsletter_type=NewsletterType.PER_CHAT, data_source_name=state[Keys.DATA_SOURCE_NAME], chat_name=state[Keys.CHAT_NAME], start_date=state[Keys.START_DATE], end_date=state[Keys.END_DATE], summary_format=state[Keys.SUMMARY_FORMAT], desired_language=state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY], json_path=enriched_json_path, md_path=enriched_md_path, stats=stats, version_type=NewsletterVersionType.ENRICHED)
+            # Fail-soft: the ENRICHED newsletter is a regenerable derivative, so
+            # a late persistence blip must not abort an otherwise-complete run.
+            # (Raw messages / discussions / polls / original newsletter remain
+            # fail-hard; see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md.)
+            try:
+                await tracker.store_newsletter(
+                    newsletter_id=newsletter_id,
+                    run_id=mongodb_run_id,
+                    newsletter_type=NewsletterType.PER_CHAT,
+                    data_source_name=state[Keys.DATA_SOURCE_NAME],
+                    chat_name=state[Keys.CHAT_NAME],
+                    start_date=state[Keys.START_DATE],
+                    end_date=state[Keys.END_DATE],
+                    summary_format=state[Keys.SUMMARY_FORMAT],
+                    desired_language=state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY],
+                    json_path=enriched_json_path,
+                    md_path=enriched_md_path,
+                    stats=stats,
+                    version_type=NewsletterVersionType.ENRICHED,
+                )
+            except Exception as e:
+                logger.error("Failed to persist ENRICHED newsletter to MongoDB (fail-soft)", extra={"event": "store_newsletter_failed", "run_id": mongodb_run_id, "newsletter_id": newsletter_id, "version_type": str(NewsletterVersionType.ENRICHED), "chat_name": state[Keys.CHAT_NAME], "error": str(e)})
 
         return {Keys.ENRICHED_NEWSLETTER_JSON_PATH: enriched_json_path, Keys.ENRICHED_NEWSLETTER_MD_PATH: enriched_md_path}
 
@@ -846,20 +874,26 @@ async def translate_final_summary(state: SingleChatState, config: RunnableConfig
             newsletter_id = f"{mongodb_run_id}_nl_{chat_slug}"
 
             tracker = get_tracker()
-            await tracker.store_newsletter(
-                newsletter_id=newsletter_id,
-                run_id=mongodb_run_id,
-                newsletter_type=NewsletterType.PER_CHAT,
-                data_source_name=state[Keys.DATA_SOURCE_NAME],
-                chat_name=state[Keys.CHAT_NAME],
-                start_date=state[Keys.START_DATE],
-                end_date=state[Keys.END_DATE],
-                summary_format=state[Keys.SUMMARY_FORMAT],
-                desired_language=state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY],
-                json_path="",  # Not applicable for translated version
-                md_path=expected_file,
-                version_type=NewsletterVersionType.TRANSLATED,
-            )
+            # Fail-soft: the TRANSLATED newsletter is a regenerable derivative,
+            # so a late persistence blip must not abort an otherwise-complete
+            # run (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+            try:
+                await tracker.store_newsletter(
+                    newsletter_id=newsletter_id,
+                    run_id=mongodb_run_id,
+                    newsletter_type=NewsletterType.PER_CHAT,
+                    data_source_name=state[Keys.DATA_SOURCE_NAME],
+                    chat_name=state[Keys.CHAT_NAME],
+                    start_date=state[Keys.START_DATE],
+                    end_date=state[Keys.END_DATE],
+                    summary_format=state[Keys.SUMMARY_FORMAT],
+                    desired_language=state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY],
+                    json_path="",  # Not applicable for translated version
+                    md_path=expected_file,
+                    version_type=NewsletterVersionType.TRANSLATED,
+                )
+            except Exception as e:
+                logger.error("Failed to persist TRANSLATED newsletter to MongoDB (fail-soft)", extra={"event": "store_newsletter_failed", "run_id": mongodb_run_id, "newsletter_id": newsletter_id, "version_type": str(NewsletterVersionType.TRANSLATED), "chat_name": state[Keys.CHAT_NAME], "error": str(e)})
 
         return {Keys.FINAL_TRANSLATED_FILE_PATH: expected_file}
 

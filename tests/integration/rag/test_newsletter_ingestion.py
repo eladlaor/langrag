@@ -132,7 +132,7 @@ class TestNewsletterIngestion:
         db = await get_database()
         chunks = await db[COLLECTION_RAG_CHUNKS].find(
             {Keys.SOURCE_ID: seed_newsletter}
-        ).to_list(length=None)
+        ).to_list()
 
         assert len(chunks) > 0
         for chunk in chunks:
@@ -188,7 +188,7 @@ class TestNewsletterIngestion:
         db = await get_database()
         chunks = await db[COLLECTION_RAG_CHUNKS].find(
             {Keys.SOURCE_ID: seed_newsletter}
-        ).to_list(length=None)
+        ).to_list()
 
         for chunk in chunks:
             assert Keys.EMBEDDING in chunk
@@ -210,7 +210,7 @@ class TestNewsletterIngestion:
         db = await get_database()
         chunks = await db[COLLECTION_RAG_CHUNKS].find(
             {Keys.SOURCE_ID: seed_newsletter}
-        ).to_list(length=None)
+        ).to_list()
 
         for chunk in chunks:
             metadata = chunk[Keys.METADATA]

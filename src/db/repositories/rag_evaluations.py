@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import COLLECTION_RAG_EVALUATIONS, EvaluationStatus
 from custom_types.field_keys import RAGEvaluationKeys as Keys
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class EvaluationsRepository(BaseRepository):
     """Repository for RAG evaluation results."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_RAG_EVALUATIONS)
 
     async def create_evaluation(

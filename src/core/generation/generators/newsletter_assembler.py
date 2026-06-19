@@ -16,7 +16,6 @@ Usage from CLI / Docker exec:
 
 import json
 import logging
-import sys
 from pathlib import Path
 
 from custom_types.newsletter_formats.langtalks.renderer import LangTalksRenderer

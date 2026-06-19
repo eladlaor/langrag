@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 class PoolClientLabel(StrEnum):
     """`client` label value distinguishing the two pools in the codebase."""
 
-    ASYNC = "async"  # motor / AsyncIOMotorClient — serves API, graphs, RAG, agent
+    ASYNC = "async"  # PyMongo async / AsyncMongoClient — serves API, graphs, RAG, agent
     SYNC = "sync"  # pymongo MongoClient — LangGraph checkpointer only
 
 

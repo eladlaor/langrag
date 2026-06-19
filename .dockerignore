@@ -79,8 +79,10 @@ temp/
 # Windows
 Thumbs.db
 
-# Scripts (development only)
+# Scripts (development only) — except the backup sidecar script, which the
+# mongo-backup image COPYs in (scripts/backup/Dockerfile).
 scripts/
+!scripts/backup/mongodump_to_gcs.sh
 
 # Frontend build artifacts (handled by multi-stage build)
 ui/frontend/node_modules/

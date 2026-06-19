@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from constants import COLLECTION_IMAGES
 from custom_types.common import ImageMetadata
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ImagesRepository(BaseRepository):
     """Repository for image metadata persistence and queries."""
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_IMAGES)
 
     async def store_image(self, image: ImageMetadata, run_id: str) -> str:
@@ -220,7 +220,7 @@ class ImagesRepository(BaseRepository):
         docs = await self.collection.find(
             {ImageKeys.MXC_URL: {"$in": mxc_urls}},
             {ImageKeys.MXC_URL: 1},
-        ).to_list(length=None)
+        ).to_list()
         return {doc[ImageKeys.MXC_URL] for doc in docs}
 
 

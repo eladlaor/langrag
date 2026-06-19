@@ -19,7 +19,8 @@ graph wiring while preserving the public contract.
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable
+from typing import Any
+from collections.abc import Awaitable, Callable
 
 from langchain_core.tools import BaseTool, tool
 from langgraph.types import interrupt

@@ -23,7 +23,7 @@ from typing import Any
 
 from bson.binary import Binary, BinaryVectorDtype
 from langgraph.store.base import BaseStore, Item, NotProvided, SearchItem
-from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo.asynchronous.collection import AsyncCollection
 
 from constants import (
     AGENT_EPISODIC_MEMORY_TTL_DAYS,
@@ -61,13 +61,13 @@ class MongoDBStore(BaseStore):
 
     def __init__(
         self,
-        collection: AsyncIOMotorCollection,
+        collection: AsyncCollection,
         embedder: Any,
         embedding_model: str,
     ) -> None:
         """
         Args:
-            collection: AsyncIOMotorCollection for `agent_memories`.
+            collection: AsyncCollection for `agent_memories`.
             embedder: Anything with an `embed_text(text) -> list[float]`
                 method. The project's `EmbeddingProviderInterface` fits.
                 A duck-typed object is also accepted so tests can pass a
@@ -243,7 +243,7 @@ class MongoDBStore(BaseStore):
                 .sort(Keys.CREATED_AT, -1)
                 .limit(limit)
             )
-            rows = await cursor.to_list(length=None)
+            rows = await cursor.to_list()
 
         return [_row_to_search_item(r, user_id) for r in rows]
 
@@ -284,7 +284,7 @@ class MongoDBStore(BaseStore):
             {"$skip": offset},
             {"$limit": limit},
         ]
-        rows = await self._collection.aggregate(pipeline).to_list(length=None)
+        rows = await self._collection.aggregate(pipeline).to_list()
         return [(r["_id"]["user"], r["_id"]["ns"]) for r in rows]
 
     async def abatch(self, ops):  # pragma: no cover — not exercised at v1.13.0

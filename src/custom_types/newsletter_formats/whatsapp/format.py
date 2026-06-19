@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from custom_types.newsletter_formats.base import NewsletterFormatBase
 from custom_types.newsletter_formats.image_context import build_image_context_text
-from custom_types.field_keys import NewsletterStructureKeys, DiscussionKeys, LlmInputKeys
+from custom_types.field_keys import NewsletterStructureKeys, LlmInputKeys
 from constants import DEFAULT_LANGUAGE, DEFAULT_HTML_LANGUAGE, MessageRole, SummaryFormats, WHATSAPP_DISPLAY_NAME
 from .schema import LlmResponseWhatsAppNewsletterContent
 from .prompt import WHATSAPP_NEWSLETTER_PROMPT

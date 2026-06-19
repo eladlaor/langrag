@@ -43,12 +43,42 @@ async def retrieve_node(state: RAGConversationState) -> dict[str, Any]:
         f"date_start={date_start}, date_end={date_end}"
     )
 
+    # Resolve the caller's saved MMR preference when this node runs under a
+    # bound user context. If none is bound (the rag_conversation graph is not
+    # currently invoked under a user context), fall back to the config default
+    # by passing nothing.
+    mmr_lambda: float | None = None
+    enable_mmr: bool | None = None
+    try:
+        from agent.auth.user_context import NoUserContextError, current_user_context
+        from db.connection import get_database
+        from db.repositories.users import UsersRepository
+
+        try:
+            ctx = current_user_context()
+        except NoUserContextError:
+            ctx = None
+
+        if ctx is not None:
+            db = await get_database()
+            prefs = await UsersRepository(db).get_rag_preferences(ctx.user_id)
+            mmr_lambda = prefs.mmr_lambda
+            enable_mmr = prefs.enable_mmr_diversity
+    except Exception as e:
+        logger.error(
+            "retrieve_node failed resolving rag preferences",
+            extra={"event": "retrieve_node_prefs_failed", "function": "retrieve_node", "error": str(e)},
+        )
+        raise
+
     pipeline = RetrievalPipeline()
     result = await pipeline.retrieve(
         query=query,
         content_sources=content_sources,
         date_start=date_start,
         date_end=date_end,
+        mmr_lambda=mmr_lambda,
+        enable_mmr=enable_mmr,
     )
 
     return {

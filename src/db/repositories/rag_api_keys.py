@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
 
 from constants import COLLECTION_RAG_API_KEYS, RAG_API_KEY_PREFIX
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class RAGApiKeysRepository(BaseRepository):
     """Repository for RAG API keys."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_RAG_API_KEYS)
 
     async def issue_key(

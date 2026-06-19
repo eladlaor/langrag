@@ -22,6 +22,7 @@ from constants import (
     CURRENT_SCHEMA_VERSION_USER_API_KEY,
     RunStatus,
 )
+from custom_types.slm_schemas import MessageClassification
 
 
 class UserRole(StrEnum):
@@ -122,19 +123,61 @@ class DiscussionDocument(BaseModel):
 
 
 class MessageDocument(BaseModel):
-    """Schema for raw message records."""
+    """Schema for the `messages` collection.
+
+    A single message document is written in two passes against the same
+    `message_id` key (see RunTracker.store_raw_messages then store_messages):
+
+      1. RAW pass (post-extraction): sets `content`, `data_source_name`, and
+         the SLM pre-filter verdict (`slm_classification`/`confidence`/`reason`).
+      2. TRANSLATED pass (post-preprocessing): upserts the translated/enriched
+         fields (`content_translated`, `is_translated`, `urls`, `mentions`,
+         `word_count`, `short_id`, `replies_to`).
+
+    This model documents the UNION of both passes as actually stored, so it is
+    the truthful schema for the collection. Fields not yet written by a given
+    pass are optional. `extra="allow"` keeps the model non-lossy if a writer
+    adds a field before this model is updated, while `model_validate` still
+    catches type errors on the declared fields.
+
+    NOTE on `discussion_id`: the extraction/preprocessing writers do NOT set it
+    — a message references its discussion only through the discussion's embedded
+    `message_ids` array (see DiscussionDocument). It is optional here and set
+    only by the legacy MessagesRepository.create_message path.
+    """
+
+    model_config = {"extra": "allow"}
 
     schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_MESSAGE, description="Document schema version for lazy migration")
-    message_id: str = Field(..., description="Unique identifier (Matrix event ID)")
-    discussion_id: str = Field(..., description="Associated discussion ID")
+    message_id: str = Field(..., description="Unique document key: f'{run_id}_msg_{matrix_event_id}'")
+    run_id: str = Field(..., description="Owning pipeline run ID")
     chat_name: str = Field(..., description="Source chat name")
     sender: str = Field(..., description="Sender identifier")
-    content: str = Field(..., description="Original message content")
-    timestamp: int = Field(..., description="Message timestamp (milliseconds)")
-    translated_content: str | None = Field(None, description="Translated content if available")
+    timestamp: int | None = Field(None, description="Message timestamp (milliseconds)")
+    data_source_name: str | None = Field(None, description="Data source key (e.g., 'langtalks'); set on the raw pass")
+    discussion_id: str | None = Field(None, description="Associated discussion ID; unset by the extraction path (messages are referenced via DiscussionDocument.message_ids)")
+
+    # Matrix linkage / alternate identifiers
+    matrix_event_id: str | None = Field(None, description="Original Matrix event ID (set on the translated pass)")
+    short_id: str | None = Field(None, description="Pipeline short_id (set on the translated pass)")
+
+    # RAW-pass content + SLM pre-filter verdict
+    content: str | None = Field(None, description="Original message content (raw pass)")
+    slm_classification: MessageClassification | None = Field(None, description="SLM pre-filter verdict: KEEP / FILTER / UNCERTAIN")
+    slm_confidence: float | None = Field(None, description="SLM pre-filter confidence in [0, 1]")
+    slm_reason: str | None = Field(None, description="SLM pre-filter rationale")
+
+    # TRANSLATED-pass enriched content
+    content_translated: str | None = Field(None, description="Translated/preprocessed content (translated pass)")
+    is_translated: bool = Field(default=False, description="Whether the translated pass has run for this document")
+    urls: list[str] = Field(default_factory=list, description="Extracted URLs (translated pass)")
+    mentions: list[str] = Field(default_factory=list, description="Extracted @-mentions (translated pass)")
+    word_count: int | None = Field(None, description="Token-ish word count of translated content")
     replies_to: str | None = Field(None, description="ID of message this replies to")
+
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp (set on first insert)")
+    updated_at: datetime | None = Field(None, description="Last upsert timestamp (set on the translated pass)")
 
 
 class CacheDocument(BaseModel):
@@ -238,6 +281,18 @@ class UserDailyUsage(BaseModel):
     newsletter_runs: int = Field(default=0)
 
 
+class RagPreferences(BaseModel):
+    """Per-user RAG retrieval preferences, persisted on the user document.
+
+    Optional sub-document: when absent, retrieval falls back to the server
+    config defaults (`rag.mmr_lambda`, `rag.enable_mmr_diversity`) under the
+    project-wide lazy-migration regime, so no batch migration is required.
+    """
+
+    mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0, description="MMR relevance/diversity weight (0-1). Higher favors relevance, lower favors diversity.")
+    enable_mmr_diversity: bool = Field(default=True, description="When false, retrieval skips MMR and returns fused top-k by relevance.")
+
+
 class UserDocument(BaseModel):
     """Schema for admin-tier user records.
 
@@ -257,6 +312,7 @@ class UserDocument(BaseModel):
     communities: list[str] = Field(default_factory=list, description="Community keys this user is authorized to act on")
     preferences: dict[str, Any] = Field(default_factory=dict, description="Free-form preferences (language, default community, etc.)")
     quotas: UserQuotas = Field(default_factory=UserQuotas, description="Daily quotas enforced by check_budget_node")
+    rag_preferences: RagPreferences | None = Field(default=None, description="Saved per-user RAG MMR setting; None means use the config default (lazy migration, no batch backfill)")
     daily_usage: UserDailyUsage | None = Field(None, description="Rolling per-UTC-day usage counters")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
     last_seen_at: datetime | None = Field(None, description="Last time this user authenticated against the agent API")

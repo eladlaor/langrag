@@ -12,7 +12,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import WriteConcern
 
 from db.repositories.base import BaseRepository
@@ -38,7 +38,7 @@ class NewslettersRepository(BaseRepository):
     - Quality scores
     """
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         # Durable record: majority write concern so a persisted newsletter
         # survives a primary failover on multi-node Atlas.
         super().__init__(db, COLLECTION_NEWSLETTERS, write_concern=WriteConcern(w=WRITE_CONCERN_MAJORITY))

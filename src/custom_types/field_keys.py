@@ -71,6 +71,30 @@ class DiscussionKeys:
     DECRYPTION_FAILED = "_decryption_failed"
 
 
+class MessageSourceKeys:
+    """Keys for the raw extracted-message dicts (custom_types.common.Message)
+    consumed by the persistence layer before they become MongoDB documents."""
+
+    ID = "id"
+    SENDER_ID = "sender_id"
+    SENDER = "sender"
+    TIMESTAMP = "timestamp"
+    CONTENT = "content"
+    REPLIES_TO = "replies_to"
+    URLS = "urls"
+    MENTIONS = "mentions"
+    MATRIX_EVENT_ID = "matrix_event_id"
+
+
+class SlmResultKeys:
+    """Sub-keys of the SLM pre-filter classification-map entries
+    (custom_types.slm_schemas.MessageClassificationResult)."""
+
+    CLASSIFICATION = "classification"
+    CONFIDENCE = "confidence"
+    REASON = "reason"
+
+
 class RankingResultKeys:
     """Keys for ranking result dictionaries from the discussion ranker."""
 
@@ -217,6 +241,30 @@ class MatrixEncryptedFileKeys:
     FILENAME = "filename"
 
 
+class ExtractionCacheKeys:
+    """Keys for extraction_cache (parent) and extraction_cache_chunks documents.
+
+    The parent doc holds metadata only (no inline messages once auto-split is in
+    effect); the message arrays are sharded into chunk docs in the companion
+    collection. MESSAGES is the assembled-list key re-attached to the parent on
+    read so callers stay unaware of the split.
+    """
+
+    CACHE_KEY = "cache_key"
+    CHAT_NAME_NORMALIZED = "chat_name_normalized"
+    START_DATE = "start_date"
+    END_DATE = "end_date"
+    MESSAGES = "messages"
+    MESSAGE_COUNT = "message_count"
+    ENCRYPTED_COUNT = "encrypted_count"
+    EXTRACTION_METADATA = "extraction_metadata"
+    CHUNK_COUNT = "chunk_count"
+    CHUNK_INDEX = "chunk_index"
+    CREATED_AT = "created_at"
+    UPDATED_AT = "updated_at"
+    EXPIRES_AT = "expires_at"
+
+
 class PollContentKeys:
     """Keys for MSC3381 poll event content structure.
 
@@ -248,6 +296,7 @@ class PollDbKeys:
     TOTAL_VOTES = "total_votes"
     UNIQUE_VOTER_COUNT = "unique_voter_count"
     CREATED_AT = "created_at"
+    UPDATED_AT = "updated_at"
 
 
 class ImageKeys:
@@ -402,6 +451,18 @@ class DbFieldKeys:
     TIMESTAMP = "timestamp"
     TRANSLATED_CONTENT = "translated_content"
     REPLIES_TO = "replies_to"
+    # Message-document fields written by the extraction/preprocessing path
+    # (RunTracker.store_raw_messages / store_messages). These describe the
+    # `messages` collection's actual stored shape; see MessageDocument.
+    SHORT_ID = "short_id"
+    CONTENT_TRANSLATED = "content_translated"
+    IS_TRANSLATED = "is_translated"
+    URLS = "urls"
+    MENTIONS = "mentions"
+    WORD_COUNT = "word_count"
+    SLM_CLASSIFICATION = "slm_classification"
+    SLM_CONFIDENCE = "slm_confidence"
+    SLM_REASON = "slm_reason"
     NEWSLETTER_TYPE = "newsletter_type"
     DATA_SOURCE_NAME = "data_source_name"
     START_DATE = "start_date"
@@ -450,10 +511,15 @@ class UserKeys:
     GOOGLE_SUB = "google_sub"
     COMMUNITIES = "communities"
     PREFERENCES = "preferences"
+    RAG_PREFERENCES = "rag_preferences"
     QUOTAS = "quotas"
     DAILY_USAGE = "daily_usage"
     CREATED_AT = "created_at"
     LAST_SEEN_AT = "last_seen_at"
+
+    # Nested `rag_preferences` sub-keys (saved per-user RAG MMR setting)
+    RAG_PREF_MMR_LAMBDA = "mmr_lambda"
+    RAG_PREF_ENABLE_MMR = "enable_mmr_diversity"
 
     # Nested `quotas` sub-keys
     QUOTA_DAILY_CHAT_INPUT_TOKENS = "daily_chat_input_tokens"

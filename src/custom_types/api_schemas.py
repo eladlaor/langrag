@@ -54,6 +54,25 @@ class CurrentUser(BaseModel):
     communities: list[str] = Field(default_factory=list, description="Community keys this user may act on.")
 
 
+class RagPreferencesUpdate(BaseModel):
+    """Request body for PUT /users/me/rag-preferences.
+
+    `mmr_lambda` is bounded to [0, 1] at the validation layer, so an
+    out-of-range value yields a 422 before any handler logic runs (fail-fast
+    at the system boundary).
+    """
+
+    mmr_lambda: float = Field(ge=0.0, le=1.0, description="MMR diversity weight (0-1). Higher favors relevance, lower favors diversity.")
+    enable_mmr_diversity: bool = Field(description="When false, RAG retrieval skips MMR and returns fused top-k by relevance.")
+
+
+class RagPreferencesResponse(BaseModel):
+    """Resolved RAG preferences returned by GET/PUT /users/me/rag-preferences."""
+
+    mmr_lambda: float = Field(description="Resolved MMR diversity weight (saved value or config default).")
+    enable_mmr_diversity: bool = Field(description="Resolved MMR enable flag (saved value or config default).")
+
+
 class AdminUserView(BaseModel):
     """Admin-facing projection of a user document. NEVER includes password_hash."""
 
@@ -434,6 +453,7 @@ class RAGChatRequest(BaseModel):
     content_sources: list[str] = Field(default=["podcast"], description="Content source types to search")
     date_start: str | None = Field(None, description="Optional inclusive lower bound on source date (YYYY-MM-DD or ISO 8601). Constrains retrieval to chunks whose source date range overlaps the window.")
     date_end: str | None = Field(None, description="Optional inclusive upper bound on source date (YYYY-MM-DD or ISO 8601).")
+    mmr_lambda: float | None = Field(None, ge=0.0, le=1.0, description="Optional per-request MMR relevance/diversity weight (0-1). Overrides the server default; higher favors relevance, lower favors diversity.")
 
 
 class RAGSessionCreateRequest(BaseModel):

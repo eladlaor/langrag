@@ -73,7 +73,7 @@ class PrometheusMetricsClient:
             self.parallel_queue_depth = Gauge(name="langgraph_parallel_queue_depth", documentation="Number of tasks in parallel execution queue", labelnames=["workflow_name"])
 
             # MongoDB connection-pool observability (fed by MongoPoolMetricsListener).
-            # `client` distinguishes the async (motor) pool from the sync (pymongo) pool.
+            # `client` distinguishes the async (PyMongo async) pool from the sync (pymongo) pool.
             self.mongodb_pool_connections = Gauge(name="mongodb_pool_connections", documentation="Current MongoDB connections by state (checked_out / available / created)", labelnames=["client", "state"])
 
             # Time a checkout waited from request to a usable connection — the head-of-line signal.

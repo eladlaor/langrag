@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Any
 
 from bson.binary import Binary, BinaryVectorDtype
-from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo.asynchronous.collection import AsyncCollection
 
 from config import get_settings
 from constants import (
@@ -38,6 +38,8 @@ from constants import (
     RAG_LEXICAL_INDEX_NAME,
     RAG_SEARCH_SCORE_FIELD,
     RAG_VECTOR_INDEX_NAME,
+    RAG_VECTOR_SEARCH_MAX_NUM_CANDIDATES as _MAX_NUM_CANDIDATES,
+    RAG_VECTOR_SEARCH_MIN_NUM_CANDIDATES as _MIN_NUM_CANDIDATES,
 )
 from custom_types.field_keys import RAGChunkKeys as Keys
 from db.queries.rankfusion import (
@@ -45,10 +47,6 @@ from db.queries.rankfusion import (
     build_rankfusion_pipeline,
     normalize_rrf_scores,
 )
-
-# Atlas Search caps numCandidates around 10,000 in practice; keep a defensive
-# upper bound so callers can't accidentally over-request.
-_MAX_NUM_CANDIDATES = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,7 @@ def _normalize_rrf_scores(results: list[dict[str, Any]]) -> None:
 
 
 async def hybrid_search_chunks(
-    collection: AsyncIOMotorCollection,
+    collection: AsyncCollection,
     query_text: str,
     query_embedding: list[float],
     content_sources: list[str] | None = None,
@@ -87,7 +85,7 @@ async def hybrid_search_chunks(
     Hybrid retrieval over rag_chunks using server-side $rankFusion.
 
     Args:
-        collection: rag_chunks AsyncIOMotorCollection
+        collection: rag_chunks AsyncCollection
         query_text: Raw user query for the lexical leg
         query_embedding: Embedded query for the vector leg
         content_sources: Optional content_source filter
@@ -96,9 +94,14 @@ async def hybrid_search_chunks(
         top_k: Final number of fused results to return
         vector_weight: Weight of the vector leg in RRF combination
         lexical_weight: Weight of the lexical leg in RRF combination
-        min_vector_score: Optional cosine-similarity floor. Fused chunks whose
-            vector-leg cosine is below this are dropped (the relevance floor that
-            lets the empty-context refusal fire). None disables the floor.
+        min_vector_score: Optional relevance floor on the vector leg, in the
+            NORMALIZED Atlas `vectorSearchScore` domain `(1 + cosine) / 2` ∈ [0, 1]
+            — NOT raw cosine. It is compared directly against the captured
+            `$meta:"vectorSearchScore"`, so it shares the exact domain of
+            `config.rag.min_similarity_score` and the vector-only path's
+            `min_score`. Fused chunks whose vector-leg score is below this are
+            dropped (the relevance floor that lets the empty-context refusal
+            fire). None disables the floor.
 
     Returns:
         List of fused chunk documents with `search_score` (fused RRF score),
@@ -118,7 +121,9 @@ async def hybrid_search_chunks(
     )
 
     num_candidates_multiplier = get_settings().rag.vector_search_num_candidates_multiplier
-    num_candidates = min(top_k * num_candidates_multiplier, _MAX_NUM_CANDIDATES)
+    # Enforce the same HNSW recall floor as the vector-only path: a small top_k
+    # must not drive numCandidates below what HNSW needs for stable recall.
+    num_candidates = min(max(top_k * num_candidates_multiplier, _MIN_NUM_CANDIDATES), _MAX_NUM_CANDIDATES)
     vector_stage: dict[str, Any] = {
         "$vectorSearch": {
             "index": RAG_VECTOR_INDEX_NAME,
@@ -165,7 +170,7 @@ async def hybrid_search_chunks(
     )
 
     try:
-        results = await collection.aggregate(pipeline).to_list(length=None)
+        results = await collection.aggregate(pipeline).to_list()
 
         if min_vector_score is not None:
             before = len(results)

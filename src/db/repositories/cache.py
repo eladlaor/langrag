@@ -9,7 +9,7 @@ import json
 import logging
 from datetime import datetime, timedelta, UTC
 from typing import Any
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db.repositories.base import BaseRepository
 from constants import COLLECTION_LLM_RESPONSE_CACHE
@@ -29,7 +29,7 @@ class CacheRepository(BaseRepository):
 
     DEFAULT_TTL_HOURS = 24 * 7  # 7 days
 
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         super().__init__(db, COLLECTION_LLM_RESPONSE_CACHE)
 
     @staticmethod

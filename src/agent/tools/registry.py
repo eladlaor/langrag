@@ -14,7 +14,6 @@ that's read-only per-turn data, not session-scoped infrastructure.
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable
 
 from langchain_core.tools import BaseTool
 

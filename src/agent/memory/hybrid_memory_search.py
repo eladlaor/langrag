@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from bson.binary import Binary, BinaryVectorDtype
-from motor.motor_asyncio import AsyncIOMotorCollection
+from pymongo.asynchronous.collection import AsyncCollection
 
 from config import get_settings
 from constants import (
@@ -40,7 +40,7 @@ _MAX_NUM_CANDIDATES = 1000
 
 
 async def hybrid_search_memories(
-    collection: AsyncIOMotorCollection,
+    collection: AsyncCollection,
     user_id: str,
     query_text: str,
     query_embedding: list[float],
@@ -53,7 +53,7 @@ async def hybrid_search_memories(
     """Hybrid retrieval over agent_memories scoped to one user_id.
 
     Args:
-        collection: agent_memories AsyncIOMotorCollection.
+        collection: agent_memories AsyncCollection.
         user_id: Owning user; every query MUST pre-filter on this. Required.
         query_text: Raw user query for the lexical leg.
         query_embedding: Embedded query for the vector leg.
@@ -131,7 +131,7 @@ async def hybrid_search_memories(
     pipeline.append({"$project": {Keys.EMBEDDING: 0}})
 
     try:
-        results = await collection.aggregate(pipeline).to_list(length=None)
+        results = await collection.aggregate(pipeline).to_list()
         normalize_rrf_scores(results, score_field=MEMORY_SCORE_FIELD)
         logger.info(
             "agent_memories $rankFusion: user_id=%s namespace=%s top_k=%d returned=%d",

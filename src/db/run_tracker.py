@@ -18,7 +18,8 @@ import uuid
 from pymongo.errors import PyMongoError
 
 from constants import NewsletterVersionType, RunStatus
-from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, RankingResultKeys
+from custom_types.db_schemas import MessageDocument
+from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, MessageSourceKeys, PollDbKeys, RankingResultKeys, SlmResultKeys
 from datetime import UTC
 
 logger = logging.getLogger(__name__)
@@ -162,88 +163,93 @@ class RunTracker:
             return False
 
     async def store_discussions(self, run_id: str, chat_name: str, discussions: list[dict]) -> int:
-        """Storing discussions from a chat."""
+        """Storing discussions from a chat.
+
+        Normalizes each discussion into a flat doc dict, then persists the whole
+        batch through DiscussionsRepository.create_discussions_bulk — one batched
+        embedding call + one bulk upsert, instead of the former per-discussion
+        OpenAI-call-plus-insert loop. Fail-fast: a write failure propagates
+        (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+        """
         if not run_id or not discussions or not await self._ensure_initialized():
             return 0
 
-        stored = 0
+        docs = []
         for idx, disc in enumerate(discussions):
-            try:
-                # Extracting message info
-                messages = disc.get(DiscussionKeys.MESSAGES, [])
+            messages = disc.get(DiscussionKeys.MESSAGES, [])
 
-                # Building correct message IDs using the messages' own IDs (short IDs from preprocessor)
-                # Format: {run_id}_msg_{short_id}
-                message_ids = []
-                for m in messages:
-                    msg_short_id = m.get(DiscussionKeys.ID)
-                    if msg_short_id:
-                        message_ids.append(f"{run_id}_msg_{msg_short_id}")
-                    else:
-                        logger.warning(f"Message in discussion {idx} missing 'id' field: {m}")
+            # Building correct message IDs using the messages' own IDs (short IDs
+            # from preprocessor). Format: {run_id}_msg_{short_id}
+            message_ids = []
+            for m in messages:
+                msg_short_id = m.get(DiscussionKeys.ID)
+                if msg_short_id:
+                    message_ids.append(f"{run_id}_msg_{msg_short_id}")
+                else:
+                    logger.warning(f"Message in discussion {idx} missing 'id' field: {m}")
 
-                # Getting timestamps
-                first_ts = messages[0].get("timestamp") if messages else None
-                last_ts = messages[-1].get("timestamp") if messages else None
+            first_ts = messages[0].get(DbFieldKeys.TIMESTAMP) if messages else None
+            last_ts = messages[-1].get(DbFieldKeys.TIMESTAMP) if messages else None
 
-                # Using discussion's own ID if available, otherwise generating one
-                disc_id = disc.get(DiscussionKeys.ID, str(idx))
-                discussion_id = f"{run_id}_disc_{disc_id}"
+            # Using discussion's own ID if available, otherwise generating one
+            disc_id = disc.get(DiscussionKeys.ID, str(idx))
+            discussion_id = f"{run_id}_disc_{disc_id}"
 
-                await self._discussions_repo.create_discussion(
-                    discussion_id=discussion_id,
-                    run_id=run_id,
-                    chat_name=chat_name,
-                    title=disc.get(DiscussionKeys.TITLE, ""),
-                    nutshell=disc.get(DiscussionKeys.NUTSHELL, ""),
-                    message_ids=message_ids,
-                    ranking_score=float(disc.get(RankingResultKeys.IMPORTANCE_SCORE, 0) or disc.get(RankingResultKeys.RANKING_SCORE, 0)),
-                    first_message_timestamp=first_ts,
-                    metadata={
+            docs.append(
+                {
+                    DbFieldKeys.DISCUSSION_ID: discussion_id,
+                    DbFieldKeys.RUN_ID: run_id,
+                    DbFieldKeys.CHAT_NAME: chat_name,
+                    DbFieldKeys.TITLE: disc.get(DiscussionKeys.TITLE, ""),
+                    DbFieldKeys.NUTSHELL: disc.get(DiscussionKeys.NUTSHELL, ""),
+                    DbFieldKeys.MESSAGE_IDS: message_ids,
+                    DbFieldKeys.RANKING_SCORE: float(disc.get(RankingResultKeys.IMPORTANCE_SCORE, 0) or disc.get(RankingResultKeys.RANKING_SCORE, 0)),
+                    DiscussionKeys.FIRST_MESSAGE_TIMESTAMP: first_ts,
+                    DbFieldKeys.METADATA: {
                         MergeGroupKeys.REASONING: disc.get(MergeGroupKeys.REASONING, ""),
                         "topics": disc.get("topics", []),
                         "selected": disc.get("selected_for_newsletter", False),
                         DiscussionKeys.NUM_MESSAGES: len(messages),
                         "last_message_timestamp": last_ts,
                     },
-                )
-                stored += 1
-            except Exception as e:
-                logger.warning(f"Failed to store discussion {idx}: {e}", extra={"run_id": run_id, "chat_name": chat_name})
-        if stored < len(discussions):
-            logger.warning(f"Partial discussion persistence: stored {stored}/{len(discussions)} discussions", extra={"run_id": run_id, "chat_name": chat_name, "stored": stored, "expected": len(discussions)})
-        return stored
+                }
+            )
+
+        return await self._discussions_repo.create_discussions_bulk(docs)
 
     async def store_polls(self, run_id: str, chat_name: str, data_source_name: str, polls: list[dict]) -> int:
-        """Storing polls extracted from a chat. Fail-soft."""
+        """Storing polls extracted from a chat.
+
+        Normalizes each poll into a flat doc dict, then persists the whole batch
+        through PollsRepository.create_polls_bulk — one ordered=False bulk upsert
+        keyed on poll_id, instead of the former per-poll create()-in-a-loop.
+        Fail-fast: a write failure propagates rather than being masked as a
+        partial count (mirrors store_messages / store_discussions, see
+        knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+        """
         if not run_id or not polls or not await self._ensure_initialized():
             return 0
 
-        stored = 0
+        docs = []
         for poll in polls:
-            try:
-                matrix_event_id = poll.get("matrix_event_id", "")
-                poll_id = f"{run_id}_poll_{matrix_event_id}"
+            matrix_event_id = poll.get(PollDbKeys.MATRIX_EVENT_ID, "")
+            docs.append(
+                {
+                    PollDbKeys.POLL_ID: f"{run_id}_poll_{matrix_event_id}",
+                    PollDbKeys.RUN_ID: run_id,
+                    PollDbKeys.CHAT_NAME: chat_name,
+                    PollDbKeys.DATA_SOURCE_NAME: data_source_name,
+                    PollDbKeys.SENDER: poll.get(PollDbKeys.SENDER, ""),
+                    PollDbKeys.TIMESTAMP: poll.get(PollDbKeys.TIMESTAMP, 0),
+                    PollDbKeys.QUESTION: poll.get(PollDbKeys.QUESTION, ""),
+                    PollDbKeys.MATRIX_EVENT_ID: matrix_event_id,
+                    PollDbKeys.OPTIONS: poll.get(PollDbKeys.OPTIONS, []),
+                    PollDbKeys.TOTAL_VOTES: poll.get(PollDbKeys.TOTAL_VOTES, 0),
+                    PollDbKeys.UNIQUE_VOTER_COUNT: poll.get(PollDbKeys.UNIQUE_VOTER_COUNT, 0),
+                }
+            )
 
-                await self._polls_repo.create_poll(
-                    poll_id=poll_id,
-                    run_id=run_id,
-                    chat_name=chat_name,
-                    data_source_name=data_source_name,
-                    sender=poll.get("sender", ""),
-                    timestamp=poll.get("timestamp", 0),
-                    question=poll.get("question", ""),
-                    matrix_event_id=matrix_event_id,
-                    options=poll.get("options", []),
-                    total_votes=poll.get("total_votes", 0),
-                    unique_voter_count=poll.get("unique_voter_count", 0),
-                )
-                stored += 1
-            except Exception as e:
-                logger.warning(f"Failed to store poll {poll.get('matrix_event_id', '?')}: {e}", extra={"run_id": run_id, "chat_name": chat_name})
-        if stored < len(polls):
-            logger.warning(f"Partial poll persistence: stored {stored}/{len(polls)} polls", extra={"run_id": run_id, "chat_name": chat_name, "stored": stored, "expected": len(polls)})
-        return stored
+        return await self._polls_repo.create_polls_bulk(docs)
 
     async def store_newsletter(self, newsletter_id: str, run_id: str, newsletter_type: str, data_source_name: str, chat_name: str | None, start_date: str, end_date: str, summary_format: str, desired_language: str, json_path: str, md_path: str, html_path: str | None = None, stats: dict | None = None, featured_discussion_ids: list[str] | None = None, version_type: str = NewsletterVersionType.ORIGINAL) -> bool:
         """
@@ -469,40 +475,41 @@ class RunTracker:
         if not run_id or not messages or not await self._ensure_initialized():
             return 0
 
-        try:
-            docs = []
-            for idx, msg in enumerate(messages):
-                # Raw messages use 'id' field which is the Matrix event ID
-                event_id = msg.get(DiscussionKeys.ID) or msg.get(DecryptionResultKeys.EVENT_ID) or str(idx)
-                message_id = f"{run_id}_msg_{event_id}"
+        docs = []
+        for idx, msg in enumerate(messages):
+            # Raw messages use 'id' field which is the Matrix event ID
+            event_id = msg.get(DiscussionKeys.ID) or msg.get(DecryptionResultKeys.EVENT_ID) or str(idx)
+            message_id = f"{run_id}_msg_{event_id}"
 
-                # Look up SLM classification if available
-                slm_data = (classification_map or {}).get(str(event_id), {})
+            # Look up SLM classification if available
+            slm_data = (classification_map or {}).get(str(event_id), {})
 
-                doc = {
-                    "message_id": message_id,
-                    "run_id": run_id,
-                    "chat_name": chat_name,
-                    "data_source_name": data_source_name,
-                    "sender": msg.get("sender_id") or msg.get("sender") or "",
-                    "timestamp": msg.get("timestamp"),
-                    "content": msg.get("content", ""),
-                    "content_translated": None,
-                    "is_translated": False,
-                    "slm_classification": slm_data.get("classification"),
-                    "slm_confidence": slm_data.get("confidence"),
-                    "slm_reason": slm_data.get("reason"),
+            # Validate through the canonical schema so the persisted document
+            # is guaranteed to match MessageDocument (fail-fast on drift).
+            doc = MessageDocument(
+                **{
+                    DbFieldKeys.MESSAGE_ID: message_id,
+                    DbFieldKeys.RUN_ID: run_id,
+                    DbFieldKeys.CHAT_NAME: chat_name,
+                    DbFieldKeys.DATA_SOURCE_NAME: data_source_name,
+                    DbFieldKeys.SENDER: msg.get(MessageSourceKeys.SENDER_ID) or msg.get(MessageSourceKeys.SENDER) or "",
+                    DbFieldKeys.TIMESTAMP: msg.get(MessageSourceKeys.TIMESTAMP),
+                    DbFieldKeys.CONTENT: msg.get(MessageSourceKeys.CONTENT, ""),
+                    DbFieldKeys.CONTENT_TRANSLATED: None,
+                    DbFieldKeys.IS_TRANSLATED: False,
+                    DbFieldKeys.SLM_CLASSIFICATION: slm_data.get(SlmResultKeys.CLASSIFICATION),
+                    DbFieldKeys.SLM_CONFIDENCE: slm_data.get(SlmResultKeys.CONFIDENCE),
+                    DbFieldKeys.SLM_REASON: slm_data.get(SlmResultKeys.REASON),
                 }
-                docs.append(doc)
+            ).model_dump()
+            docs.append(doc)
 
-            count = await self._messages_repo.insert_batch(docs)
-            logger.info(f"Stored {count}/{len(messages)} raw messages for run {run_id}, chat {chat_name}")
-            if count < len(messages):
-                logger.warning(f"Partial raw-message persistence: stored {count}/{len(messages)} messages", extra={"run_id": run_id, "chat_name": chat_name, "stored": count, "expected": len(messages)})
-            return count
-        except Exception as e:
-            logger.warning(f"Failed to store raw messages: {e}", extra={"run_id": run_id, "chat_name": chat_name})
-            return 0
+        # Fail-fast: a write failure must surface, not be masked as "0 stored".
+        count = await self._messages_repo.insert_batch(docs)
+        logger.info(f"Stored {count}/{len(messages)} raw messages for run {run_id}, chat {chat_name}")
+        if count < len(messages):
+            logger.warning(f"Partial raw-message persistence: stored {count}/{len(messages)} messages", extra={"run_id": run_id, "chat_name": chat_name, "stored": count, "expected": len(messages)})
+        return count
 
     async def store_messages(self, run_id: str, chat_name: str, data_source_name: str, messages: list[dict]) -> int:
         """
@@ -523,40 +530,43 @@ class RunTracker:
         if not run_id or not messages or not await self._ensure_initialized():
             return 0
 
-        try:
-            docs = []
-            for idx, msg in enumerate(messages):
-                msg_short_id = msg.get(DiscussionKeys.ID, str(idx))
+        docs = []
+        for idx, msg in enumerate(messages):
+            msg_short_id = msg.get(MessageSourceKeys.ID, str(idx))
 
-                # Build message_id using matrix_event_id to match store_raw_messages keys,
-                # falling back to the short_id for compatibility
-                matrix_event_id = msg.get("matrix_event_id")
-                message_id = f"{run_id}_msg_{matrix_event_id}" if matrix_event_id else f"{run_id}_msg_{msg_short_id}"
+            # Build message_id using matrix_event_id to match store_raw_messages keys,
+            # falling back to the short_id for compatibility
+            matrix_event_id = msg.get(MessageSourceKeys.MATRIX_EVENT_ID)
+            message_id = f"{run_id}_msg_{matrix_event_id}" if matrix_event_id else f"{run_id}_msg_{msg_short_id}"
+            translated_content = msg.get(MessageSourceKeys.CONTENT, "")
 
-                doc = {
-                    "message_id": message_id,
-                    "matrix_event_id": matrix_event_id,
-                    "short_id": msg_short_id,
-                    "run_id": run_id,
-                    "chat_name": chat_name,
-                    "data_source_name": data_source_name,
-                    "sender": msg.get("sender", ""),
-                    "timestamp": msg.get("timestamp"),
-                    "content_translated": msg.get("content", ""),
-                    "is_translated": True,
-                    "urls": msg.get("urls", []),
-                    "mentions": msg.get("mentions", []),
-                    "replies_to": msg.get("replies_to"),
-                    "word_count": len(msg.get("content", "").split()),
+            # Validate through the canonical schema. exclude_unset keeps this an
+            # UPSERT PATCH: only the translated-pass fields are written, so the
+            # raw-pass fields (content, slm_*) set earlier are not clobbered.
+            doc = MessageDocument(
+                **{
+                    DbFieldKeys.MESSAGE_ID: message_id,
+                    DbFieldKeys.MATRIX_EVENT_ID: matrix_event_id,
+                    DbFieldKeys.SHORT_ID: msg_short_id,
+                    DbFieldKeys.RUN_ID: run_id,
+                    DbFieldKeys.CHAT_NAME: chat_name,
+                    DbFieldKeys.DATA_SOURCE_NAME: data_source_name,
+                    DbFieldKeys.SENDER: msg.get(MessageSourceKeys.SENDER, ""),
+                    DbFieldKeys.TIMESTAMP: msg.get(MessageSourceKeys.TIMESTAMP),
+                    DbFieldKeys.CONTENT_TRANSLATED: translated_content,
+                    DbFieldKeys.IS_TRANSLATED: True,
+                    DbFieldKeys.URLS: msg.get(MessageSourceKeys.URLS, []),
+                    DbFieldKeys.MENTIONS: msg.get(MessageSourceKeys.MENTIONS, []),
+                    DbFieldKeys.REPLIES_TO: msg.get(MessageSourceKeys.REPLIES_TO),
+                    DbFieldKeys.WORD_COUNT: len(translated_content.split()),
                 }
-                docs.append(doc)
+            ).model_dump(exclude_unset=True)
+            docs.append(doc)
 
-            count = await self._messages_repo.upsert_batch(docs)
-            logger.info(f"Upserted {count}/{len(messages)} messages for run {run_id}, chat {chat_name}")
-            return count
-        except Exception as e:
-            logger.warning(f"Failed to upsert messages: {e}")
-            return 0
+        # Fail-fast: surface write failures instead of returning a misleading 0.
+        count = await self._messages_repo.upsert_batch(docs)
+        logger.info(f"Upserted {count}/{len(messages)} messages for run {run_id}, chat {chat_name}")
+        return count
 
 
 # Singleton

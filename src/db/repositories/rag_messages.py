@@ -19,7 +19,8 @@ Integrity contract (Mongo has no FK enforcement, so it is explicit):
 import logging
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorClientSession, AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
+from pymongo.asynchronous.client_session import AsyncClientSession
 
 from constants import COLLECTION_RAG_MESSAGES
 from custom_types.field_keys import RAGMessageKeys as Keys
@@ -31,14 +32,14 @@ logger = logging.getLogger(__name__)
 class RAGMessagesRepository(BaseRepository):
     """Repository for individual RAG conversation messages."""
 
-    def __init__(self, db: AsyncIOMotorDatabase) -> None:
+    def __init__(self, db: AsyncDatabase) -> None:
         super().__init__(db, COLLECTION_RAG_MESSAGES)
 
     async def insert_message(
         self,
         session_id: str,
         message: dict[str, Any],
-        mongo_session: AsyncIOMotorClientSession | None = None,
+        mongo_session: AsyncClientSession | None = None,
     ) -> str:
         """Insert a single message for a session.
 
@@ -76,7 +77,7 @@ class RAGMessagesRepository(BaseRepository):
                 .sort(Keys.CREATED_AT, -1)
                 .limit(max_messages)
             )
-            newest_first = await cursor.to_list(length=max_messages)
+            newest_first = await cursor.to_list(max_messages)
             newest_first.reverse()
             return newest_first
         except Exception as e:
@@ -100,7 +101,7 @@ class RAGMessagesRepository(BaseRepository):
     async def delete_for_session(
         self,
         session_id: str,
-        mongo_session: AsyncIOMotorClientSession | None = None,
+        mongo_session: AsyncClientSession | None = None,
     ) -> int:
         """Delete all messages for a session (cascade on session delete).
 

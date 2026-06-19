@@ -40,21 +40,28 @@ async def rag_query(
     date_start: str | None = None,
     date_end: str | None = None,
     sources: list[str] | None = None,
+    mmr_lambda: float | None = None,
 ) -> dict[str, Any]:
     """Run the full RAG chain (retrieve + generate) and return a dated answer.
 
     Returns a dict with the answer text, citations (each carrying source dates),
     and the freshness summary so calling agents can render staleness warnings.
+
+    `mmr_lambda` (0-1) optionally overrides the server default MMR relevance/
+    diversity balance for this query; None falls back to the config default.
     """
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
 
+    # MCP tool signatures carry no caller identity, so per-user MMR lambda is
+    # not resolvable here; retrieval falls through to the config default.
     pipeline = RetrievalPipeline()
     retrieval = await pipeline.retrieve(
         query=query,
         content_sources=sources,
         date_start=ds,
         date_end=de,
+        mmr_lambda=mmr_lambda,
     )
 
     if not retrieval["context"]:
@@ -90,11 +97,18 @@ async def rag_search(
     date_end: str | None = None,
     sources: list[str] | None = None,
     top_k: int | None = None,
+    mmr_lambda: float | None = None,
 ) -> dict[str, Any]:
-    """Run retrieval only — no LLM call. Returns reranked citations with source dates."""
+    """Run retrieval only — no LLM call. Returns reranked citations with source dates.
+
+    `mmr_lambda` (0-1) optionally overrides the server default MMR relevance/
+    diversity balance for this query; None falls back to the config default.
+    """
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
 
+    # No caller identity on the MCP path: per-user MMR lambda is not resolvable,
+    # so retrieval uses the config default.
     pipeline = RetrievalPipeline()
     retrieval = await pipeline.retrieve(
         query=query,
@@ -102,6 +116,7 @@ async def rag_search(
         date_start=ds,
         date_end=de,
         rerank_top_k=top_k,
+        mmr_lambda=mmr_lambda,
     )
 
     return {

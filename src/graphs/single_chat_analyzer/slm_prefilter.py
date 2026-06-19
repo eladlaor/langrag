@@ -54,15 +54,17 @@ async def _persist_raw_messages_to_mongodb(
     """
     Persist all raw messages to MongoDB with optional SLM classification metadata.
 
-    Fail-soft: logs warnings on failure but does not raise.
+    Fail-hard: the raw message corpus is source-of-truth data, so a persistence
+    failure aborts the run rather than silently leaving a partial corpus behind
+    (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
     """
     if not mongodb_run_id:
         return
 
-    try:
-        from db.run_tracker import get_tracker
+    from db.run_tracker import get_tracker
 
-        tracker = get_tracker()
+    tracker = get_tracker()
+    try:
         count = await tracker.store_raw_messages(
             run_id=mongodb_run_id,
             chat_name=chat_name,
@@ -70,9 +72,10 @@ async def _persist_raw_messages_to_mongodb(
             messages=messages,
             classification_map=classification_map,
         )
-        logger.info(f"Persisted {count}/{len(messages)} raw messages to MongoDB for chat {chat_name}")
     except Exception as e:
-        logger.warning(f"Failed to persist raw messages to MongoDB: {e}")
+        logger.error("Failed to persist raw messages to MongoDB", extra={"event": "store_raw_messages_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "message_count": len(messages), "error": str(e)})
+        raise
+    logger.info(f"Persisted {count}/{len(messages)} raw messages to MongoDB for chat {chat_name}")
 
 
 def _read_json_file(file_path: str) -> Any:

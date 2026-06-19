@@ -14,7 +14,7 @@ from time import perf_counter
 
 logger = logging.getLogger(__name__)
 
-_singleton: "_RAGMetrics | None" = None
+_singleton: _RAGMetrics | None = None
 
 
 class _RAGMetrics:

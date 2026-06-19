@@ -17,12 +17,12 @@ def _mongodb_available():
     """Check if MongoDB is reachable."""
     try:
         import asyncio
-        from motor.motor_asyncio import AsyncIOMotorClient
+        from pymongo import AsyncMongoClient
         from config import get_settings
 
         settings = get_settings()
         url = settings.get_mongodb_url()
-        client = AsyncIOMotorClient(url, serverSelectionTimeoutMS=2000)
+        client = AsyncMongoClient(url, serverSelectionTimeoutMS=2000)
 
         loop = asyncio.new_event_loop()
         try:

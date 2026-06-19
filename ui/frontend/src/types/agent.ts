@@ -81,3 +81,8 @@ export interface InterruptPayload {
   action: string;
   args: Record<string, unknown>;
 }
+
+export interface RagPreferences {
+  mmr_lambda: number;
+  enable_mmr_diversity: boolean;
+}

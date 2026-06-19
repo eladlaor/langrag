@@ -1405,20 +1405,29 @@ async def translate_consolidated_newsletter(state: ParallelOrchestratorState, co
             tracker = get_tracker()
             newsletter_id = f"{mongodb_run_id}_nl_consolidated"
 
-            await tracker.store_newsletter(
-                newsletter_id=newsletter_id,
-                run_id=mongodb_run_id,
-                newsletter_type=NewsletterType.CONSOLIDATED,
-                data_source_name=state[OrchestratorKeys.DATA_SOURCE_NAME],
-                chat_name=None,
-                start_date=state[OrchestratorKeys.START_DATE],
-                end_date=state[OrchestratorKeys.END_DATE],
-                summary_format=state[OrchestratorKeys.SUMMARY_FORMAT],
-                desired_language=state[OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY],
-                json_path="",  # Not applicable for translated version
-                md_path=expected_file,
-                version_type=NewsletterVersionType.TRANSLATED,
-            )
+            # Fail-soft: the TRANSLATED consolidated newsletter is a regenerable
+            # derivative, so a late persistence blip must not abort an
+            # otherwise-complete run. Caught here so it does NOT reach the outer
+            # except (which re-raises as RuntimeError). Raw messages /
+            # discussions / polls / original newsletter remain fail-hard; see
+            # knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md.
+            try:
+                await tracker.store_newsletter(
+                    newsletter_id=newsletter_id,
+                    run_id=mongodb_run_id,
+                    newsletter_type=NewsletterType.CONSOLIDATED,
+                    data_source_name=state[OrchestratorKeys.DATA_SOURCE_NAME],
+                    chat_name=None,
+                    start_date=state[OrchestratorKeys.START_DATE],
+                    end_date=state[OrchestratorKeys.END_DATE],
+                    summary_format=state[OrchestratorKeys.SUMMARY_FORMAT],
+                    desired_language=state[OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY],
+                    json_path="",  # Not applicable for translated version
+                    md_path=expected_file,
+                    version_type=NewsletterVersionType.TRANSLATED,
+                )
+            except Exception as e:
+                logger.error("Failed to persist TRANSLATED consolidated newsletter to MongoDB (fail-soft)", extra={"event": "store_newsletter_failed", "run_id": mongodb_run_id, "newsletter_id": newsletter_id, "version_type": str(NewsletterVersionType.TRANSLATED), "error": str(e)})
 
         return {OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: expected_file}
 
