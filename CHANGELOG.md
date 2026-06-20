@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.4] - 2026-06-20
+
+### Fixed
+- **App startup failure when MongoDB Atlas search indexes are present:** `AsyncCollection.list_search_indexes()` is a coroutine in the pymongo native-async API (4.15+), so it must be awaited before iteration. Eight call sites in `src/db/indexes.py` iterated it directly with `async for` without awaiting, which raised when RAG/agent search indexes already existed and `hybrid_enabled=True` tripped the lexical-index queryability guard, preventing the app from booting. Each site now awaits the call into a cursor first, then iterates the cursor.
+
 ## [1.17.3] - 2026-06-19
 
 ### Changed
@@ -341,7 +346,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.3...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.4...HEAD
+[1.17.4]: https://github.com/eladlaor/langrag/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/eladlaor/langrag/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/eladlaor/langrag/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/eladlaor/langrag/compare/v1.17.0...v1.17.1

@@ -664,7 +664,8 @@ async def _ensure_vector_search_index(db: AsyncDatabase) -> None:
         # Check if vector search index already exists
         existing_index_dims: int | None = None
         existing_indexes = []
-        async for idx in collection.list_search_indexes():
+        cursor = await collection.list_search_indexes()
+        async for idx in cursor:
             name = idx.get("name", "")
             existing_indexes.append(name)
             if name == RAG_VECTOR_INDEX_NAME:
@@ -739,7 +740,8 @@ async def _ensure_discussion_vector_index(db: AsyncDatabase) -> None:
     try:
         existing_index_dims: int | None = None
         existing_indexes = []
-        async for idx in collection.list_search_indexes():
+        cursor = await collection.list_search_indexes()
+        async for idx in cursor:
             name = idx.get("name", "")
             existing_indexes.append(name)
             if name == DISCUSSION_VECTOR_INDEX_NAME:
@@ -793,7 +795,8 @@ async def _wait_for_search_index_ready(collection, index_name: str) -> bool:
     deadline = time.monotonic() + _SEARCH_INDEX_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         try:
-            async for idx in collection.list_search_indexes():
+            cursor = await collection.list_search_indexes()
+            async for idx in cursor:
                 if idx.get("name") != index_name:
                     continue
                 if idx.get("queryable") is True:
@@ -819,7 +822,8 @@ async def _drop_legacy_vector_index(collection) -> None:
     Safe to call repeatedly: a missing legacy index is a no-op.
     """
     try:
-        existing = {idx.get("name") async for idx in collection.list_search_indexes()}
+        cursor = await collection.list_search_indexes()
+        existing = {idx.get("name") async for idx in cursor}
         if RAG_VECTOR_INDEX_NAME_LEGACY not in existing:
             return
         await collection.drop_search_index(RAG_VECTOR_INDEX_NAME_LEGACY)
@@ -848,7 +852,8 @@ async def _ensure_lexical_search_index(db: AsyncDatabase) -> bool:
 
     try:
         existing_indexes = []
-        async for idx in collection.list_search_indexes():
+        cursor = await collection.list_search_indexes()
+        async for idx in cursor:
             existing_indexes.append(idx.get("name", ""))
 
         if RAG_LEXICAL_INDEX_NAME in existing_indexes:
@@ -898,7 +903,8 @@ async def _ensure_agent_memory_vector_index(db: AsyncDatabase) -> bool:
     """
     collection = db[COLLECTION_AGENT_MEMORIES]
     try:
-        existing = [idx.get("name", "") async for idx in collection.list_search_indexes()]
+        cursor = await collection.list_search_indexes()
+        existing = [idx.get("name", "") async for idx in cursor]
         if AGENT_MEMORY_VECTOR_INDEX_NAME in existing:
             logger.debug(f"Agent memory vector index '{AGENT_MEMORY_VECTOR_INDEX_NAME}' already exists")
             return await _wait_for_search_index_ready(collection, AGENT_MEMORY_VECTOR_INDEX_NAME)
@@ -944,7 +950,8 @@ async def _ensure_agent_memory_lexical_index(db: AsyncDatabase) -> bool:
     """
     collection = db[COLLECTION_AGENT_MEMORIES]
     try:
-        existing = [idx.get("name", "") async for idx in collection.list_search_indexes()]
+        cursor = await collection.list_search_indexes()
+        existing = [idx.get("name", "") async for idx in cursor]
         if AGENT_MEMORY_LEXICAL_INDEX_NAME in existing:
             logger.debug(f"Agent memory lexical index '{AGENT_MEMORY_LEXICAL_INDEX_NAME}' already exists")
             return await _wait_for_search_index_ready(collection, AGENT_MEMORY_LEXICAL_INDEX_NAME)
@@ -1012,7 +1019,8 @@ async def drop_all_indexes(db: AsyncDatabase) -> None:
     for collection_name, index_names in _SEARCH_INDEXES_BY_COLLECTION.items():
         collection = db[collection_name]
         try:
-            existing = {idx["name"] async for idx in collection.list_search_indexes()}
+            cursor = await collection.list_search_indexes()
+            existing = {idx["name"] async for idx in cursor}
         except Exception as e:
             logger.warning(f"Could not list search indexes for {collection_name} (mongot unavailable?): {e}")
             continue
