@@ -171,7 +171,7 @@ The diagram below covers the **newsletter generation** flow only — message ext
 |---------|-----|--------|
 | Image Understanding | Vision model describes shared images, context injected into generation | Newsletters reflect visual content, not just text |
 | Reply Correlation | Matrix `m.relates_to` metadata preserved through Beeper extraction | Precise discussion separation - no timestamp guessing |
-| MMR Diversity Ranking | Multi-factor scoring + Maximal Marginal Relevance | Quality-diversity balance |
+| MMR Diversity Ranking | Multi-factor scoring + Maximal Marginal Relevance, with a tunable quality/diversity weight (`mmr_lambda`) per request, per user, and via server default | Quality-diversity balance, controllable per run |
 | Human-in-the-Loop | Two-phase pipeline with Web UI discussion selector | Editorial control over final newsletter content |
 | Batch API | JSONL serialization, async polling, exponential backoff | 50% cost reduction |
 | SLM Pre-filtering | Configurable local SLM classifies KEEP/FILTER/UNCERTAIN before LLM | 15-30% additional savings |
@@ -224,6 +224,10 @@ cp .env.example .env
 echo "LANGFUSE_AUTH_SECRET=$(openssl rand -base64 32)" >> .env
 echo "LANGFUSE_SALT=$(openssl rand -base64 32)" >> .env
 echo "LANGFUSE_DB_PASSWORD=$(openssl rand -base64 32)" >> .env
+
+# The Web UI is gated by a login (enabled by default). The app refuses to start
+# without a session key — generate one (set LANGRAG_LOGIN_ENABLED=false to disable the gate):
+echo "LANGRAG_LOGIN_SESSION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> .env
 ```
 
 See [Configuration Reference](#configuration-reference) for the full list of parameters and environment variables.
@@ -295,6 +299,8 @@ See: **[docs/setup/SETUP_LINKEDIN_WEBHOOK.md](docs/setup/SETUP_LINKEDIN_WEBHOOK.
 | `previous_newsletters_to_consider` | Number of past newsletters checked for anti-repetition | `0`-`20` | `5` |
 | `enable_discussion_merging` | Merge similar discussions across different chats | `true` / `false` | `true` |
 | `similarity_threshold` | How aggressively to merge similar discussions | `strict` / `moderate` / `aggressive` | `moderate` |
+| `enable_mmr_diversity` | Apply MMR diversity reranking when selecting the top-K discussions, preventing multiple near-duplicate discussions on the same topic | `true` / `false` | `true` |
+| `mmr_lambda` | MMR quality-vs-diversity weight. `1.0` = pure quality (no diversity rerank), `0.0` = pure diversity, `0.7` = 70% quality / 30% diversity | `0.0`-`1.0` | `0.7` |
 | `summary_format` | Newsletter template and editorial style | `langtalks_format`, `mcp_israel_format` | required |
 | `enable_image_extraction` | Extract and describe shared images using a vision model | `true` / `false` | `false` |
 | `create_linkedin_draft` | Auto-create a LinkedIn draft post via n8n | `true` / `false` | `false` |
@@ -311,6 +317,8 @@ See `.env.example` for the full list. Key variables:
 | `BEEPER_RECOVERY_CODE` | Optional, enables server-side key backup |
 | `SLM_ENABLED` | Enable Ollama SLM pre-filtering (`true`/`false`) |
 | `SLM_ENRICHMENT_ENABLED` | Enable DeBERTa semantic enrichment for ranking (`true`/`false`) |
+| `RANKING_ENABLE_MMR_DIVERSITY` / `RANKING_MMR_LAMBDA` | Server defaults for newsletter discussion-ranking MMR (overridable per request) |
+| `RAG_ENABLE_MMR_DIVERSITY` / `RAG_MMR_LAMBDA` | Server defaults for RAG retrieval MMR (overridable per user and per request) |
 | `MONGODB_URI` | MongoDB connection string |
 | `EMAIL_PROVIDER` | Email delivery provider (`gmail` / `sendgrid`) |
 | `DEFAULT_EMAIL_RECIPIENT` | Default recipient when `send_email` is triggered without explicit recipients |
@@ -326,6 +334,7 @@ See `.env.example` for the full list. Key variables:
 | Service | Port | Purpose |
 |---------|------|---------|
 | app | 80 (nginx), 8000 (direct) | FastAPI + React frontend |
+| mcp-server | 8765 | MCP server over the RAG corpus (past newsletters + podcast transcripts) |
 | mongodb | 27017 | Database + vector search |
 | langfuse-server | 3001 | LLM observability |
 | grafana | 3000 | Log visualization |
