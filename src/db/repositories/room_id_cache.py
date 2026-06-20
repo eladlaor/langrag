@@ -156,7 +156,7 @@ class RoomIdCacheRepository(BaseRepository):
             # Get most accessed
             pipeline = [{"$sort": {"access_count": -1}}, {"$limit": 5}, {"$project": {"chat_name": 1, "access_count": 1, "last_accessed_at": 1}}]
 
-            top_accessed = (await self.collection.aggregate(pipeline)).to_list()
+            top_accessed = await (await self.collection.aggregate(pipeline)).to_list()
 
             stats = {"total_entries": total_entries, "top_accessed": top_accessed}
 

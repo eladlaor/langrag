@@ -301,7 +301,7 @@ class ExtractionCacheRepository(BaseRepository):
             # Count by chat name
             pipeline = [{"$group": {"_id": f"${DbFieldKeys.CHAT_NAME}", "count": {"$sum": 1}, "total_messages": {"$sum": f"${ExtractionCacheKeys.MESSAGE_COUNT}"}}}, {"$sort": {"count": -1}}, {"$limit": DEFAULT_MAX_QUERY_RESULTS}]
 
-            by_chat = (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
+            by_chat = await (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
 
             # Count expired entries
             now = datetime.now(UTC)

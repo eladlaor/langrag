@@ -192,7 +192,7 @@ class TranslationCacheRepository(BaseRepository):
                 {"$sort": {"count": -1}},
                 {"$limit": DEFAULT_MAX_QUERY_RESULTS},
             ]
-            by_chat_language = (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
+            by_chat_language = await (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
 
             now = datetime.now(UTC)
             expired_count = await self.count({DbFieldKeys.EXPIRES_AT: {"$lt": now}})

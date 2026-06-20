@@ -84,7 +84,7 @@ class ChunksRepository(BaseRepository):
             {"$sort": {"_id": 1}},
             {"$limit": DEFAULT_MAX_QUERY_RESULTS},
         ]
-        results = (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
+        results = await (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
         return {doc["_id"]: doc["count"] for doc in results}
 
     async def list_ingested_sources(self, content_source: str | None = None) -> list[dict]:
@@ -117,7 +117,7 @@ class ChunksRepository(BaseRepository):
         ]
         # One doc per distinct source_id; $limit + bounded to_list guard against
         # an unexpectedly large source catalog materializing fully into memory.
-        results = (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
+        results = await (await self.collection.aggregate(pipeline)).to_list(DEFAULT_MAX_QUERY_RESULTS)
         return [
             {
                 Keys.SOURCE_ID: doc["_id"],

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.6] - 2026-06-20
+
+### Fixed
+- **Unawaited `AsyncCommandCursor.to_list()` on aggregate calls:** in the pymongo native-async API, `AsyncCommandCursor.to_list()` is itself a coroutine, so the cursor returned by an awaited `aggregate()` must also be awaited when materialized. v1.17.5 awaited only the outer `aggregate()` layer (`(await coll.aggregate(p)).to_list()`), leaving the `.to_list()` coroutine un-awaited so the result was a coroutine and the next line (for example `len(results)`) raised. All twelve aggregate sites now use `await (await coll.aggregate(p)).to_list(...)`. The `find().to_list()` sites are correct as-is, since `find()` is not a coroutine and a single await is right. This completes the v1.17.5 native-async fix and unbreaks RAG retrieval (vector and hybrid search), observability run search/stats, and the agent-memory and data-layer cache/chunks/discussions aggregate paths.
+
 ## [1.17.5] - 2026-06-20
 
 ### Fixed
@@ -353,6 +358,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Initial public release.
 
 [Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.5...HEAD
+[1.17.6]: https://github.com/eladlaor/langrag/compare/v1.17.5...v1.17.6
 [1.17.5]: https://github.com/eladlaor/langrag/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/eladlaor/langrag/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/eladlaor/langrag/compare/v1.17.2...v1.17.3

@@ -131,7 +131,7 @@ async def hybrid_search_memories(
     pipeline.append({"$project": {Keys.EMBEDDING: 0}})
 
     try:
-        results = (await collection.aggregate(pipeline)).to_list()
+        results = await (await collection.aggregate(pipeline)).to_list()
         normalize_rrf_scores(results, score_field=MEMORY_SCORE_FIELD)
         logger.info(
             "agent_memories $rankFusion: user_id=%s namespace=%s top_k=%d returned=%d",

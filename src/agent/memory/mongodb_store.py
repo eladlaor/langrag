@@ -284,7 +284,7 @@ class MongoDBStore(BaseStore):
             {"$skip": offset},
             {"$limit": limit},
         ]
-        rows = (await self._collection.aggregate(pipeline)).to_list()
+        rows = await (await self._collection.aggregate(pipeline)).to_list()
         return [(r["_id"]["user"], r["_id"]["ns"]) for r in rows]
 
     async def abatch(self, ops):  # pragma: no cover — not exercised at v1.13.0

@@ -355,7 +355,7 @@ class DiscussionsRepository(BaseRepository):
                 },
             ]
 
-            results = (await self.collection.aggregate(pipeline)).to_list(top_k)
+            results = await (await self.collection.aggregate(pipeline)).to_list(top_k)
             logger.info(f"Vector-searched {len(results)} similar discussions across {len(run_ids)} run_ids (raw_cosine_min_score={min_score:.2f})")
             return results
 
