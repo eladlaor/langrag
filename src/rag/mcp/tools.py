@@ -156,7 +156,7 @@ async def list_rag_sources() -> dict[str, list[dict[str, Any]]]:
         {"$sort": {"source_date_end": -1}},
     ]
 
-    cursor = repo.collection.aggregate(pipeline)
+    cursor = await repo.collection.aggregate(pipeline)
     async for doc in cursor:
         bucket = doc["_id"][RAGChunkKeys.CONTENT_SOURCE]
         entry = {

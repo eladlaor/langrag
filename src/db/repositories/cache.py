@@ -143,7 +143,7 @@ class CacheRepository(BaseRepository):
         pipeline = [
             {"$group": {"_id": f"${CacheDocumentKeys.OPERATION_TYPE}", "count": {"$sum": 1}}},
         ]
-        cursor = self.collection.aggregate(pipeline)
+        cursor = await self.collection.aggregate(pipeline)
         by_type = {doc["_id"]: doc["count"] async for doc in cursor}
 
         return {

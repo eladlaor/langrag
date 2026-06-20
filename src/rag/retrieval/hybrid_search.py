@@ -170,7 +170,7 @@ async def hybrid_search_chunks(
     )
 
     try:
-        results = await collection.aggregate(pipeline).to_list()
+        results = (await collection.aggregate(pipeline)).to_list()
 
         if min_vector_score is not None:
             before = len(results)

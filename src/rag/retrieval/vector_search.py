@@ -113,7 +113,7 @@ async def vector_search_chunks(
     ]
 
     try:
-        results = await collection.aggregate(pipeline).to_list()
+        results = (await collection.aggregate(pipeline)).to_list()
         logger.info(
             f"Vector search returned {len(results)} chunks "
             f"(top_k={top_k}, min_score={min_score}, "

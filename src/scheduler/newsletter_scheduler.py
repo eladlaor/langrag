@@ -221,9 +221,12 @@ async def _change_stream_watcher() -> None:
 
             # `fullDocument='updateLookup'` is required so update events carry
             # the post-image with the new next_run/enabled values.
-            async with collection.watch(
+            # watch() is a coroutine in the pymongo native-async API; it must be
+            # awaited to obtain the AsyncChangeStream before entering it.
+            change_stream = await collection.watch(
                 full_document="updateLookup",
-            ) as stream:
+            )
+            async with change_stream as stream:
                 logger.info("Change stream open on scheduled_newsletters")
                 await _reconcile_jobs_from_db(scheduler)
 

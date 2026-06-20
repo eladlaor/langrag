@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.5] - 2026-06-20
+
+### Fixed
+- **Remaining unawaited pymongo native-async coroutine calls:** in the pymongo native-async API (4.16), `AsyncCollection.aggregate()` and `AsyncCollection.watch()` are coroutines that must be awaited before use. v1.17.4 fixed `list_search_indexes()`; this completes the class. Fifteen aggregate sites called `.to_list()` (or iterated the cursor) on the un-awaited coroutine, and the scheduler change-stream watcher entered `async with collection.watch(...)` without awaiting it, all of which raised `AttributeError` at runtime. Each site now awaits the coroutine first, then consumes the resulting cursor or change stream. Affects RAG retrieval (vector and hybrid search, fired on every `/api/rag` query), observability run search/stats, agent-memory hybrid search and namespace listing, the data-layer cache/chunks/discussions/extraction/room-id/translation repositories, the RAG `list_rag_sources` MCP tool, and the scheduled-newsletter change-stream watcher.
+
 ## [1.17.4] - 2026-06-20
 
 ### Fixed
@@ -26,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.17.2] - 2026-06-19
 
 ### Added
+- **Automated daily MongoDB backup to Google Cloud Storage:** closes the standing durability gap (prod data existed only in local Docker volumes on a single Hetzner host with no second copy). A profile-gated `mongo-backup` Compose sidecar (`scripts/backup/Dockerfile`, mongodb-database-tools + gcloud) runs `mongodump --archive --gzip` of the `langrag` DB over the Docker network and uploads to `gs://langrag-499615-langrag-backups/langrag/daily/`, promoting the 1st-of-month dump to a `monthly/` tier; a host systemd timer (`scripts/backup/systemd/`) fires it daily at 03:30 with missed-run catch-up. Retention is a GCS lifecycle rule (daily 30d, monthly → Coldline at 30d then deleted at 365d). A least-privilege service account (`roles/storage.objectAdmin` on the one bucket) authenticates the sidecar. `scripts/backup/restore_verify.sh` proves recoverability by restoring the latest archive into a throwaway Mongo and asserting collection counts. Backup config lives as constants in `src/constants.py` (single source of truth, mirrored into the sidecar env). Documented in `knowledge/deployment/DEPLOYMENT_GUIDE.md`; full design in `knowledge/plans/MONGODB_BACKUP_GCS.md`.
 - **Extraction-cache message auto-split (16MB BSON ceiling protection):** the extraction-cache parent document no longer embeds the message array inline. Messages are now sharded across a companion `extraction_cache_chunks` collection (2000 messages per chunk), so a wide date range over a busy chat can never push a single document toward MongoDB's 16MB BSON limit. The split is transparent to callers: reads re-attach a fully assembled `messages` list onto the parent. Write ordering is crash-safe (chunks written first, parent `chunk_count` flipped last) and reads fail safe (a chunk-count or length mismatch is treated as a cache miss, never served truncated). The chunk collection carries its own unique `{cache_key, chunk_index}` index and a TTL on the same clock as the parent; legacy inline-array parents are read back directly until they expire.
 - **Bulk poll persistence:** `PollsRepository.create_polls_bulk` upserts a whole batch of polls in one `ordered=False` bulk write keyed on `poll_id` (mirroring the discussions and messages bulk paths). `RunTracker.store_polls` now routes through it instead of a per-poll `create()` loop, and is fail-fast: a write error propagates with per-op details rather than being masked as a partial count that is indistinguishable from "fewer polls existed".
 - **Query-plan regression test:** new Docker-gated integration suite (`tests/integration/db/test_query_plans.py`) runs each hot query through `.explain("executionStats")` and asserts the winning plan is index-backed (IXSCAN, never COLLSCAN) with a sane examined/returned ratio, turning the index reasoning in `src/db/indexes.py` into runtime-verified evidence. The mongot vector path is covered by a lighter queryable-index assertion that skips when mongot is absent.
@@ -346,7 +352,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.4...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.5...HEAD
+[1.17.5]: https://github.com/eladlaor/langrag/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/eladlaor/langrag/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/eladlaor/langrag/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/eladlaor/langrag/compare/v1.17.1...v1.17.2
