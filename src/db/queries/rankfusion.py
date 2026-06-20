@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 RRF_RAW_SCORE_FIELD = "rrf_score"
 
 
+#  Name $rankFusion assigns to the vector input pipeline. Used both as the
+#  combination-weight key and to locate the vector leg inside `scoreDetails`.
+_VECTOR_PIPELINE_NAME = "vector"
+_LEXICAL_PIPELINE_NAME = "lexical"
+
+
 def build_rankfusion_pipeline(
     vector_stage: dict[str, Any],
     lexical_pipeline: list[dict[str, Any]],
@@ -47,7 +53,7 @@ def build_rankfusion_pipeline(
     top_k: int,
     score_details: bool = False,
     drop_id: bool = True,
-    vector_extra_stages: list[dict[str, Any]] | None = None,
+    capture_vector_score_field: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build a `$rankFusion` aggregation pipeline.
 
@@ -68,43 +74,74 @@ def build_rankfusion_pipeline(
         drop_id: When True, the trailing `$project` strips `_id`. Set to
             False if the caller needs the document `_id` to survive (e.g.,
             for downstream `update_one` / `delete_one` on the same doc).
-        vector_extra_stages: Optional stages appended to the vector leg right
-            after `$vectorSearch` — e.g. an `$addFields` that captures
-            `$meta:"vectorSearchScore"` so the cosine survives fusion (used by
-            the RAG relevance floor). `$meta` for the vector score is only valid
-            immediately after `$vectorSearch`, hence it must live in the leg.
+        capture_vector_score_field: When set, the vector leg's per-pipeline
+            score (the normalized `vectorSearchScore`, `(1 + cosine) / 2`) is
+            extracted from `$rankFusion`'s `scoreDetails` into this field on
+            every output document, so a caller can apply a relevance floor on
+            the vector leg after fusion. This is the *only* supported way to
+            surface the vector-leg score: `$rankFusion` input pipelines must be
+            selection-only (no `$addFields`/`$set` — server error 9191103), so
+            the score cannot be captured with an in-leg `$addFields`. Setting
+            this forces `scoreDetails` on regardless of the `score_details` arg.
 
     Returns:
-        A list of aggregation stages: [$rankFusion, $addFields, $limit, $project].
+        A list of aggregation stages: [$rankFusion, $addFields, ($addFields), $limit, $project].
     """
-    vector_pipeline: list[dict[str, Any]] = [vector_stage]
-    if vector_extra_stages:
-        vector_pipeline.extend(vector_extra_stages)
-
     rank_fusion_stage: dict[str, Any] = {
         "$rankFusion": {
             "input": {
                 "pipelines": {
-                    "vector": vector_pipeline,
-                    "lexical": list(lexical_pipeline),
+                    _VECTOR_PIPELINE_NAME: [vector_stage],
+                    _LEXICAL_PIPELINE_NAME: list(lexical_pipeline),
                 }
             },
             "combination": {
                 "weights": {
-                    "vector": vector_weight,
-                    "lexical": lexical_weight,
+                    _VECTOR_PIPELINE_NAME: vector_weight,
+                    _LEXICAL_PIPELINE_NAME: lexical_weight,
                 }
             },
         }
     }
-    if score_details:
+    # scoreDetails is required to recover the per-leg vector score after fusion.
+    if score_details or capture_vector_score_field:
         rank_fusion_stage["$rankFusion"]["scoreDetails"] = True
 
     pipeline: list[dict[str, Any]] = [
         rank_fusion_stage,
         {"$addFields": {RRF_RAW_SCORE_FIELD: {"$meta": "score"}}},
-        {"$limit": top_k},
     ]
+
+    if capture_vector_score_field:
+        # Pull the vector leg's `value` out of scoreDetails.details[]. This runs
+        # AFTER $rankFusion (a normal $addFields, allowed here), so it sidesteps
+        # the selection-only restriction on input pipelines. A chunk that only
+        # surfaced via the lexical leg has no vector entry -> default 0.0, which
+        # makes it fail any relevance floor (the intended behavior).
+        pipeline.append(
+            {
+                "$addFields": {
+                    capture_vector_score_field: {
+                        "$let": {
+                            "vars": {
+                                "vector_leg": {
+                                    "$first": {
+                                        "$filter": {
+                                            "input": {"$ifNull": [{"$getField": {"field": "details", "input": {"$meta": "scoreDetails"}}}, []]},
+                                            "as": "leg",
+                                            "cond": {"$eq": ["$$leg.inputPipelineName", _VECTOR_PIPELINE_NAME]},
+                                        }
+                                    }
+                                }
+                            },
+                            "in": {"$ifNull": ["$$vector_leg.value", 0.0]},
+                        }
+                    }
+                }
+            }
+        )
+
+    pipeline.append({"$limit": top_k})
     if drop_id:
         pipeline.append({"$project": {"_id": 0}})
     return pipeline

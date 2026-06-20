@@ -39,7 +39,10 @@ class _SpyCollection:
         self.last_pipeline: list[dict] | None = None
         self._results = results or []
 
-    def aggregate(self, pipeline):
+    # `aggregate` is a coroutine in pymongo's native-async API: callers must
+    # `await collection.aggregate(...)` to get the cursor. Model that here so the
+    # mock matches the driver (a sync mock previously masked the missing-await bug).
+    async def aggregate(self, pipeline):
         self.last_pipeline = pipeline
         return _FakeCursor(self._results)
 
@@ -138,12 +141,15 @@ async def test_num_candidates_capped():
 
 
 @pytest.mark.asyncio
-async def test_score_details_off_by_default():
-    """scoreDetails has non-trivial query cost; it must be opt-in."""
+async def test_score_details_on_for_vector_floor():
+    """The RAG path always enables scoreDetails: it is the only way to recover
+    the vector leg's score after fusion (input pipelines are selection-only, so
+    the cosine cannot be captured with an in-leg $addFields). The relevance
+    floor depends on that captured score."""
     spy = _SpyCollection()
     await hybrid_search_chunks(spy, query_text="x", query_embedding=[0.0] * 4, top_k=5)
     rank_fusion = spy.last_pipeline[0]["$rankFusion"]
-    assert "scoreDetails" not in rank_fusion
+    assert rank_fusion["scoreDetails"] is True
 
 
 @pytest.mark.asyncio
@@ -217,25 +223,45 @@ class _RaisingCollection:
     def __init__(self, exc: Exception):
         self._exc = exc
 
-    def aggregate(self, pipeline):
+    async def aggregate(self, pipeline):
         raise self._exc
 
 
 @pytest.mark.asyncio
-async def test_vector_leg_captures_cosine_for_relevance_floor():
-    """The vector leg must capture $meta:vectorSearchScore right after
-    $vectorSearch so the cosine survives $rankFusion and a relevance floor can
-    be applied. $rankFusion fuses ranks, so the fused score alone cannot express
-    'everything is irrelevant'."""
+async def test_vector_leg_is_selection_only():
+    """$rankFusion input pipelines must be selection-only (no document-mutating
+    stages); a $addFields inside the vector leg triggers server error 9191103.
+    The vector leg must therefore be JUST $vectorSearch — the cosine is captured
+    post-fusion via scoreDetails, not in the leg."""
     spy = _SpyCollection()
     await hybrid_search_chunks(
         spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=0.5
     )
     vector_leg = spy.last_pipeline[0]["$rankFusion"]["input"]["pipelines"]["vector"]
-    # [$vectorSearch, $addFields(cosine)]
+    assert len(vector_leg) == 1, "vector leg must contain only $vectorSearch (selection-only)"
     assert "$vectorSearch" in vector_leg[0]
-    add_fields = vector_leg[1]["$addFields"]
-    assert add_fields[RAG_HYBRID_VECTOR_COSINE_FIELD] == {"$meta": "vectorSearchScore"}
+    # Guard against regressing to the forbidden in-leg $addFields.
+    assert not any("$addFields" in stage or "$set" in stage for stage in vector_leg)
+
+
+@pytest.mark.asyncio
+async def test_vector_cosine_captured_post_fusion():
+    """The vector cosine is recovered after fusion: a post-$rankFusion $addFields
+    extracts the vector leg's value from $meta:scoreDetails into the cosine field
+    that the relevance floor reads."""
+    spy = _SpyCollection()
+    await hybrid_search_chunks(
+        spy, query_text="x", query_embedding=[0.0] * 4, top_k=5, min_vector_score=0.5
+    )
+    # Find the post-fusion $addFields that populates the cosine field.
+    add_fields_stages = [
+        s["$addFields"] for s in spy.last_pipeline if "$addFields" in s
+    ]
+    capture = [af for af in add_fields_stages if RAG_HYBRID_VECTOR_COSINE_FIELD in af]
+    assert len(capture) == 1, "exactly one post-fusion stage must capture the vector cosine"
+    # The expression must read from scoreDetails (the only legal source post-fusion).
+    expr_str = str(capture[0][RAG_HYBRID_VECTOR_COSINE_FIELD])
+    assert "scoreDetails" in expr_str
 
 
 @pytest.mark.asyncio

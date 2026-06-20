@@ -114,3 +114,35 @@ def test_helper_matches_pre_refactor_pipeline_with_score_details():
         debug_score_details=True,
     )
     assert built == reference
+
+
+def test_capture_vector_score_keeps_legs_selection_only_and_extracts_post_fusion():
+    """When capturing the vector-leg score for a relevance floor, the vector
+    input pipeline MUST stay selection-only (no in-leg $addFields -> server
+    error 9191103). The score is instead pulled from scoreDetails by a
+    post-$rankFusion $addFields, and scoreDetails is forced on."""
+    built = build_rankfusion_pipeline(
+        vector_stage=VEC,
+        lexical_pipeline=LEX,
+        vector_weight=0.7,
+        lexical_weight=0.3,
+        top_k=20,
+        capture_vector_score_field="_vc",
+    )
+
+    rank_fusion = built[0]["$rankFusion"]
+    # scoreDetails is required to recover the per-leg score.
+    assert rank_fusion["scoreDetails"] is True
+    # The vector leg is JUST $vectorSearch — selection-only.
+    vector_leg = rank_fusion["input"]["pipelines"]["vector"]
+    assert vector_leg == [VEC]
+    assert not any("$addFields" in s or "$set" in s for s in vector_leg)
+
+    # Exactly one post-fusion $addFields captures the cosine, reading scoreDetails.
+    capture = [s["$addFields"] for s in built if "$addFields" in s and "_vc" in s["$addFields"]]
+    assert len(capture) == 1
+    assert "scoreDetails" in str(capture[0]["_vc"])
+
+    # Trailing shape still ends with limit + project.
+    assert "$limit" in built[-2]
+    assert built[-1] == {"$project": {"_id": 0}}

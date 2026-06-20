@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.7] - 2026-06-20
+
+### Fixed
+- **Hybrid RAG search failed with MongoDB error 9191103 on every query:** `$rankFusion` input pipelines are selection-only, so the in-leg `$addFields` that captured `$meta:"vectorSearchScore"` for the relevance floor was rejected by the server (`$addFields is not a selection stage`), 500ing every hybrid query. The vector leg is now strictly `$vectorSearch`, `scoreDetails` is enabled on `$rankFusion`, and the vector leg's normalized score is extracted from `$meta:"scoreDetails"` by a post-fusion `$addFields` into the cosine field the relevance floor reads. The captured score stays in the same `(1 + cosine) / 2` domain as the vector-only path, so `min_vector_score` remains comparable. Verified against real data on MongoDB 8.2.9 that hybrid queries now return fused results with the captured score intact.
+
 ## [1.17.6] - 2026-06-20
 
 ### Fixed
@@ -357,7 +362,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.5...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.7...HEAD
+[1.17.7]: https://github.com/eladlaor/langrag/compare/v1.17.6...v1.17.7
 [1.17.6]: https://github.com/eladlaor/langrag/compare/v1.17.5...v1.17.6
 [1.17.5]: https://github.com/eladlaor/langrag/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/eladlaor/langrag/compare/v1.17.3...v1.17.4

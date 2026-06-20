@@ -153,12 +153,12 @@ async def hybrid_search_chunks(
     # emit the un-normalized RRF score under search_score: it would silently
     # break MMR (lambda * relevance collapses to ~0 when relevance is RRF).
     # Capture the vector-leg cosine on each candidate so we can apply a relevance
-    # floor after fusion. $meta:"vectorSearchScore" is only valid in the stage
-    # immediately following $vectorSearch, so it must live inside the vector leg.
-    vector_extra_stages = [
-        {"$addFields": {RAG_HYBRID_VECTOR_COSINE_FIELD: {"$meta": "vectorSearchScore"}}}
-    ]
-
+    # floor after fusion. $rankFusion input pipelines are selection-only, so we
+    # CANNOT inject an `$addFields {$meta:"vectorSearchScore"}` into the vector
+    # leg (server error 9191103). Instead the builder enables scoreDetails and
+    # extracts the vector leg's normalized score into RAG_HYBRID_VECTOR_COSINE_FIELD
+    # post-fusion. That score is the same `(1 + cosine) / 2` domain as the
+    # vector-only path, so the min_vector_score floor below stays comparable.
     pipeline = build_rankfusion_pipeline(
         vector_stage=vector_stage,
         lexical_pipeline=lexical_pipeline,
@@ -166,7 +166,7 @@ async def hybrid_search_chunks(
         lexical_weight=lexical_weight,
         top_k=top_k,
         score_details=debug_score_details,
-        vector_extra_stages=vector_extra_stages,
+        capture_vector_score_field=RAG_HYBRID_VECTOR_COSINE_FIELD,
     )
 
     try:
