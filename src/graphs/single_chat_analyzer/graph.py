@@ -2,17 +2,11 @@
 Newsletter Generation Workflow - LangGraph 1.0 Implementation
 
 This module implementing the complete newsletter generation pipeline as a LangGraph StateGraph.
-Processing individual chats through extraction, SLM pre-filtering, preprocessing, translation,
+Processing individual chats through extraction, preprocessing, translation,
 discussion separation, ranking, content generation, link enrichment, and final translation stages.
 
 Workflow: Periodic Newsletter (Multi-day date range)
-Pipeline: extract → slm_prefilter → extract_images → preprocess → translate → separate → rank → associate_images → generate → enrich_links → translate_final
-
-SLM Pre-filtering (optional, controlled by SLM_ENABLED):
-- Uses local Ollama SLM to classify messages as KEEP/FILTER/UNCERTAIN
-- Reduces expensive LLM API calls by 15-30% by filtering low-quality messages
-- Fail-soft: if SLM unavailable, continues without filtering
-- Fail-safe: UNCERTAIN messages continue to LLM pipeline
+Pipeline: extract → extract_images → preprocess → translate → separate → slm_enrichment → rank → associate_images → generate → enrich_links → translate_final
 
 Architecture:
 - Linear flow (no conditional routing)
@@ -104,7 +98,6 @@ from graphs.single_chat_analyzer.generate_content_helpers import (
     score_newsletter_if_available,
     log_mongodb_persistence_success,
 )
-from graphs.single_chat_analyzer.slm_prefilter import slm_prefilter_node
 
 
 # Configuring logging
@@ -117,6 +110,33 @@ logger = logging.getLogger(__name__)
 
 # NOTE: ensure_valid_session node removed - now running once at orchestrator level (parallel_orchestrator.py)
 # Preventing parallel login attempts from all workers that cause rate limiting
+
+
+async def _persist_raw_messages_to_mongodb(
+    mongodb_run_id: str | None,
+    chat_name: str,
+    data_source_name: str,
+    messages: list[dict],
+) -> None:
+    """
+    Persist all raw extracted messages to MongoDB.
+
+    Fail-hard: the raw message corpus is source-of-truth data, so a persistence
+    failure aborts the run rather than silently leaving a partial corpus behind
+    (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+    """
+    if not mongodb_run_id:
+        return
+
+    from db.run_tracker import get_tracker
+
+    tracker = get_tracker()
+    try:
+        count = await tracker.store_raw_messages(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, messages=messages)
+    except Exception as e:
+        logger.error("Failed to persist raw messages to MongoDB", extra={"event": "store_raw_messages_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "message_count": len(messages), "error": str(e)})
+        raise
+    logger.info(f"Persisted {count}/{len(messages)} raw messages to MongoDB for chat {chat_name}")
 
 
 @with_logging
@@ -263,6 +283,7 @@ async def extract_messages(state: SingleChatState, config: RunnableConfig | None
         # Checking message count and adding diagnostic if unexpectedly low
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
         message_count = None
+        messages = None
         try:
             messages = await load_json_async(decrypted_file_path)
             message_count = len(messages) if isinstance(messages, list) else 0
@@ -273,6 +294,12 @@ async def extract_messages(state: SingleChatState, config: RunnableConfig | None
                 diagnostics.info(category=DIAGNOSTIC_CATEGORY_EXTRACTION, message=f"Low message count: only {message_count} messages extracted for date range {start_date} to {end_date}", node_name="extract_messages", details={"message_count": message_count, "chat_name": chat_name, "date_range": f"{start_date} to {end_date}"})
         except Exception as e:
             logger.warning(f"Failed to check message count: {e}")
+
+        # Persisting the raw message corpus to MongoDB (source-of-truth data).
+        # Fail-hard: a persistence failure aborts the run rather than leaving a
+        # partial corpus behind (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+        if mongodb_run_id and isinstance(messages, list):
+            await _persist_raw_messages_to_mongodb(mongodb_run_id=mongodb_run_id, chat_name=chat_name, data_source_name=source_name, messages=messages)
 
         result = {Keys.EXTRACTED_FILE_PATH: decrypted_file_path, Keys.REUSED_EXISTING: False, Keys.MESSAGE_COUNT: message_count}
 
@@ -477,12 +504,26 @@ async def separate_discussions(state: SingleChatState, config: RunnableConfig | 
 
         # Counting discussions
         discussions_count = None
+        discussions = []
         try:
             data = await load_json_async(expected_file)
             discussions = data.get(DiscussionKeys.DISCUSSIONS, []) if isinstance(data, dict) else data
             discussions_count = len(discussions) if isinstance(discussions, list) else 0
         except Exception as e:
             logger.warning(f"Failed to count discussions: {e}")
+
+        # Persist the RAW (pre-rank, pre-merge) per-chat discussions to the
+        # raw_discussions collection, stamped with community + exact group name.
+        # Fail-hard: these are the source-of-truth pre-consolidation segmentation.
+        mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
+        if mongodb_run_id and isinstance(discussions, list) and discussions:
+            tracker = get_tracker()
+            try:
+                raw_count = await tracker.store_raw_discussions(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, discussions=discussions)
+                logger.info(f"Persisted {raw_count} raw discussions for chat: {chat_name}")
+            except Exception as e:
+                logger.error("Failed to persist raw discussions to MongoDB", extra={"event": "store_raw_discussions_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "error": str(e)})
+                raise
 
         result = {Keys.SEPARATE_DISCUSSIONS_FILE_PATH: expected_file}
         if discussions_count is not None:
@@ -559,8 +600,9 @@ async def rank_discussions(state: SingleChatState, config: RunnableConfig | None
 
             tracker = get_tracker()
             chat_name = state[Keys.CHAT_NAME]
+            data_source_name = state.get(Keys.DATA_SOURCE_NAME)
             try:
-                stored_count = await tracker.store_discussions(run_id=mongodb_run_id, chat_name=chat_name, discussions=ranked_discussions if isinstance(ranked_discussions, list) else [])
+                stored_count = await tracker.store_discussions(run_id=mongodb_run_id, chat_name=chat_name, discussions=ranked_discussions if isinstance(ranked_discussions, list) else [], data_source_name=data_source_name)
             except Exception as e:
                 logger.error("Failed to persist discussions to MongoDB", extra={"event": "store_discussions_failed", "run_id": mongodb_run_id, "chat_name": chat_name, "error": str(e)})
                 raise
@@ -905,16 +947,13 @@ def build_newsletter_generation_graph() -> StateGraph:
     Building and compiling the newsletter generation workflow graph.
 
     Graph Structure:
-    START → setup_directories → extract_messages → slm_prefilter → extract_images →
+    START → setup_directories → extract_messages → extract_images →
     preprocess_messages → translate_messages → separate_discussions → slm_enrichment →
     rank_discussions → generate_content → enrich_with_links → translate_final_summary → END
 
     Note: Session validation (ensure_valid_session) now running once at orchestrator level
     (parallel_orchestrator.py) before workers are dispatched, preventing rate limiting
     from parallel login attempts.
-
-    SLM pre-filter is optional and controlled by SLM_ENABLED config.
-    If disabled or unavailable, the node passes through without modification (fail-soft).
 
     Returns:
         Compiled StateGraph with checkpointing enabled
@@ -929,7 +968,6 @@ def build_newsletter_generation_graph() -> StateGraph:
     # to avoid parallel login attempts that cause rate limiting
     builder.add_node(NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES, setup_directories)
     builder.add_node(NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES, extract_messages)
-    builder.add_node(NodeNames.SingleChatAnalyzer.SLM_PREFILTER, slm_prefilter_node)  # SLM pre-filtering (optional, controlled by SLM_ENABLED)
     builder.add_node(NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES, extract_images_node)  # Image extraction (optional, controlled by VISION_ENABLED)
     builder.add_node(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, preprocess_messages)
     builder.add_node(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, translate_messages)
@@ -945,8 +983,7 @@ def build_newsletter_generation_graph() -> StateGraph:
     # NOTE: Session validation now happening once at orchestrator level before workers start
     builder.add_edge(START, NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.SETUP_DIRECTORIES, NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES)
-    builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES, NodeNames.SingleChatAnalyzer.SLM_PREFILTER)  # SLM pre-filter after extraction
-    builder.add_edge(NodeNames.SingleChatAnalyzer.SLM_PREFILTER, NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES)
+    builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_MESSAGES, NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.EXTRACT_IMAGES, NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.PREPROCESS_MESSAGES, NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES)
     builder.add_edge(NodeNames.SingleChatAnalyzer.TRANSLATE_MESSAGES, NodeNames.SingleChatAnalyzer.SEPARATE_DISCUSSIONS)

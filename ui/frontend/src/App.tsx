@@ -12,6 +12,7 @@ import { ResultsDisplay } from "./components/ResultsDisplay";
 import { RunsBrowser } from "./components/RunsBrowser";
 import { SchedulesPage } from "./components/SchedulesPage";
 import { RAGChatPage } from "./components/rag/RAGChatPage";
+import { AgentKeyManager } from "./components/agent/AgentKeyManager";
 import { UsersAdmin } from "./components/admin/UsersAdmin";
 import { AccessRequestsAdmin } from "./components/admin/AccessRequestsAdmin";
 import { ExtractedImagesGallery } from "./components/admin/ExtractedImagesGallery";
@@ -80,6 +81,10 @@ function App() {
 
             <Tab eventKey="knowledge-chat" title="Knowledge Chat">
               <RAGChatPage />
+            </Tab>
+
+            <Tab eventKey="agent" title="Agent">
+              {activeTab === "agent" && <AgentKeyManager />}
             </Tab>
 
             {isAdmin && (

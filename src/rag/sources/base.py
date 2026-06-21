@@ -29,6 +29,7 @@ class ContentChunk(BaseModel):
     chunk_index: int = Field(description="Position of this chunk within the parent source")
     source_date_start: datetime = Field(description="Earliest date the source content covers (UTC)")
     source_date_end: datetime = Field(description="Latest date the source content covers (UTC); equals source_date_start for point-in-time sources")
+    data_source_name: str | None = Field(default=None, description="Community key (e.g. 'langtalks'), promoted to a top-level chunk field so retrieval can pre-filter by community. None for non-community sources like podcasts.")
     metadata: dict = Field(default_factory=dict, description="Source-specific metadata (timestamps, speakers, etc.)")
 
     @model_validator(mode="after")

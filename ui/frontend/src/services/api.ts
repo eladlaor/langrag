@@ -37,6 +37,8 @@ import {
 } from "../types";
 import { RAG_API_ROUTES } from "../constants/rag";
 import {
+  AgentApiKeyIssued,
+  AgentApiKeySummary,
   AgentMemoryItem,
   AgentSessionSummary,
   CreateSessionRequest,
@@ -662,6 +664,40 @@ export const agentApi = {
       body: JSON.stringify(prefs),
     });
     return handleResponse<RagPreferences>(response);
+  },
+};
+
+// ============================================================================
+// Agent API key management — cookie-gated (no X-API-Key; a user mints their
+// first key here). Backed by /api/users/me/agent-keys.
+// ============================================================================
+
+export const agentKeysApi = {
+  async issue(name: string): Promise<AgentApiKeyIssued> {
+    const response = await fetch(`${API_BASE_URL}/api/users/me/agent-keys`, {
+      method: "POST",
+      credentials: FETCH_CREDENTIALS,
+      headers: { [HEADER_CONTENT_TYPE]: CONTENT_TYPE_JSON },
+      body: JSON.stringify({ name }),
+    });
+    return handleResponse<AgentApiKeyIssued>(response);
+  },
+
+  async list(): Promise<AgentApiKeySummary[]> {
+    const response = await fetch(`${API_BASE_URL}/api/users/me/agent-keys`, {
+      credentials: FETCH_CREDENTIALS,
+    });
+    return handleResponse<AgentApiKeySummary[]>(response);
+  },
+
+  async revoke(keyId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/users/me/agent-keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE", credentials: FETCH_CREDENTIALS }
+    );
+    if (!response.ok) {
+      throw new ApiError(response.status, `HTTP ${response.status}`);
+    }
   },
 };
 

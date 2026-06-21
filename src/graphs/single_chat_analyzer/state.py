@@ -111,7 +111,6 @@ class SingleChatState(TypedDict):
     message_count: int | None  # Number of messages processed
     discussion_count: int | None  # Number of separated discussions (set by separate_discussions node)
     reused_existing: bool | None  # Whether existing files were reused (not regenerated)
-    slm_filter_stats: dict | None  # SLM pre-filter statistics (from slm_prefilter node)
 
     # === Worker Isolation ===
     worker_store_path: str | None  # Per-worker copy of Matrix encryption store (prevents SQLite concurrent access)
@@ -239,7 +238,6 @@ def create_single_chat_state(*, chat_name: str, data_source_name: str, start_dat
         "message_count": None,
         "discussion_count": None,
         "reused_existing": None,
-        "slm_filter_stats": None,
         # === Worker Isolation ===
         "worker_store_path": kwargs.get("worker_store_path"),
         # === MongoDB Integration ===

@@ -75,6 +75,7 @@ async def hybrid_search_chunks(
     content_sources: list[str] | None = None,
     date_start: datetime | None = None,
     date_end: datetime | None = None,
+    data_source_names: list[str] | None = None,
     top_k: int = 20,
     vector_weight: float = RAG_HYBRID_VECTOR_WEIGHT,
     lexical_weight: float = RAG_HYBRID_LEXICAL_WEIGHT,
@@ -114,6 +115,9 @@ async def hybrid_search_chunks(
         pre_filter[Keys.SOURCE_DATE_START] = {"$lte": date_end}
     if date_start is not None:
         pre_filter[Keys.SOURCE_DATE_END] = {"$gte": date_start}
+    # Community pre-filter (vector leg). Podcasts (null) excluded when set.
+    if data_source_names:
+        pre_filter[Keys.DATA_SOURCE_NAME] = {"$in": data_source_names}
 
     query_vector_bin = Binary.from_vector(
         list(query_embedding),
@@ -141,7 +145,7 @@ async def hybrid_search_chunks(
     # before scoring, instead of being filtered post-hoc with a downstream
     # $match. This keeps the Lucene candidate set bounded and avoids paying
     # to score documents that will be discarded.
-    lexical_search_stage = _build_lexical_search_stage(query_text, content_sources, date_start, date_end)
+    lexical_search_stage = _build_lexical_search_stage(query_text, content_sources, date_start, date_end, data_source_names)
     lexical_pipeline: list[dict[str, Any]] = [
         lexical_search_stage,
         {"$limit": top_k * 4},
@@ -201,6 +205,7 @@ def _build_lexical_search_stage(
     content_sources: list[str] | None,
     date_start: datetime | None,
     date_end: datetime | None,
+    data_source_names: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the lexical $search stage with filter clauses pushed into compound.
 
@@ -221,6 +226,9 @@ def _build_lexical_search_stage(
         filter_clauses.append({"range": {"path": Keys.SOURCE_DATE_START, "lte": date_end}})
     if date_start is not None:
         filter_clauses.append({"range": {"path": Keys.SOURCE_DATE_END, "gte": date_start}})
+    # Community pre-filter (lexical leg), parity with the vector leg.
+    if data_source_names:
+        filter_clauses.append({"in": {"path": Keys.DATA_SOURCE_NAME, "value": data_source_names}})
 
     if not filter_clauses:
         return {

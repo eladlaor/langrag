@@ -37,15 +37,26 @@ async def rag_query(
     date_start: str | None = None,
     date_end: str | None = None,
     sources: list[str] | None = None,
+    communities: list[str] | None = None,
     mmr_lambda: float | None = None,
+    include_raw_messages: bool | None = None,
 ) -> dict[str, Any]:
     """Run the full RAG chain (retrieve + generate) and return a dated answer.
 
     Returns a dict with the answer text, citations (each carrying source dates),
     and the freshness summary so calling agents can render staleness warnings.
 
+    `communities` optionally restricts retrieval to specific communities
+    (data_source_name, e.g. ["langtalks"]); podcasts are excluded when set.
+
     `mmr_lambda` (0-1) optionally overrides the server default MMR relevance/
     diversity balance for this query; None falls back to the config default.
+
+    `include_raw_messages` (parent-document retrieval): when true, the retrieval
+    drills from each cited newsletter chunk down to the raw underlying messages
+    and injects them into the generator's context as a primary-sources section,
+    so the answer can draw on the original messages, not just the summary. None
+    falls back to the config default.
     """
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
@@ -58,7 +69,9 @@ async def rag_query(
         content_sources=sources,
         date_start=ds,
         date_end=de,
+        data_source_names=communities,
         mmr_lambda=mmr_lambda,
+        include_raw_messages=include_raw_messages,
     )
 
     if not retrieval["context"]:
@@ -93,13 +106,22 @@ async def rag_search(
     date_start: str | None = None,
     date_end: str | None = None,
     sources: list[str] | None = None,
+    communities: list[str] | None = None,
     top_k: int | None = None,
     mmr_lambda: float | None = None,
+    include_raw_messages: bool | None = None,
 ) -> dict[str, Any]:
     """Run retrieval only — no LLM call. Returns reranked citations with source dates.
 
+    `communities` optionally restricts retrieval to specific communities
+    (data_source_name, e.g. ["langtalks"]); podcasts are excluded when set.
+
     `mmr_lambda` (0-1) optionally overrides the server default MMR relevance/
     diversity balance for this query; None falls back to the config default.
+
+    `include_raw_messages` (parent-document retrieval): when true, each returned
+    citation also carries the raw underlying messages behind that chunk
+    (`parent_messages`). None falls back to the config default.
     """
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
@@ -112,8 +134,10 @@ async def rag_search(
         content_sources=sources,
         date_start=ds,
         date_end=de,
+        data_source_names=communities,
         rerank_top_k=top_k,
         mmr_lambda=mmr_lambda,
+        include_raw_messages=include_raw_messages,
     )
 
     return {

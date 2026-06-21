@@ -106,6 +106,10 @@ ROUTE_AUTH_CONFIG = "/auth/config"
 # saved value (or config default when unset); PUT persists a new value.
 ROUTE_USER_RAG_PREFERENCES = "/users/me/rag-preferences"
 
+# Per-user agent API key management. Cookie-session gated (a user has no agent
+# API key before minting one), distinct from the X-API-Key gate on /api/agent/*.
+ROUTE_USER_AGENT_KEYS = "/users/me/agent-keys"
+
 # Structured machine-readable code returned in the signup 403 body when the
 # email is not on the allowlist. The frontend branches on this to show the
 # invite-only rejection screen.
@@ -211,7 +215,6 @@ HTML_LANG_ENGLISH = "en"
 # ============================================================================
 
 DIAGNOSTIC_CATEGORY_EXTRACTION = "extraction"
-DIAGNOSTIC_CATEGORY_SLM_FILTER = "slm_filter"
 DIAGNOSTIC_CATEGORY_LINK_ENRICHMENT = "link_enrichment"
 
 
@@ -277,6 +280,7 @@ LANGTALKS_I18N = {
         "merged_discussed_in": "📍 נדון ב-{count} קבוצות: {groups}",
         "merged_attribution_header": "📅 **נדון בקבוצות הבאות:**",
         "merged_started_at": "התחיל ב-{date}, {time}",
+        "images_shared_heading": "🖼️ תמונות ששותפו",
     },
     "english": {
         "footer_thanks": "Thanks for reading!",
@@ -289,6 +293,7 @@ LANGTALKS_I18N = {
         "merged_discussed_in": "📍 Discussed in {count} groups: {groups}",
         "merged_attribution_header": "📅 **Discussed in the following groups:**",
         "merged_started_at": "started on {date}, {time}",
+        "images_shared_heading": "🖼️ Images shared",
     },
 }
 
@@ -401,6 +406,7 @@ APP_DESCRIPTION = "Newsletter generation from WhatsApp group chats using LangGra
 # ============================================================================
 
 HTTP_STATUS_OK = 200
+HTTP_STATUS_NO_CONTENT = 204
 HTTP_STATUS_FOUND = 302
 HTTP_STATUS_BAD_REQUEST = 400
 HTTP_STATUS_UNAUTHORIZED = 401
@@ -424,6 +430,10 @@ HTTP_DETAIL_INTERNAL_ERROR = "Internal server error"
 COLLECTION_RUNS = "runs"
 COLLECTION_MESSAGES = "messages"
 COLLECTION_DISCUSSIONS = "discussions"
+# Raw, pre-rank/pre-merge per-chat discussions (output of separate_discussions),
+# persisted separately from the ranked `discussions` collection. Each doc is
+# stamped with data_source_name (community) + chat_name (exact group).
+COLLECTION_RAW_DISCUSSIONS = "raw_discussions"
 COLLECTION_LLM_RESPONSE_CACHE = "llm_response_cache"
 COLLECTION_BATCH_JOBS = "batch_jobs"
 COLLECTION_NEWSLETTERS = "newsletters"
@@ -769,9 +779,6 @@ class LlmInputPurposes(StrEnum):
     TRANSLATE_SUMMARY = "translate_summary"
     GENERATE_CONTENT_WA_COMMUNITY_LANGTALKS_NEWSLETTER = "generate_content_wa_community_langtalks_newsletter"
 
-    # Anti-repetition validation
-    CHECK_REPETITION = "check_repetition"
-
     # Vision purposes
     DESCRIBE_IMAGE = "describe_image"
 
@@ -785,7 +792,6 @@ class NodeNames:
     class SingleChatAnalyzer(StrEnum):
         SETUP_DIRECTORIES = "setup_directories"
         EXTRACT_MESSAGES = "extract_messages"
-        SLM_PREFILTER = "slm_prefilter"
         EXTRACT_IMAGES = "extract_images"
         PREPROCESS_MESSAGES = "preprocess_messages"
         TRANSLATE_MESSAGES = "translate_messages"

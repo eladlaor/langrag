@@ -43,6 +43,13 @@ class SummarizedDiscussion(BaseModel):
     is_merged: bool | None = Field(default=False, description="True if this discussion combines multiple source groups")
     source_discussions: list[DiscussionSource] | None = Field(default=None, description="For merged discussions: list of source groups with timestamps")
 
+    # Verified image-caption metadata surfaced from the vision pipeline's image manifest.
+    # Optional + default None for backward compatibility (existing JSON/tests still validate).
+    image_descriptions: list[str] | None = Field(
+        default=None,
+        description="Verified vision-LLM descriptions of images shared in this discussion (capped per discussion).",
+    )
+
 
 class LlmResponseLangTalksNewsletterContent(BaseModel):
     """

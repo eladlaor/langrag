@@ -30,6 +30,7 @@ async def vector_search_chunks(
     content_sources: list[str] | None = None,
     date_start: datetime | None = None,
     date_end: datetime | None = None,
+    data_source_names: list[str] | None = None,
     top_k: int = 20,
     min_score: float = 0.5,
 ) -> list[dict[str, Any]]:
@@ -67,6 +68,10 @@ async def vector_search_chunks(
         pre_filter[Keys.SOURCE_DATE_START] = {"$lte": date_end}
     if date_start is not None:
         pre_filter[Keys.SOURCE_DATE_END] = {"$gte": date_start}
+    # Community pre-filter. Podcast chunks have data_source_name=null and are
+    # excluded when a community filter is set (they are not community-scoped).
+    if data_source_names:
+        pre_filter[Keys.DATA_SOURCE_NAME] = {"$in": data_source_names}
 
     # Encode the query vector as BSON Binary subtype 9 (FLOAT32). MongoDB 8.1+
     # accepts BinData queryVectors against scalar-quantized vector indexes and

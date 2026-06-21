@@ -54,6 +54,30 @@ class CurrentUser(BaseModel):
     communities: list[str] = Field(default_factory=list, description="Community keys this user may act on.")
 
 
+class AgentApiKeyIssueRequest(BaseModel):
+    """Request body for POST /users/me/agent-keys."""
+
+    name: str = Field(default="", max_length=120, description="Human-readable label for the key (e.g. 'laptop', 'cli').")
+
+
+class AgentApiKeyIssued(BaseModel):
+    """Response for a freshly issued key. `plaintext` is returned exactly once."""
+
+    key_id: str = Field(..., description="Stable identifier for the key (safe to display/store).")
+    name: str = Field(..., description="Human-readable label.")
+    plaintext: str = Field(..., description="The API key in cleartext — shown once, never retrievable again.")
+
+
+class AgentApiKeySummary(BaseModel):
+    """A user's key as listed back to them (no hash, no plaintext)."""
+
+    key_id: str = Field(..., description="Stable identifier for the key.")
+    name: str = Field(..., description="Human-readable label.")
+    enabled: bool = Field(..., description="Whether the key is currently active.")
+    created_at: str | None = Field(default=None, description="ISO-8601 issue timestamp.")
+    last_used_at: str | None = Field(default=None, description="ISO-8601 timestamp of last successful auth, if any.")
+
+
 class RagPreferencesUpdate(BaseModel):
     """Request body for PUT /users/me/rag-preferences.
 

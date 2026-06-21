@@ -60,10 +60,11 @@ services:
       PYTHONUNBUFFERED: 1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
-      # SLM (Small Language Model) - Ollama message pre-filtering
-      SLM_ENABLED: ${SLM_ENABLED:-false}
-      SLM_MODEL: ${SLM_MODEL:-phi3:mini}
-      SLM_BASE_URL: ${SLM_BASE_URL:-http://ollama:11434}
+      # SLM Semantic Enrichment (in-process DeBERTa-v3 multi-label tagger)
+      SLM_ENRICHMENT_ENABLED: ${SLM_ENRICHMENT_ENABLED:-false}
+      SLM_ENRICHMENT_MODEL_NAME: ${SLM_ENRICHMENT_MODEL_NAME:-eladlaor/chat-message-tagger-deberta-v3}
+      SLM_ENRICHMENT_BATCH_SIZE: ${SLM_ENRICHMENT_BATCH_SIZE:-32}
+      SLM_ENRICHMENT_MAX_LENGTH: ${SLM_ENRICHMENT_MAX_LENGTH:-256}
 
       # Vision (Image Extraction & Understanding)
       VISION_ENABLED: ${VISION_ENABLED:-false}
@@ -83,6 +84,14 @@ services:
       # DeepEval (RAG quality evaluation)
       DEEPEVAL_ENABLED: ${DEEPEVAL_ENABLED:-false}
       DEEPEVAL_EVAL_MODEL: ${DEEPEVAL_EVAL_MODEL:-gpt-4.1-mini}
+
+      # Agentic chatbot (mounts /api/agent/* and /api/users/me/agent-keys)
+      AGENT_ENABLED: ${AGENT_ENABLED:-true}
+      AGENT_AGENT_MODEL: ${AGENT_AGENT_MODEL:-claude-sonnet-4-6}
+      AGENT_MEMORY_MODEL: ${AGENT_MEMORY_MODEL:-claude-opus-4-7}
+      AGENT_MAX_TOOL_CALLS_PER_TURN: ${AGENT_MAX_TOOL_CALLS_PER_TURN:-12}
+      AGENT_SUMMARIZE_THRESHOLD: ${AGENT_SUMMARIZE_THRESHOLD:-30}
+      AGENT_MEMORY_TOP_K: ${AGENT_MEMORY_TOP_K:-6}
 
       # Email delivery
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
@@ -251,6 +260,12 @@ services:
       # Batch worker settings
       BATCH_WORKER_POLL_INTERVAL: ${BATCH_WORKER_POLL_INTERVAL:-10}
       BATCH_WORKER_MAX_JOBS: ${BATCH_WORKER_MAX_JOBS:-1}
+
+      # SLM Semantic Enrichment (in-process DeBERTa-v3 multi-label tagger)
+      SLM_ENRICHMENT_ENABLED: ${SLM_ENRICHMENT_ENABLED:-false}
+      SLM_ENRICHMENT_MODEL_NAME: ${SLM_ENRICHMENT_MODEL_NAME:-eladlaor/chat-message-tagger-deberta-v3}
+      SLM_ENRICHMENT_BATCH_SIZE: ${SLM_ENRICHMENT_BATCH_SIZE:-32}
+      SLM_ENRICHMENT_MAX_LENGTH: ${SLM_ENRICHMENT_MAX_LENGTH:-256}
 
       # Application settings
       PYTHONUNBUFFERED: 1
@@ -603,41 +618,6 @@ services:
       - langrag-network
     restart: unless-stopped
 
-  # Ollama - Local SLM Inference Server
-  # Provides OpenAI-compatible API for CPU-optimized small language models
-  # Used for message pre-filtering to reduce expensive LLM API calls
-  ollama:
-    image: ollama/ollama:latest
-    container_name: langrag-ollama
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      # CPU optimization settings
-      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-4}
-      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
-    deploy:
-      resources:
-        limits:
-          memory: 6G
-        reservations:
-          memory: 3G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    networks:
-      - langrag-network
-    restart: unless-stopped
-
   # Prometheus - Metrics Collection
   # Time-series database for application performance metrics
   prometheus:
@@ -668,8 +648,6 @@ services:
 
 # Volumes
 volumes:
-  ollama_models:
-    driver: local
   n8n_data:
     driver: local
   mongodb_data:

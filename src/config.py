@@ -225,17 +225,18 @@ class LLMSettings(BaseSettings):
 class EmbeddingSettings(BaseSettings):
     """Embedding model and parameter configuration."""
 
-    default_model: str = Field(default="text-embedding-3-small", description="Default embedding model")
+    default_model: str = Field(default="text-embedding-3-large", description="Default embedding model. text-embedding-3-large (3072 dims) is used so the dense, jargon-heavy corpus separates near-duplicate concepts better than 3-small (1536); also unifies discussion + rag_chunks embeddings on one model/dim so a single query embedding can search both.")
     max_text_length: int = Field(default=8000, description="Maximum text length for embedding")
     batch_size: int = Field(default=100, description="Batch size for embedding multiple texts")
     discussion_batch_size: int = Field(default=50, description="Batch size for embedding discussions")
     # text-embedding-3-* models accept an optional `dimensions` parameter that
     # truncates the output vector via Matryoshka. Lets us A/B smaller dims
-    # (e.g. 512, 768) without swapping models. None = use the model's native
-    # full dimension. Existing chunks ARE NOT re-embedded when this changes;
-    # switching requires a full re-ingest because the vector index stores
-    # numDimensions at build time and HNSW comparisons require dim equality.
-    output_dimensions: int | None = Field(default=None, description="Optional OpenAI 'dimensions' override (Matryoshka truncation). When set, must match the vector index's numDimensions or queries will fail.")
+    # (e.g. 512, 768) without swapping models. Set to 3072 (3-large native) so
+    # discussions and rag_chunks share one dimension. Existing vectors ARE NOT
+    # re-embedded when this changes; switching requires a full re-ingest +
+    # vector-index rebuild because the index stores numDimensions at build time
+    # and HNSW comparisons require dim equality (see migration scripts).
+    output_dimensions: int | None = Field(default=3072, description="OpenAI 'dimensions' override. 3072 = text-embedding-3-large native. Must match the vector index's numDimensions or queries fail; changing it requires a re-embed + index rebuild.")
 
     model_config = SettingsConfigDict(env_prefix="EMBEDDING_")
 
@@ -419,31 +420,6 @@ class ProcessingSettings(BaseSettings):
 
 
 # ============================================================================
-# SLM (SMALL LANGUAGE MODEL) CONFIGURATION
-# ============================================================================
-
-
-class SLMSettings(BaseSettings):
-    """Small Language Model configuration for local inference via Ollama."""
-
-    enabled: bool = Field(default=False, description="Enable SLM-based message pre-filtering. Set to false to disable.")
-    classifier_mode: str = Field(default="ollama", description="Classifier mode: 'deberta' (HTTP sidecar) | 'ollama' | 'disabled'")
-    classifier_url: str = Field(default="http://slm-classifier:8090", description="DeBERTa classifier sidecar URL")
-    provider: str = Field(default="ollama", description="SLM provider (currently only 'ollama' supported)")
-    base_url: str = Field(default="http://ollama:11434", description="Ollama API base URL (use http://localhost:11434 outside Docker)")
-    model: str = Field(default="phi3:mini", description="Ollama model name for message classification")
-    fallback_model: str = Field(default="gemma2:2b", description="Fallback model if primary is unavailable")
-    confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0, description="Minimum confidence for classification (below this → UNCERTAIN)")
-    request_timeout_seconds: int = Field(default=60, description="Timeout for individual SLM requests")
-    max_retries: int = Field(default=2, description="Maximum retries for SLM requests")
-    batch_size: int = Field(default=10, description="Batch size for parallel message classification")
-    temperature: float = Field(default=0.1, description="Temperature for SLM inference (lower = more deterministic)")
-    max_tokens: int = Field(default=50, description="Maximum tokens for classification response")
-
-    model_config = SettingsConfigDict(env_prefix="SLM_")
-
-
-# ============================================================================
 # SLM ENRICHMENT CONFIGURATION
 # ============================================================================
 
@@ -526,6 +502,9 @@ class RAGSettings(BaseSettings):
     # MMR Diversity Settings (server default; overridable per user and per request)
     mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0, description="RAG MMR diversity weight (0-1). Higher favors relevance, lower favors diversity. 1.0 = pure relevance (no diversity rerank). Server default; overridable per user and per request.")
     enable_mmr_diversity: bool = Field(default=True, description="When false, RAG retrieval skips MMR and returns fused top-k by relevance (equivalent to lambda=1.0).")
+    include_raw_messages_default: bool = Field(default=False, description="Default for parent-document retrieval (D10): when true, retrieval expands selected chunks to the raw underlying messages via $lookup and injects them as a primary-sources context section. The agent can override per call; this is the fallback when no explicit value is passed.")
+    default_retrieval_window_days: int = Field(default=30, ge=0, description="Soft default date window for retrieval: when a caller passes NO date_start, retrieval defaults to now - this many days (community discourse moves fast, so recent content is the sensible default). An explicit date_start always overrides it (including older). 0 disables the default (unbounded search).")
+    parent_messages_per_chunk_cap: int = Field(default=40, ge=1, description="Max raw messages injected per chunk during parent-document expansion. Guards prompt size; truncation is logged, never silent.")
 
     # Podcast chunking
     podcast_chunk_size: int = Field(default=1000, description="Target chunk size in characters for podcast transcripts")
@@ -711,7 +690,6 @@ class Settings(BaseSettings):
     beeper: BeeperSettings = Field(default_factory=BeeperSettings)
     processing: ProcessingSettings = Field(default_factory=ProcessingSettings)
     ranking: RankingSettings = Field(default_factory=RankingSettings)
-    slm: SLMSettings = Field(default_factory=SLMSettings)
     slm_enrichment: SLMEnrichmentSettings = Field(default_factory=SLMEnrichmentSettings)
     vision: VisionSettings = Field(default_factory=VisionSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)

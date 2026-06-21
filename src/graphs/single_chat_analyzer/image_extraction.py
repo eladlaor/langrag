@@ -2,11 +2,10 @@
 Image Extraction Pipeline Node
 
 Extracts, downloads, and optionally describes images from WhatsApp messages.
-Follows the same fail-soft pattern as slm_prefilter.py — any failure logs
-and returns empty stats without breaking the pipeline.
+Fail-soft: any failure logs and returns empty stats without breaking the pipeline.
 
 Node position in graph:
-    ... → slm_prefilter → extract_images → preprocess_messages → ...
+    ... → extract_messages → extract_images → preprocess_messages → ...
 
 Configuration:
 - VISION_ENABLED: Master toggle (default: false)

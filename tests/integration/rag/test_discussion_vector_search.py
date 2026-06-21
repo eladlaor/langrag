@@ -1,8 +1,7 @@
 """Integration test: server-side $vectorSearch for discussion similarity.
 
-Validates the P2 fix that replaced the O(N) client-side cosine loop in
-anti_repetition_hybrid with a server-side $vectorSearch over the
-discussion_embeddings index (created programmatically by ensure_indexes).
+Validates the server-side $vectorSearch over the discussion_embeddings
+index (created programmatically by ensure_indexes).
 
 Property under test (parity, not exact-float): given a query embedding equal to
 one stored discussion's embedding, find_similar_discussions returns that

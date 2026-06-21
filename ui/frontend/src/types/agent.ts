@@ -86,3 +86,19 @@ export interface RagPreferences {
   mmr_lambda: number;
   enable_mmr_diversity: boolean;
 }
+
+// Agent API key management (cookie-gated /api/users/me/agent-keys). The
+// plaintext is present only on the issue response, never on the listing.
+export interface AgentApiKeyIssued {
+  key_id: string;
+  name: string;
+  plaintext: string;
+}
+
+export interface AgentApiKeySummary {
+  key_id: string;
+  name: string;
+  enabled: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+}

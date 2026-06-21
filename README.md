@@ -11,7 +11,6 @@
   <a href="https://www.mongodb.com/"><img src="https://img.shields.io/badge/MongoDB-8.0-47A248.svg" alt="MongoDB"></a>
   <a href="https://langfuse.com/"><img src="https://img.shields.io/badge/Langfuse-observability-F4B400.svg" alt="Langfuse"></a>
   <img src="https://img.shields.io/badge/LLM_Batching-orchestration-412991.svg" alt="LLM Batching Orchestration">
-  <a href="https://ollama.com/"><img src="https://img.shields.io/badge/Ollama-SLM-white.svg" alt="Ollama SLM"></a>
   <a href="https://www.anthropic.com/"><img src="https://img.shields.io/badge/Anthropic-Claude-D97757.svg" alt="Anthropic"></a>
   <a href="https://creativecommons.org/licenses/by-nc/4.0/"><img src="https://img.shields.io/badge/license-CC%20BY--NC%204.0-lightgrey.svg" alt="CC BY-NC 4.0"></a>
 
@@ -174,7 +173,6 @@ The diagram below covers the **newsletter generation** flow only — message ext
 | MMR Diversity Ranking | Multi-factor scoring + Maximal Marginal Relevance, with a tunable quality/diversity weight (`mmr_lambda`) per request, per user, and via server default | Quality-diversity balance, controllable per run |
 | Human-in-the-Loop | Two-phase pipeline with Web UI discussion selector | Editorial control over final newsletter content |
 | Batch API | JSONL serialization, async polling, exponential backoff | 50% cost reduction |
-| SLM Pre-filtering | Configurable local SLM classifies KEEP/FILTER/UNCERTAIN before LLM | 15-30% additional savings |
 | SLM Semantic Enrichment | Fine-tuned DeBERTa-v3 model tags messages with 15 semantic labels for ranking | Richer discussion scoring signals |
 | Hybrid Anti-Repetition | Embedding cosine similarity + LLM validation vs. last N editions | No repetition of content from previous N newsletters |
 | Smart Discussion Merging | Configurable similarity thresholds + LLM validation | Better handling of cross-group similar discussions |
@@ -315,7 +313,6 @@ See `.env.example` for the full list. Key variables:
 | `BEEPER_USERNAME` / `BEEPER_PASSWORD` | Beeper authentication |
 | `BEEPER_HOMESERVER` | Matrix homeserver (default: `beeper.local`) |
 | `BEEPER_RECOVERY_CODE` | Optional, enables server-side key backup |
-| `SLM_ENABLED` | Enable Ollama SLM pre-filtering (`true`/`false`) |
 | `SLM_ENRICHMENT_ENABLED` | Enable DeBERTa semantic enrichment for ranking (`true`/`false`) |
 | `RANKING_ENABLE_MMR_DIVERSITY` / `RANKING_MMR_LAMBDA` | Server defaults for newsletter discussion-ranking MMR (overridable per request) |
 | `RAG_ENABLE_MMR_DIVERSITY` / `RAG_MMR_LAMBDA` | Server defaults for RAG retrieval MMR (overridable per user and per request) |
@@ -339,7 +336,6 @@ See `.env.example` for the full list. Key variables:
 | langfuse-server | 3001 | LLM observability |
 | grafana | 3000 | Log visualization |
 | n8n | 5678 | Workflow automation (LinkedIn drafts) |
-| ollama | 11434 | Local SLM inference |
 | prometheus | 9090 | Metrics collection |
 | loki | 3100 | Log aggregation |
 

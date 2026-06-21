@@ -23,11 +23,15 @@ from constants import (
     RESULT_KEY_MARKDOWN_PATH,
     RESULT_KEY_HTML_PATH,
     RESULT_KEY_TRANSLATED_PATH,
+    OUTPUT_FILENAME_IMAGE_MANIFEST,
+    MAX_IMAGES_TOTAL,
 )
+from custom_types.field_keys import DiscussionKeys, ImageKeys, NewsletterStructureKeys
 from custom_types.newsletter_formats.langtalks.renderer import LangTalksRenderer
 from custom_types.newsletter_formats.langtalks.schema import (
     LlmResponseLangTalksNewsletterContent,
 )
+from graphs.single_chat_analyzer.associate_images import _build_image_discussion_map
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,11 @@ class NewsletterAssembler:
         self.run_dir = Path(run_dir)
         self._discussions_by_title: dict[str, dict] = {}
         self._discussions_by_id: dict[str, dict] = {}
+        self._source_path: Path | None = None
         self._load_source_data()
+        # discussion_id -> list of image description dicts (from the vision pipeline).
+        # Built once and cached; empty when no manifest is present (feature inert).
+        self._image_map: dict[str, list[dict]] = self._build_image_map()
 
     def _load_source_data(self) -> None:
         """Load merged_discussions.json and build lookup indexes."""
@@ -59,6 +67,8 @@ class NewsletterAssembler:
         source_path = merged_path if merged_path.exists() else aggregated_path
         if not source_path.exists():
             raise FileNotFoundError(f"No source discussion data found at {merged_path} or {aggregated_path}")
+
+        self._source_path = source_path
 
         with open(source_path) as f:
             data = json.load(f)
@@ -73,6 +83,52 @@ class NewsletterAssembler:
                 self._discussions_by_id[disc_id.lower()] = d
 
         logger.info(f"Loaded {len(discussions)} source discussions from {source_path.name}")
+
+    def _build_image_map(self) -> dict[str, list[dict]]:
+        """
+        Build a discussion_id -> image-description-dicts map from any image manifests
+        in the run dir, matched against the same source-discussion file the assembler loaded.
+
+        The vision pipeline writes one manifest per chat at
+        <run_dir>/<chat_subdir>/images/image_manifest.json, so a consolidated run can
+        carry several. Each is built via the shared, pure _build_image_discussion_map
+        (which applies the per-discussion + total caps), then merged here under the
+        global MAX_IMAGES_TOTAL budget.
+
+        Fail-soft: any missing manifest or per-manifest error is logged and skipped;
+        no manifest at all yields an empty map (the images feature is simply inert).
+        """
+        if self._source_path is None:
+            return {}
+
+        manifest_paths = sorted(self.run_dir.rglob(OUTPUT_FILENAME_IMAGE_MANIFEST))
+        if not manifest_paths:
+            logger.info("No image manifest found in run dir; image descriptions disabled")
+            return {}
+
+        merged: dict[str, list[dict]] = {}
+        total = 0
+        for manifest_path in manifest_paths:
+            if total >= MAX_IMAGES_TOTAL:
+                break
+            try:
+                per_manifest = _build_image_discussion_map(str(manifest_path), str(self._source_path))
+            except Exception as e:
+                logger.warning(f"Skipping image manifest {manifest_path} (fail-soft): {e}", extra={"error": str(e)})
+                continue
+
+            for disc_id, images in per_manifest.items():
+                if total >= MAX_IMAGES_TOTAL:
+                    break
+                existing = merged.setdefault(disc_id, [])
+                for image in images:
+                    if total >= MAX_IMAGES_TOTAL:
+                        break
+                    existing.append(image)
+                    total += 1
+
+        logger.info(f"Built image map for {len(merged)} discussions, {total} total image descriptions")
+        return merged
 
     def find_discussion(self, identifier: str) -> dict | None:
         """
@@ -181,12 +237,30 @@ class NewsletterAssembler:
 
         metadata = self.extract_metadata(source)
 
-        return {
+        assembled = {
             "title": editorial_discussion["title"],
             "bullet_points": editorial_discussion["bullet_points"],
             "ranking_of_relevance_to_gen_ai_engineering": editorial_discussion.get("ranking_of_relevance_to_gen_ai_engineering", 7),
             **metadata,
         }
+
+        image_descriptions = self._image_descriptions_for(source)
+        if image_descriptions:
+            assembled[NewsletterStructureKeys.IMAGE_DESCRIPTIONS] = image_descriptions
+
+        return assembled
+
+    def _image_descriptions_for(self, source_discussion: dict) -> list[str]:
+        """
+        Return the verified image-description strings for a matched source discussion.
+
+        Looks up the source discussion's id in the cached image map and flattens the
+        per-image dicts down to their description strings. Fail-soft: returns an empty
+        list when there are no images or no id.
+        """
+        disc_id = source_discussion.get(DiscussionKeys.ID, "")
+        images = self._image_map.get(disc_id, []) if disc_id else []
+        return [img[ImageKeys.DESCRIPTION] for img in images if img.get(ImageKeys.DESCRIPTION)]
 
     def assemble_render_save(self, editorial: dict, language: str = "hebrew") -> dict:
         """

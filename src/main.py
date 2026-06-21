@@ -265,9 +265,12 @@ app.include_router(user_preferences.router, prefix=API_V1_PREFIX, tags=["user-pr
 # Agentic chatbot (v1.13.0+): mounted only when AGENT_ENABLED=true so the
 # default deployment is unaffected. See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
 if get_settings().agent.enabled:
-    from api import agent_chat
+    from api import agent_api_keys, agent_chat
 
     app.include_router(agent_chat.router, prefix=API_V1_PREFIX, tags=["agent"], dependencies=_session_gate)
+    # Key-minting is cookie-gated (a user has no agent API key yet), so it carries
+    # only _session_gate — not the X-API-Key dependency the agent routes use.
+    app.include_router(agent_api_keys.router, prefix=API_V1_PREFIX, tags=["agent-keys"], dependencies=_session_gate)
 
 
 @app.get(ROUTE_ROOT)

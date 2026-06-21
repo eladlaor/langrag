@@ -96,9 +96,6 @@ class SingleChatStateKeys:
     # === Worker Store Path (for parallel workers) ===
     WORKER_STORE_PATH = "worker_store_path"
 
-    # === SLM Pre-Filter Statistics ===
-    SLM_FILTER_STATS = "slm_filter_stats"
-
     # === Image Extraction ===
     ENABLE_IMAGE_EXTRACTION = "enable_image_extraction"
     IMAGE_MANIFEST_PATH = "image_manifest_path"

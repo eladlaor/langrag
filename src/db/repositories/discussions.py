@@ -65,6 +65,7 @@ class DiscussionsRepository(BaseRepository):
         first_message_timestamp: int = None,
         metadata: dict[str, Any] = None,
         generate_embedding: bool = True,
+        data_source_name: str | None = None,
     ) -> str:
         """
         Create a new discussion record with optional embedding generation.
@@ -118,6 +119,7 @@ class DiscussionsRepository(BaseRepository):
             discussion_id=discussion_id,
             run_id=run_id,
             chat_name=chat_name,
+            data_source_name=data_source_name,
             title=title,
             nutshell=nutshell,
             message_ids=message_ids,
@@ -207,6 +209,7 @@ class DiscussionsRepository(BaseRepository):
                 discussion_id=disc[DbFieldKeys.DISCUSSION_ID],
                 run_id=disc[DbFieldKeys.RUN_ID],
                 chat_name=disc[DbFieldKeys.CHAT_NAME],
+                data_source_name=disc.get(DbFieldKeys.DATA_SOURCE_NAME),
                 title=disc.get(DbFieldKeys.TITLE, ""),
                 nutshell=disc.get(DbFieldKeys.NUTSHELL, ""),
                 message_ids=disc.get(DbFieldKeys.MESSAGE_IDS, []),

@@ -22,7 +22,6 @@ from constants import (
     CURRENT_SCHEMA_VERSION_USER_API_KEY,
     RunStatus,
 )
-from custom_types.slm_schemas import MessageClassification
 
 
 class UserRole(StrEnum):
@@ -98,7 +97,8 @@ class DiscussionDocument(BaseModel):
     schema_version: int = Field(default=CURRENT_SCHEMA_VERSION_DISCUSSION, description="Document schema version (offline-migrated; see constants)")
     discussion_id: str = Field(..., description="Unique identifier for the discussion")
     run_id: str = Field(..., description="Associated pipeline run ID")
-    chat_name: str = Field(..., description="Source chat name")
+    chat_name: str = Field(..., description="Source chat name (exact WhatsApp group name)")
+    data_source_name: str | None = Field(None, description="Community key (e.g. 'langtalks'). Filterable; enables community-scoped retrieval over discussions.")
     title: str = Field(..., description="Discussion title")
     nutshell: str = Field(..., description="Brief summary of the discussion")
     # Embed-vs-reference decision: message_ids is an embedded array, NOT a
@@ -122,14 +122,38 @@ class DiscussionDocument(BaseModel):
     embedding_timestamp: datetime | None = Field(None, description="When the embedding was generated")
 
 
+class RawDiscussionDocument(BaseModel):
+    """Schema for the `raw_discussions` collection.
+
+    The truly raw, per-chat discussions as produced by `separate_discussions`
+    (the LLM segmentation of a single group's messages into threads) — BEFORE
+    ranking and BEFORE cross-chat merge. These were previously JSON-only working
+    state; persisting them gives an auditable, community-scoped record of the
+    pre-merge segmentation. Distinct from the `discussions` collection, which
+    holds the per-chat *ranked* discussions.
+    """
+
+    schema_version: int = Field(default=1, description="Document schema version")
+    raw_discussion_id: str = Field(..., description="Unique key: f'{run_id}_{chat_name}_{local_id}'")
+    run_id: str = Field(..., description="Owning pipeline run ID")
+    chat_name: str = Field(..., description="Exact source WhatsApp group name")
+    data_source_name: str | None = Field(None, description="Community key (e.g. 'langtalks'); filterable.")
+    local_id: str = Field(..., description="The per-run discussion id assigned at segmentation (e.g. 'discussion_1')")
+    title: str | None = Field(None, description="LLM-generated discussion title")
+    nutshell: str | None = Field(None, description="LLM-generated brief summary")
+    message_ids: list[str] = Field(default_factory=list, description="Message ids in this raw discussion (when resolvable)")
+    message_count: int = Field(default=0, description="Number of messages in the raw discussion")
+    first_message_timestamp: int | None = Field(None, description="Timestamp of first message")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
+
+
 class MessageDocument(BaseModel):
     """Schema for the `messages` collection.
 
     A single message document is written in two passes against the same
     `message_id` key (see RunTracker.store_raw_messages then store_messages):
 
-      1. RAW pass (post-extraction): sets `content`, `data_source_name`, and
-         the SLM pre-filter verdict (`slm_classification`/`confidence`/`reason`).
+      1. RAW pass (post-extraction): sets `content` and `data_source_name`.
       2. TRANSLATED pass (post-preprocessing): upserts the translated/enriched
          fields (`content_translated`, `is_translated`, `urls`, `mentions`,
          `word_count`, `short_id`, `replies_to`).
@@ -161,11 +185,8 @@ class MessageDocument(BaseModel):
     matrix_event_id: str | None = Field(None, description="Original Matrix event ID (set on the translated pass)")
     short_id: str | None = Field(None, description="Pipeline short_id (set on the translated pass)")
 
-    # RAW-pass content + SLM pre-filter verdict
+    # RAW-pass content
     content: str | None = Field(None, description="Original message content (raw pass)")
-    slm_classification: MessageClassification | None = Field(None, description="SLM pre-filter verdict: KEEP / FILTER / UNCERTAIN")
-    slm_confidence: float | None = Field(None, description="SLM pre-filter confidence in [0, 1]")
-    slm_reason: str | None = Field(None, description="SLM pre-filter rationale")
 
     # TRANSLATED-pass enriched content
     content_translated: str | None = Field(None, description="Translated/preprocessed content (translated pass)")
@@ -232,6 +253,7 @@ class RAGChunkDocument(BaseModel):
     chunk_index: int = Field(..., description="0-based chunk index within source")
     source_date_start: datetime = Field(..., description="Inclusive lower bound of source content date range")
     source_date_end: datetime = Field(..., description="Inclusive upper bound of source content date range")
+    data_source_name: str | None = Field(None, description="Community key (e.g. 'langtalks'), promoted to top-level so it is filterable in the search indexes. None for podcast chunks (not community-scoped).")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Source-specific metadata")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), description="Creation timestamp")
 

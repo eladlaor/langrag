@@ -19,7 +19,7 @@ from pymongo.errors import PyMongoError
 
 from constants import NewsletterVersionType, RunStatus
 from custom_types.db_schemas import MessageDocument
-from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, MessageSourceKeys, PollDbKeys, RankingResultKeys, SlmResultKeys
+from custom_types.field_keys import ContentResultKeys, DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MergeGroupKeys, MessageSourceKeys, PollDbKeys, RankingResultKeys
 from datetime import UTC
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class RunTracker:
             from db.connection import get_database
             from db.repositories.runs import RunsRepository
             from db.repositories.discussions import DiscussionsRepository
+            from db.repositories.raw_discussions import RawDiscussionsRepository
             from db.repositories.messages import MessagesRepository
             from db.repositories.newsletters import NewslettersRepository
             from db.repositories.polls import PollsRepository
@@ -56,6 +57,7 @@ class RunTracker:
             self._db = await get_database()
             self._runs_repo = RunsRepository(self._db)
             self._discussions_repo = DiscussionsRepository(self._db)
+            self._raw_discussions_repo = RawDiscussionsRepository(self._db)
             self._messages_repo = MessagesRepository(self._db)
             self._newsletters_repo = NewslettersRepository(self._db)
             self._polls_repo = PollsRepository(self._db)
@@ -162,7 +164,7 @@ class RunTracker:
             logger.warning(f"Failed to store diagnostic report for run {run_id}: {e}")
             return False
 
-    async def store_discussions(self, run_id: str, chat_name: str, discussions: list[dict]) -> int:
+    async def store_discussions(self, run_id: str, chat_name: str, discussions: list[dict], data_source_name: str | None = None) -> int:
         """Storing discussions from a chat.
 
         Normalizes each discussion into a flat doc dict, then persists the whole
@@ -170,6 +172,9 @@ class RunTracker:
         embedding call + one bulk upsert, instead of the former per-discussion
         OpenAI-call-plus-insert loop. Fail-fast: a write failure propagates
         (see knowledge/mongodb/MONGODB_REAUDIT_2026_06_18.md).
+
+        data_source_name stamps the community key on each discussion so retrieval
+        can pre-filter discussions by community.
         """
         if not run_id or not discussions or not await self._ensure_initialized():
             return 0
@@ -200,6 +205,7 @@ class RunTracker:
                     DbFieldKeys.DISCUSSION_ID: discussion_id,
                     DbFieldKeys.RUN_ID: run_id,
                     DbFieldKeys.CHAT_NAME: chat_name,
+                    DbFieldKeys.DATA_SOURCE_NAME: data_source_name,
                     DbFieldKeys.TITLE: disc.get(DiscussionKeys.TITLE, ""),
                     DbFieldKeys.NUTSHELL: disc.get(DiscussionKeys.NUTSHELL, ""),
                     DbFieldKeys.MESSAGE_IDS: message_ids,
@@ -216,6 +222,25 @@ class RunTracker:
             )
 
         return await self._discussions_repo.create_discussions_bulk(docs)
+
+    async def store_raw_discussions(self, run_id: str, chat_name: str, data_source_name: str | None, discussions: list[dict]) -> int:
+        """Persist the raw, pre-rank/pre-merge per-chat discussions.
+
+        These are the output of separate_discussions (the LLM segmentation of one
+        group's messages into threads), captured BEFORE ranking and cross-chat
+        merge. Stamped with data_source_name (community) + chat_name (exact group)
+        so the raw segmentation is auditable and community-scoped. Idempotent per
+        (run_id, chat_name, local_id). Fail-fast: a write error propagates.
+        """
+        if not run_id or not discussions or not await self._ensure_initialized():
+            return 0
+
+        return await self._raw_discussions_repo.store_raw_discussions(
+            run_id=run_id,
+            chat_name=chat_name,
+            data_source_name=data_source_name,
+            discussions=discussions,
+        )
 
     async def store_polls(self, run_id: str, chat_name: str, data_source_name: str, polls: list[dict]) -> int:
         """Storing polls extracted from a chat.
@@ -453,21 +478,18 @@ class RunTracker:
         chat_name: str,
         data_source_name: str,
         messages: list[dict],
-        classification_map: dict[str, dict] | None = None,
     ) -> int:
         """
-        Storing ALL raw extracted messages (pre-preprocessing) with SLM classification metadata.
+        Storing ALL raw extracted messages (pre-preprocessing).
 
-        Called from slm_prefilter node to persist every message before any filtering occurs.
-        Each message gets SLM classification metadata if available.
+        Called from the extract_messages node to persist every message before
+        any preprocessing occurs.
 
         Args:
             run_id: Run identifier
             chat_name: Chat name
             data_source_name: Data source (e.g., "langtalks")
             messages: List of raw extracted message dictionaries
-            classification_map: Mapping of message_id -> {classification, confidence, reason}.
-                                None when SLM is disabled or unavailable.
 
         Returns:
             Number of messages successfully stored
@@ -480,9 +502,6 @@ class RunTracker:
             # Raw messages use 'id' field which is the Matrix event ID
             event_id = msg.get(DiscussionKeys.ID) or msg.get(DecryptionResultKeys.EVENT_ID) or str(idx)
             message_id = f"{run_id}_msg_{event_id}"
-
-            # Look up SLM classification if available
-            slm_data = (classification_map or {}).get(str(event_id), {})
 
             # Validate through the canonical schema so the persisted document
             # is guaranteed to match MessageDocument (fail-fast on drift).
@@ -497,9 +516,6 @@ class RunTracker:
                     DbFieldKeys.CONTENT: msg.get(MessageSourceKeys.CONTENT, ""),
                     DbFieldKeys.CONTENT_TRANSLATED: None,
                     DbFieldKeys.IS_TRANSLATED: False,
-                    DbFieldKeys.SLM_CLASSIFICATION: slm_data.get(SlmResultKeys.CLASSIFICATION),
-                    DbFieldKeys.SLM_CONFIDENCE: slm_data.get(SlmResultKeys.CONFIDENCE),
-                    DbFieldKeys.SLM_REASON: slm_data.get(SlmResultKeys.REASON),
                 }
             ).model_dump()
             docs.append(doc)

@@ -62,6 +62,7 @@ class LangTalksRenderer:
             for i, bullet in enumerate(primary[NewsletterStructureKeys.BULLET_POINTS], 1):
                 markdown += f"{i}. **{bullet[NewsletterStructureKeys.LABEL]}**: {bullet[NewsletterStructureKeys.CONTENT]}\n\n"
 
+            markdown += self._render_image_descriptions_markdown(primary, desired_language)
             markdown += self._render_markdown_attribution(primary, desired_language)
 
             markdown += "\n---\n\n## Secondary Discussions\n\n"
@@ -74,6 +75,7 @@ class LangTalksRenderer:
                 for i, bullet in enumerate(discussion[NewsletterStructureKeys.BULLET_POINTS], 1):
                     markdown += f"{i}. **{bullet[NewsletterStructureKeys.LABEL]}**: {bullet[NewsletterStructureKeys.CONTENT]}\n\n"
 
+                markdown += self._render_image_descriptions_markdown(discussion, desired_language)
                 markdown += self._render_markdown_attribution(discussion, desired_language)
                 markdown += "\n---\n\n"
 
@@ -176,6 +178,36 @@ class LangTalksRenderer:
             items.append(f"<li><p><strong>{label}</strong>: {content}</p></li>")
         return f"<{tag}>\n" + "\n".join(items) + f"\n</{tag}>"
 
+    def _render_image_descriptions_html(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
+        """
+        Render a small "Images shared" block listing verified image descriptions.
+
+        Returns an empty string when the discussion has no image_descriptions, so the
+        block is fully omitted for discussions without images.
+        """
+        descriptions = discussion.get(NewsletterStructureKeys.IMAGE_DESCRIPTIONS)
+        if not descriptions:
+            return ""
+
+        i18n = get_langtalks_i18n(desired_language)
+        items = [f"<li><p>{self._process_inline_formatting(desc)}</p></li>" for desc in descriptions if desc]
+        if not items:
+            return ""
+        return f"<p><strong>{i18n['images_shared_heading']}</strong></p>\n<ul>\n" + "\n".join(items) + "\n</ul>"
+
+    def _render_image_descriptions_markdown(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
+        """Render the "Images shared" block in markdown; empty string when absent."""
+        descriptions = discussion.get(NewsletterStructureKeys.IMAGE_DESCRIPTIONS)
+        if not descriptions:
+            return ""
+
+        i18n = get_langtalks_i18n(desired_language)
+        lines = [f"\n**{i18n['images_shared_heading']}**\n"]
+        for desc in descriptions:
+            if desc:
+                lines.append(f"- {desc}\n")
+        return "".join(lines)
+
     def _parse_worth_mentioning_item(self, text: str) -> str:
         """
         Parse a worth_mentioning string into HTML with bold labels.
@@ -213,6 +245,10 @@ class LangTalksRenderer:
                 parts.append(f"\n<h2><strong>{self._process_inline_formatting(primary.get(NewsletterStructureKeys.TITLE, ''))}</strong></h2>")
                 parts.append("")
                 parts.append(self._render_bullet_points_html(primary.get(NewsletterStructureKeys.BULLET_POINTS, [])))
+                images_block = self._render_image_descriptions_html(primary, desired_language)
+                if images_block:
+                    parts.append("")
+                    parts.append(images_block)
                 attribution = self._render_discussion_attribution_html(primary, desired_language)
                 if attribution:
                     parts.append("")
@@ -225,6 +261,10 @@ class LangTalksRenderer:
                 parts.append(f"\n<h3><strong>{self._process_inline_formatting(discussion.get(NewsletterStructureKeys.TITLE, ''))}</strong></h3>")
                 parts.append("")
                 parts.append(self._render_bullet_points_html(discussion.get(NewsletterStructureKeys.BULLET_POINTS, [])))
+                images_block = self._render_image_descriptions_html(discussion, desired_language)
+                if images_block:
+                    parts.append("")
+                    parts.append(images_block)
                 attribution = self._render_discussion_attribution_html(discussion, desired_language)
                 if attribution:
                     parts.append("")
@@ -552,6 +592,10 @@ class LangTalksRenderer:
         parts.append(f"<{heading_tag}><strong>{title}</strong></{heading_tag}>")
         parts.append("")
         parts.append(self._render_bullet_points_html(discussion.get(NewsletterStructureKeys.BULLET_POINTS, [])))
+        images_block = self._render_image_descriptions_html(discussion, desired_language)
+        if images_block:
+            parts.append("")
+            parts.append(images_block)
         attribution = self._render_discussion_attribution_html(discussion, desired_language)
         if attribution:
             parts.append("")

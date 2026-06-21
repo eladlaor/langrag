@@ -12,11 +12,12 @@ from typing import Any
 
 from config import get_settings
 from constants import ContentSourceType, NewsletterVersionType, NewsletterStatus
-from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys
+from custom_types.field_keys import DbFieldKeys, NewsletterStructureKeys, RAGChunkMetadataKeys
 from db.connection import get_database
 from db.repositories.newsletters import NewslettersRepository
 from rag.chunking.markdown_chunker import MarkdownChunker
 from rag.sources.base import ContentChunk, ContentSourceInterface
+from rag.sources.provenance import resolve_newsletter_message_provenance
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,13 @@ class NewsletterSource(ContentSourceInterface):
 
         source_title = self._build_source_title(data_source_name, start_date, end_date, chat_name)
 
+        # Parent-document provenance (D10): resolve the discussions that fed this
+        # newsletter and the flattened raw-message ids behind them, so every chunk
+        # carries the keys needed to drill from a chunk down to raw messages at
+        # retrieval time. Whole-newsletter granularity: all chunks share the lists.
+        # Fail-soft: legacy newsletters with no discussion refs get empty lists.
+        discussion_ids, message_ids = await resolve_newsletter_message_provenance(db, newsletter)
+
         chunk_metadata = {
             "newsletter_date_range": f"{start_date} to {end_date}",
             "data_source_name": data_source_name,
@@ -96,6 +104,8 @@ class NewsletterSource(ContentSourceInterface):
             "language": desired_language,
             "version_used": str(version_used),
             "newsletter_type": newsletter.get(DbFieldKeys.NEWSLETTER_TYPE, ""),
+            RAGChunkMetadataKeys.DISCUSSION_IDS: discussion_ids,
+            RAGChunkMetadataKeys.MESSAGE_IDS: message_ids,
         }
 
         chunks = self._chunker.chunk(
@@ -106,6 +116,11 @@ class NewsletterSource(ContentSourceInterface):
             source_date_end=source_date_end,
             metadata=chunk_metadata,
         )
+
+        # Stamp the community key top-level on every chunk so retrieval can
+        # pre-filter by community (the metadata copy stays for display).
+        for chunk in chunks:
+            chunk.data_source_name = data_source_name
 
         logger.info(
             f"Newsletter extraction complete: {source_id} -> {len(chunks)} chunks "

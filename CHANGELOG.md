@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-06-21
+
+### Added
+- **Agentic chatbot is now reachable from the UI.** Added an "Agent" tab that mounts the previously orphaned `AgentChat` component, plus cookie-gated key management at `POST/GET/DELETE /api/users/me/agent-keys` so a logged-in user can mint, list, and revoke the personal API key the agent endpoints require (plaintext shown once, scoped to the caller). Key minting reuses the existing `user_api_keys` repository.
+- **RAG source provenance and parent-document expansion.** Retrieval records per-chunk source provenance (community + exact chat) backed by a dedicated `raw_discussions` collection, and expands matched chunks to their parent documents before answering, with community filtering and newsletter image assembly.
+
+### Changed
+- **`AGENT_ENABLED` now defaults to `true` in `docker-compose.yml`**, with the `AGENT_*` knobs documented in `.env.example`, so the agentic chatbot (`/api/agent/*` and the new key-management routes) is mounted by default rather than dark.
+
+### Removed
+- **Phi-3 SLM message pre-filter retired:** the optional Ollama-hosted Phi-3 KEEP/FILTER/UNCERTAIN pre-filter node (`slm_prefilter`) is removed from the newsletter pipeline, along with its backend (`core/slm/` Ollama provider and classifier), `SLMSettings` config and all `SLM_*` pre-filter env vars, the `slm_classification`/`slm_confidence`/`slm_reason` fields on `MessageDocument`, the `slm_filter_stats` state field, and the `langrag-ollama` Docker service. The DeBERTa-v3 multi-label semantic enrichment SLM (`slm_enrichment`) is unaffected and remains the only SLM in the pipeline. Raw-message MongoDB persistence (`store_raw_messages`), previously performed inside the pre-filter node, is now performed by the `extract_messages` node so the raw corpus is still captured.
+
 ## [1.17.7] - 2026-06-20
 
 ### Fixed
@@ -362,7 +374,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.17.7...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/eladlaor/langrag/compare/v1.17.7...v1.18.0
 [1.17.7]: https://github.com/eladlaor/langrag/compare/v1.17.6...v1.17.7
 [1.17.6]: https://github.com/eladlaor/langrag/compare/v1.17.5...v1.17.6
 [1.17.5]: https://github.com/eladlaor/langrag/compare/v1.17.4...v1.17.5

@@ -22,15 +22,6 @@ from custom_types.api_schemas import (
 
 from custom_types.common import CustomBaseModel
 
-from custom_types.slm_schemas import (
-    MessageClassification,
-    MessageClassificationResult,
-    MessageForClassification,
-    BatchClassificationResult,
-    SLMFilterStats,
-    SLMHealthStatus,
-)
-
 __all__ = [
     # API Schemas
     "PeriodicNewsletterRequest",
@@ -45,11 +36,4 @@ __all__ = [
     "Phase2GenerationResponse",
     # Common
     "CustomBaseModel",
-    # SLM Schemas
-    "MessageClassification",
-    "MessageClassificationResult",
-    "MessageForClassification",
-    "BatchClassificationResult",
-    "SLMFilterStats",
-    "SLMHealthStatus",
 ]

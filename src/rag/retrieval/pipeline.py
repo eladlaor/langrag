@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from config import get_settings
-from constants import COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_HYBRID_VECTOR_COSINE_FIELD, RAG_SEARCH_SCORE_FIELD
-from custom_types.field_keys import RAGChunkKeys as Keys
+from constants import COLLECTION_MESSAGES, COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_HYBRID_VECTOR_COSINE_FIELD, RAG_SEARCH_SCORE_FIELD
+from custom_types.field_keys import DbFieldKeys, RAGChunkKeys as Keys, RAGChunkMetadataKeys
 from db.connection import get_database
 from observability.llm.langfuse_client import langfuse_span
 from observability.metrics.rag_metrics import (
@@ -54,10 +54,12 @@ class RetrievalPipeline:
         content_sources: list[str] | None = None,
         date_start: datetime | None = None,
         date_end: datetime | None = None,
+        data_source_names: list[str] | None = None,
         top_k: int | None = None,
         rerank_top_k: int | None = None,
         mmr_lambda: float | None = None,
         enable_mmr: bool | None = None,
+        include_raw_messages: bool | None = None,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -96,6 +98,21 @@ class RetrievalPipeline:
         # is resolved by callers and passed in as the explicit arg.)
         effective_lambda = mmr_lambda if mmr_lambda is not None else self._settings.mmr_lambda
         effective_enable_mmr = enable_mmr if enable_mmr is not None else self._settings.enable_mmr_diversity
+
+        # Parent-document retrieval (D10): explicit arg (the agent's per-call
+        # decision) wins, else the config default.
+        effective_include_raw = (
+            include_raw_messages if include_raw_messages is not None
+            else self._settings.include_raw_messages_default
+        )
+
+        # Soft default date window: when the caller gives NO lower bound, default
+        # to the recent window (community discourse ages fast). An explicit
+        # date_start always wins, including an older one. 0 days disables it.
+        window_days = self._settings.default_retrieval_window_days
+        if date_start is None and window_days > 0:
+            date_start = datetime.now(UTC) - timedelta(days=window_days)
+            logger.info(f"No date_start given; applying soft default window of {window_days}d (from {date_start.date()})")
 
         # Fail-fast on an out-of-range lambda rather than silently clamping; a
         # bad value almost always means a caller bug we want surfaced.
@@ -146,6 +163,7 @@ class RetrievalPipeline:
                     content_sources=content_sources,
                     date_start=date_start,
                     date_end=date_end,
+                    data_source_names=data_source_names,
                     top_k=search_top_k,
                     min_vector_score=self._settings.min_similarity_score,
                 )
@@ -156,6 +174,7 @@ class RetrievalPipeline:
                     content_sources=content_sources,
                     date_start=date_start,
                     date_end=date_end,
+                    data_source_names=data_source_names,
                     top_k=search_top_k,
                     min_score=self._settings.min_similarity_score,
                 )
@@ -187,6 +206,13 @@ class RetrievalPipeline:
                 top_k=final_top_k,
                 lambda_param=effective_lambda,
             )
+
+        # Parent-document expansion (D10): drill from the selected chunks down to
+        # the raw underlying messages via a server-side $lookup, attaching them as
+        # `parent_messages`. Only the final top-k chunks are expanded (cheap), and
+        # only when the caller/agent asked for it.
+        if effective_include_raw:
+            await self._expand_with_parents(reranked)
 
         context, citations = self._format_context(reranked)
         freshness_warning, oldest, newest = self._evaluate_freshness(reranked)
@@ -234,7 +260,82 @@ class RetrievalPipeline:
             "mmr_applied": not skip_mmr,
             "effective_lambda": effective_lambda,
             "enable_mmr": effective_enable_mmr,
+            "include_raw_messages": effective_include_raw,
         }
+
+    async def _expand_with_parents(self, chunks: list[dict[str, Any]]) -> None:
+        """Attach raw underlying messages to each chunk via a $lookup (D10).
+
+        Parent-document retrieval: each newsletter chunk carries, in its metadata,
+        the flattened ids of the raw messages behind it (persisted at ingest).
+        This runs a single server-side $lookup from rag_chunks -> messages keyed
+        by `metadata.message_ids`, and attaches the resolved messages to each
+        chunk under `parent_messages` (sender / content / timestamp, time-ordered,
+        capped per chunk). Mutates `chunks` in place.
+
+        This is the only cross-collection $lookup in the codebase; every other
+        join is single-collection by design. Chunks with no message provenance
+        (legacy / podcast) simply get an empty `parent_messages` list.
+        """
+        chunk_ids = [c.get(Keys.CHUNK_ID) for c in chunks if c.get(Keys.CHUNK_ID)]
+        if not chunk_ids:
+            return
+
+        cap = self._settings.parent_messages_per_chunk_cap
+        metadata_message_ids_path = f"{Keys.METADATA}.{RAGChunkMetadataKeys.MESSAGE_IDS}"
+
+        try:
+            db = await get_database()
+            collection = db[COLLECTION_RAG_CHUNKS]
+
+            pipeline = [
+                {"$match": {Keys.CHUNK_ID: {"$in": chunk_ids}}},
+                {
+                    "$lookup": {
+                        "from": COLLECTION_MESSAGES,
+                        "localField": metadata_message_ids_path,
+                        "foreignField": DbFieldKeys.MESSAGE_ID,
+                        "as": RAGChunkMetadataKeys.PARENT_MESSAGES,
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        Keys.CHUNK_ID: 1,
+                        RAGChunkMetadataKeys.PARENT_MESSAGES: {
+                            "$map": {
+                                "input": f"${RAGChunkMetadataKeys.PARENT_MESSAGES}",
+                                "as": "m",
+                                "in": {
+                                    DbFieldKeys.MESSAGE_ID: f"$$m.{DbFieldKeys.MESSAGE_ID}",
+                                    DbFieldKeys.SENDER: f"$$m.{DbFieldKeys.SENDER}",
+                                    DbFieldKeys.CONTENT: f"$$m.{DbFieldKeys.CONTENT}",
+                                    DbFieldKeys.TIMESTAMP: f"$$m.{DbFieldKeys.TIMESTAMP}",
+                                },
+                            }
+                        },
+                    }
+                },
+            ]
+
+            rows = await (await collection.aggregate(pipeline)).to_list(len(chunk_ids))
+            by_chunk = {row[Keys.CHUNK_ID]: row.get(RAGChunkMetadataKeys.PARENT_MESSAGES, []) for row in rows}
+
+            for chunk in chunks:
+                messages = by_chunk.get(chunk.get(Keys.CHUNK_ID), [])
+                # Time-order so the LLM reads the discussion as it unfolded.
+                messages.sort(key=lambda m: m.get(DbFieldKeys.TIMESTAMP) or 0)
+                if len(messages) > cap:
+                    logger.warning(
+                        "Parent expansion: chunk %s has %d messages, capping to %d",
+                        chunk.get(Keys.CHUNK_ID), len(messages), cap,
+                    )
+                    messages = messages[:cap]
+                chunk[RAGChunkMetadataKeys.PARENT_MESSAGES] = messages
+
+        except Exception as e:
+            logger.error(f"Parent-document expansion failed: {e}")
+            raise
 
     @staticmethod
     def _format_context(chunks: list[dict[str, Any]]) -> tuple[str, list[dict]]:
@@ -246,6 +347,10 @@ class RetrievalPipeline:
         """
         context_parts = []
         citations = []
+        # Collected separately so raw messages form one dedicated section at the
+        # end of the context, keyed back to each chunk marker — the chunk summary
+        # blocks above stay untouched.
+        primary_source_blocks = []
 
         for i, chunk in enumerate(chunks, start=1):
             marker = f"[{i}]"
@@ -260,6 +365,14 @@ class RetrievalPipeline:
                 f"{marker} (source: {source_title}; {date_tag})\n{content}"
             )
 
+            parent_messages = chunk.get(RAGChunkMetadataKeys.PARENT_MESSAGES) or []
+            if parent_messages:
+                lines = "\n".join(
+                    f"  {m.get(DbFieldKeys.SENDER, '?')}: {m.get(DbFieldKeys.CONTENT, '')}"
+                    for m in parent_messages
+                )
+                primary_source_blocks.append(f"{marker} raw messages:\n{lines}")
+
             citation = {
                 "index": i,
                 "chunk_id": chunk.get(Keys.CHUNK_ID, ""),
@@ -271,10 +384,18 @@ class RetrievalPipeline:
                 "snippet": content[:RAG_CITATION_SNIPPET_MAX_LENGTH],
                 "search_score": chunk.get(RAG_SEARCH_SCORE_FIELD, 0.0),
                 "metadata": metadata,
+                RAGChunkMetadataKeys.PARENT_MESSAGES: parent_messages,
             }
             citations.append(citation)
 
         context = "\n\n".join(context_parts)
+        if primary_source_blocks:
+            primary_section = "\n\n".join(primary_source_blocks)
+            context = (
+                f"{context}\n\n"
+                f"--- PRIMARY SOURCES (raw messages behind the cited newsletters) ---\n"
+                f"{primary_section}"
+            )
         return context, citations
 
     def _evaluate_freshness(

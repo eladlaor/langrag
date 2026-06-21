@@ -696,6 +696,10 @@ async def _ensure_vector_search_index(db: AsyncDatabase) -> None:
                     {"type": "filter", "path": "content_source"},
                     {"type": "filter", "path": "source_date_start"},
                     {"type": "filter", "path": "source_date_end"},
+                    # Community pre-filter: top-level data_source_name (promoted
+                    # out of metadata so it is filterable). Podcast chunks have
+                    # it null and are excluded when a community filter is set.
+                    {"type": "filter", "path": "data_source_name"},
                 ]
             },
             name=RAG_VECTOR_INDEX_NAME,
@@ -765,6 +769,8 @@ async def _ensure_discussion_vector_index(db: AsyncDatabase) -> None:
                     },
                     {"type": "filter", "path": DbFieldKeys.RUN_ID},
                     {"type": "filter", "path": DbFieldKeys.CHAT_NAME},
+                    # Community pre-filter on discussions (parity with rag_chunks).
+                    {"type": "filter", "path": DbFieldKeys.DATA_SOURCE_NAME},
                 ]
             },
             name=DISCUSSION_VECTOR_INDEX_NAME,
@@ -873,6 +879,8 @@ async def _ensure_lexical_search_index(db: AsyncDatabase) -> bool:
                         RAGChunkKeys.CONTENT_SOURCE: {"type": "token"},
                         RAGChunkKeys.SOURCE_DATE_START: {"type": "date"},
                         RAGChunkKeys.SOURCE_DATE_END: {"type": "date"},
+                        # Community pre-filter (token for exact-match $in).
+                        RAGChunkKeys.DATA_SOURCE_NAME: {"type": "token"},
                     },
                 }
             },

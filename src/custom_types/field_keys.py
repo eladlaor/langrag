@@ -86,15 +86,6 @@ class MessageSourceKeys:
     MATRIX_EVENT_ID = "matrix_event_id"
 
 
-class SlmResultKeys:
-    """Sub-keys of the SLM pre-filter classification-map entries
-    (custom_types.slm_schemas.MessageClassificationResult)."""
-
-    CLASSIFICATION = "classification"
-    CONFIDENCE = "confidence"
-    REASON = "reason"
-
-
 class RankingResultKeys:
     """Keys for ranking result dictionaries from the discussion ranker."""
 
@@ -146,6 +137,7 @@ class NewsletterStructureKeys:
     NUMBER_OF_UNIQUE_PARTICIPANTS = "number_of_unique_participants"
     LINK_ENRICHMENT_METADATA = "link_enrichment_metadata"
     METADATA = "metadata"
+    IMAGE_DESCRIPTIONS = "image_descriptions"
 
 
 class MMRMetadataKeys:
@@ -343,6 +335,25 @@ class RAGChunkKeys:
     CREATED_AT = "created_at"
     SOURCE_DATE_START = "source_date_start"
     SOURCE_DATE_END = "source_date_end"
+    # Community key, promoted to top-level (out of metadata) so it is filterable
+    # in the vector + lexical search indexes. Null for podcast chunks.
+    DATA_SOURCE_NAME = "data_source_name"
+
+
+class RAGChunkMetadataKeys:
+    """Sub-keys stored inside a rag_chunks document's free-form `metadata` dict.
+
+    Parent-document retrieval (D10) persists the provenance of a newsletter chunk
+    here at ingest time: the discussion ids that fed the newsletter, and the
+    flattened raw-message ids behind those discussions. Granularity is
+    whole-newsletter (every chunk of a newsletter shares the same lists) — the
+    newsletter markdown carries no per-section discussion map.
+    """
+
+    MESSAGE_IDS = "message_ids"
+    DISCUSSION_IDS = "discussion_ids"
+    # Attached at retrieval time by the $lookup expansion, not stored.
+    PARENT_MESSAGES = "parent_messages"
 
 
 class RAGConversationKeys:
@@ -468,9 +479,6 @@ class DbFieldKeys:
     URLS = "urls"
     MENTIONS = "mentions"
     WORD_COUNT = "word_count"
-    SLM_CLASSIFICATION = "slm_classification"
-    SLM_CONFIDENCE = "slm_confidence"
-    SLM_REASON = "slm_reason"
     NEWSLETTER_TYPE = "newsletter_type"
     DATA_SOURCE_NAME = "data_source_name"
     START_DATE = "start_date"
@@ -669,14 +677,6 @@ class ScheduleDocumentKeys:
     SUMMARY_FORMAT = "summary_format"
     CONSOLIDATE_CHATS = "consolidate_chats"
     EMAIL_RECIPIENTS = "email_recipients"
-
-
-class AntiRepetitionKeys:
-    """Keys for the hybrid anti-repetition result dict
-    (core.retrieval.history.anti_repetition_hybrid)."""
-
-    SIMILAR_HISTORICAL = "similar_historical"
-    PENALTY_APPLIED = "penalty_applied"
 
 
 class CacheDocumentKeys:

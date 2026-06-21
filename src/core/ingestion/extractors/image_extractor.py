@@ -76,7 +76,7 @@ def extract_image_metadata_from_raw_messages(
     Scan raw extracted messages for image entries and build ImageMetadata objects.
 
     Args:
-        raw_messages: Raw messages from extraction (same JSON slm_prefilter reads)
+        raw_messages: Raw messages from extraction
         chat_name: WhatsApp group name
         data_source_name: Community identifier
         max_images: Maximum images to return (most recent kept)
