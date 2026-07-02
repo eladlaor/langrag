@@ -16,12 +16,16 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
+from config import get_settings
 from constants import (
     CONTENT_TYPE_EVENT_STREAM,
     HTTP_STATUS_BAD_REQUEST,
     HTTP_DETAIL_INTERNAL_ERROR,
+    HTTP_DETAIL_RAG_OVERLOADED,
+    HTTP_HEADER_RETRY_AFTER,
     HTTP_STATUS_INTERNAL_SERVER_ERROR,
     HTTP_STATUS_NOT_FOUND,
+    HTTP_STATUS_SERVICE_UNAVAILABLE,
     RAGEventType,
     RAG_RATE_LIMIT_CHAT,
     RAG_RATE_LIMIT_DEFAULT,
@@ -37,6 +41,12 @@ from constants import (
     ROUTE_RAG_SOURCES_NEWSLETTERS,
     ROUTE_RAG_SOURCES_STATS,
     ContentSourceType,
+    RAGTraceName,
+    RAGTraceTag,
+    TAG_STREAMING,
+    RAG_TRACE_META_CITATION_COUNT,
+    RAG_TRACE_META_REFUSAL,
+    RAG_TRACE_OUTPUT_ANSWER,
 )
 from custom_types.api_schemas import (
     RAGChatRequest,
@@ -55,10 +65,13 @@ from db.repositories.chunks import ChunksRepository
 from db.repositories.rag_evaluations import EvaluationsRepository
 from rag.auth.dependencies import require_api_key
 from rag.auth.rate_limit import limiter
+from rag.concurrency.guard import RagCapacityExceeded, capacity, current_in_flight, rag_slot, release, try_acquire
 from rag.conversation.manager import ConversationManager
 from rag.generation.rag_chain import generate_answer, generate_answer_stream, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.sources.podcast_source import PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS, PodcastSource
+from observability.llm.langfuse_client import flush_langfuse, get_langfuse_callback_handler
+from observability.llm.rag_tracing import create_rag_trace, schedule_rag_online_eval
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +137,40 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
     date_start = _parse_date(body.date_start, "date_start")
     date_end = _parse_date(body.date_end, "date_end")
 
+    # Create the Langfuse trace in the OUTER handler scope BEFORE returning the
+    # StreamingResponse. Creating it inside event_stream() would let it be
+    # garbage-collected before the closure flushes it. trace.id is captured in
+    # the closure below; the trace object itself is held by this frame.
+    trace, trace_id = create_rag_trace(
+        name=RAGTraceName.REST_CHAT_STREAM,
+        user_id=owner,
+        session_id=session_id,
+        query=body.query,
+        content_sources=body.content_sources,
+        date_start=date_start,
+        date_end=date_end,
+        tags=[RAGTraceTag.RAG, TAG_STREAMING],
+    )
+
+    # Concurrency admission control. The slot MUST be acquired in this outer
+    # handler scope BEFORE the StreamingResponse is returned — once a 200 stream
+    # is committed we can no longer emit a 503 status line. The matching release
+    # lives in event_stream()'s finally so the slot is held for the ENTIRE stream
+    # lifetime and released on success, exception, AND client disconnect
+    # (Starlette aclose()s the generator on disconnect, triggering finally).
+    if not await try_acquire():
+        logger.warning(
+            "RAG stream shed at capacity",
+            extra={"in_flight": current_in_flight(), "cap": capacity(), "surface": "rest", "session_id": session_id},
+        )
+        raise HTTPException(
+            status_code=HTTP_STATUS_SERVICE_UNAVAILABLE,
+            detail=HTTP_DETAIL_RAG_OVERLOADED,
+            headers={HTTP_HEADER_RETRY_AFTER: str(get_settings().rag.concurrency_retry_after_seconds)},
+        )
+
     async def event_stream():
+        refused = False
         try:
             pipeline = RetrievalPipeline()
             # Per-user MMR lambda is NOT applied on this path: the public RAG
@@ -139,6 +185,7 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
                 date_start=date_start,
                 date_end=date_end,
                 mmr_lambda=body.mmr_lambda,
+                trace_id=trace_id,
             )
 
             context = retrieval_result["context"]
@@ -148,11 +195,15 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
             # event (so the client renders it identically to a normal answer) and
             # skip the LLM entirely. No citations on a refusal.
             if not context:
+                refused = True
                 refusal = refusal_for_empty_context(date_start, date_end)
                 full_answer = refusal
                 citations = []
                 yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': refusal})}\n\n"
             else:
+                # Handler built by the caller (SRP): threads the request's trace
+                # onto the gpt-4.1 generation so token usage -> Langfuse cost.
+                callback = get_langfuse_callback_handler(trace_id=trace_id, session_id=session_id, user_id=owner)
                 full_answer = ""
                 async for token in generate_answer_stream(
                     query=body.query,
@@ -162,6 +213,7 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
                     date_end=date_end,
                     freshness_warning=retrieval_result["freshness_warning"],
                     newest_source_date=retrieval_result["newest_source_date"],
+                    callbacks=[callback] if callback else None,
                 ):
                     full_answer += token
                     yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': token})}\n\n"
@@ -184,9 +236,34 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
             }
             yield f"event: {RAGEventType.DONE}\ndata: {json.dumps(done_payload, default=str)}\n\n"
 
+            # AFTER DONE, still inside the try: update the trace output + refusal
+            # flag and (only on a real answer) schedule background online eval.
+            if trace:
+                trace.update(
+                    output={RAG_TRACE_OUTPUT_ANSWER: full_answer},
+                    metadata={RAG_TRACE_META_REFUSAL: refused, RAG_TRACE_META_CITATION_COUNT: len(citations)},
+                )
+            if not refused:
+                schedule_rag_online_eval(
+                    session_id=session_id,
+                    query=body.query,
+                    answer=full_answer,
+                    contexts=[context],
+                    trace_id=trace_id,
+                )
+
         except Exception as e:
             logger.error(f"RAG chat stream error: {e}", extra={"session_id": session_id})
             yield f"event: {RAGEventType.ERROR}\ndata: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Flush the trace BEFORE the frame unwinds so it is not GC'd
+            # unflushed; runs on success, on the except-branch, and on client
+            # disconnect. Release the admission-control slot last.
+            flush_langfuse()
+            # Release the admission-control slot acquired in the outer scope. Runs
+            # on normal completion, on the except-branch above, and on client
+            # disconnect (Starlette aclose()s the generator, which triggers this).
+            release()
 
     return StreamingResponse(
         event_stream(),
@@ -355,10 +432,7 @@ async def get_source_stats(request: Request) -> list[RAGSourceStats]:
     db = await get_database()
     repo = ChunksRepository(db)
     stats = await repo.count_by_source_type()
-    return [
-        RAGSourceStats(source_type=source_type, chunk_count=count)
-        for source_type, count in stats.items()
-    ]
+    return [RAGSourceStats(source_type=source_type, chunk_count=count) for source_type, count in stats.items()]
 
 
 # ============================================================================
@@ -387,72 +461,122 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
     date_start = _parse_date(body.date_start, "date_start")
     date_end = _parse_date(body.date_end, "date_end")
 
+    trace, trace_id = create_rag_trace(
+        name=RAGTraceName.REST_CHAT,
+        user_id=owner,
+        session_id=session_id,
+        query=body.query,
+        content_sources=body.content_sources,
+        date_start=date_start,
+        date_end=date_end,
+        tags=[RAGTraceTag.RAG, RAGTraceTag.SYNC],
+    )
+
     try:
-        pipeline = RetrievalPipeline()
-        # Per-user MMR lambda is NOT applied here: the public RAG api-key OWNER
-        # is a free-form label, not a users.user_id, so there is no users
-        # identity to resolve a saved preference from. Config default is used.
-        # See the streaming handler above for the same rationale.
-        retrieval_result = await pipeline.retrieve(
-            query=body.query,
-            content_sources=body.content_sources or None,
-            date_start=date_start,
-            date_end=date_end,
-            mmr_lambda=body.mmr_lambda,
-        )
+        # rag_slot() ENCLOSES the retrieval+generation body so a capacity
+        # rejection surfaces as RagCapacityExceeded (mapped to 503 below) and is
+        # NOT swallowed by the generic `except Exception -> 500`. The slot is
+        # released in rag_slot()'s finally, so a downstream error never leaks it.
+        async with rag_slot():
+            pipeline = RetrievalPipeline()
+            # Per-user MMR lambda is NOT applied here: the public RAG api-key OWNER
+            # is a free-form label, not a users.user_id, so there is no users
+            # identity to resolve a saved preference from. Config default is used.
+            # See the streaming handler above for the same rationale.
+            retrieval_result = await pipeline.retrieve(
+                query=body.query,
+                content_sources=body.content_sources or None,
+                date_start=date_start,
+                date_end=date_end,
+                mmr_lambda=body.mmr_lambda,
+                trace_id=trace_id,
+            )
 
-        context = retrieval_result["context"]
-        citations = retrieval_result["citations"]
+            context = retrieval_result["context"]
+            citations = retrieval_result["citations"]
 
-        # Empty-context guard: never feed the LLM an empty context (it would
-        # hallucinate an ungrounded answer). Return the canonical refusal instead,
-        # persisted to session history exactly like a normal answer.
-        if not context:
-            answer = refusal_for_empty_context(date_start, date_end)
+            # Empty-context guard: never feed the LLM an empty context (it would
+            # hallucinate an ungrounded answer). Return the canonical refusal instead,
+            # persisted to session history exactly like a normal answer.
+            if not context:
+                answer = refusal_for_empty_context(date_start, date_end)
+                if trace:
+                    trace.update(output={RAG_TRACE_OUTPUT_ANSWER: answer}, metadata={RAG_TRACE_META_REFUSAL: True})
+                await manager.add_assistant_message(
+                    session_id=session_id,
+                    content=answer,
+                    citations=[],
+                )
+                return RAGChatResponse(
+                    session_id=session_id,
+                    answer=answer,
+                    citations=[],
+                    freshness_warning=False,
+                    oldest_source_date=None,
+                    newest_source_date=None,
+                )
+
+            # Handler built by the caller (SRP): threads the request's trace onto
+            # the gpt-4.1 generation so token usage -> Langfuse cost.
+            callback = get_langfuse_callback_handler(trace_id=trace_id, session_id=session_id, user_id=owner)
+            answer = await generate_answer(
+                query=body.query,
+                context=context,
+                conversation_history=history,
+                date_start=date_start,
+                date_end=date_end,
+                freshness_warning=retrieval_result["freshness_warning"],
+                newest_source_date=retrieval_result["newest_source_date"],
+                callbacks=[callback] if callback else None,
+            )
+
             await manager.add_assistant_message(
                 session_id=session_id,
                 content=answer,
-                citations=[],
+                citations=citations,
             )
+
+            if trace:
+                trace.update(
+                    output={RAG_TRACE_OUTPUT_ANSWER: answer},
+                    metadata={RAG_TRACE_META_REFUSAL: False, RAG_TRACE_META_CITATION_COUNT: len(citations)},
+                )
+            schedule_rag_online_eval(
+                session_id=session_id,
+                query=body.query,
+                answer=answer,
+                contexts=[context],
+                trace_id=trace_id,
+            )
+
             return RAGChatResponse(
                 session_id=session_id,
                 answer=answer,
-                citations=[],
-                freshness_warning=False,
-                oldest_source_date=None,
-                newest_source_date=None,
+                citations=[_citation_to_response(c) for c in citations],
+                freshness_warning=retrieval_result["freshness_warning"],
+                oldest_source_date=_iso_date_or_none(retrieval_result["oldest_source_date"]),
+                newest_source_date=_iso_date_or_none(retrieval_result["newest_source_date"]),
             )
 
-        answer = await generate_answer(
-            query=body.query,
-            context=context,
-            conversation_history=history,
-            date_start=date_start,
-            date_end=date_end,
-            freshness_warning=retrieval_result["freshness_warning"],
-            newest_source_date=retrieval_result["newest_source_date"],
+    except RagCapacityExceeded:
+        logger.warning(
+            "RAG chat shed at capacity",
+            extra={"in_flight": current_in_flight(), "cap": capacity(), "surface": "rest", "session_id": session_id},
         )
-
-        await manager.add_assistant_message(
-            session_id=session_id,
-            content=answer,
-            citations=citations,
-        )
-
-        return RAGChatResponse(
-            session_id=session_id,
-            answer=answer,
-            citations=[_citation_to_response(c) for c in citations],
-            freshness_warning=retrieval_result["freshness_warning"],
-            oldest_source_date=_iso_date_or_none(retrieval_result["oldest_source_date"]),
-            newest_source_date=_iso_date_or_none(retrieval_result["newest_source_date"]),
-        )
-
+        raise HTTPException(
+            status_code=HTTP_STATUS_SERVICE_UNAVAILABLE,
+            detail=HTTP_DETAIL_RAG_OVERLOADED,
+            headers={HTTP_HEADER_RETRY_AFTER: str(get_settings().rag.concurrency_retry_after_seconds)},
+        ) from None
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"RAG chat error: {e}", extra={"session_id": session_id})
         raise HTTPException(status_code=HTTP_STATUS_INTERNAL_SERVER_ERROR, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
+    finally:
+        # Flush the trace on every exit path (success, capacity 503, HTTP errors,
+        # and the generic 500) so a request's trace is never left unsent.
+        flush_langfuse()
 
 
 # ============================================================================

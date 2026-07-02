@@ -156,6 +156,9 @@ class ContentResultKeys:
 
     NEWSLETTER_ID = "newsletter_id"
     LINKS_ADDED = "links_added"
+    # Structured-translate result: the translated newsletter dict (same shape as
+    # the enriched dict). Present when the translate op wraps its dict return.
+    TRANSLATED_NEWSLETTER = "translated_newsletter"
 
 
 class MergeGroupKeys:

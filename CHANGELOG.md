@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-07-02
+
+### Added
+- **Internal service-auth path for session-gated API routes.** `require_session` now accepts a shared machine secret in the `X-Internal-Key` header as an alternative to the per-user Fernet session cookie, resolving to an admin-equivalent service principal without a DB-backed account or a forged session. Constant-time comparison; fail-closed (the path is inert unless `LANGRAG_LOGIN_INTERNAL_API_KEY` is set); the cookie path and human login are unchanged. Enables headless automation (the `/newsletter-generate` skill) to call gated endpoints.
+- **`/newsletter-generate` skill.** Single-command newsletter run for one or more communities: validates a mandatory `community`, gates on composition health (stops and diagnoses if unhealthy, never auto-starts), auto-dates from each community's last completed run when dates are omitted, supplies the internal auth key, and delegates the long generation to the `multi-community-newsletter` workflow. Defaults to save-local + email.
+- **Live-RAG Langfuse tracing across the REST and MCP surfaces.** Public RAG calls (`/api/rag` chat, streaming, and the `rag_query`/`rag_search` MCP tools) now emit Langfuse traces with a propagated `trace_id`, wiring LLM callbacks through the RAG chain and chat-model factory, and schedule online evaluations. No behavior change when `LANGFUSE_ENABLED` is unset (no-op).
+- **Hard concurrency admission control for the public RAG service.** A global guard caps concurrent RAG requests (default 50) and sheds excess load with HTTP 503 + `Retry-After` instead of degrading, applied independently to the REST endpoints and the MCP server; nginx gains dedicated MCP rate-limit zones separate from REST. Configurable via `rag.max_concurrent_requests` / `rag.retry_after_seconds`. The public MCP server is now gated behind the `production` Compose profile, defaults `RAG_AUTH_ENABLED=true`, and fails fast at compose-parse time if `RAG_MCP_API_KEY` is unset.
+- **Structured newsletter translation.** The final translation stage now translates the enriched newsletter as a structured JSON object — translating only human-readable text values while preserving keys, structure, and every URL verbatim — instead of re-parsing translated markdown, producing a same-shaped object that renders identically across md/html/json. Adds a `TRANSLATE_NEWSLETTER_STRUCTURED` content operation and prompt wired across all three LLM providers.
+- **Per-discussion engagement stats in the newsletter.** Each discussion's attribution footer now shows total message count and unique participant count (💬 messages | 👥 participants, with a Hebrew equivalent) in both HTML and markdown; merged discussions report the pre-aggregated totals once and attribute the start time to the earliest source group.
+- **`RAG_ONLINE_EVAL_ENABLED` master switch for live-RAG online evaluation.** New config flag that fires background LLM-judge/shadow scoring after each live RAG answer (REST + MCP), additionally gated by the runtime-eval sampling settings; defaults off.
+
+### Changed
+- **Numbered pipeline stage directories.** New runs write stage output to zero-padded, execution-ordered directories (e.g. `01_extracted`, `03_newsletter`, `05_final_newsletter`) so a run directory lists in pipeline order. Historical runs remain fully readable via a numbered-then-legacy directory fallback; no migration is performed.
+- **HTML is rendered only at the final delivery stage.** The generation stage no longer writes an HTML file; the deliverable is now a `final_newsletter.{json,md,html}` triplet rendered once from the translated structured object at the final stage. Email delivery resolves and sends only this final HTML and fails loud if it is absent, instead of silently falling back to a pre-enrichment, untranslated draft.
+- **OpenAI streamed responses now report token usage.** `ChatOpenAI` is created with `stream_usage=True`, so streamed answers carry token counts through to Langfuse cost reporting.
+- **Added "LangTalks Community 5"** to the langtalks community grouping across backend, frontend, and CLI so its chat is ingested and selectable.
+
+### Fixed
+- **Newsletter generation no longer fails for any chat containing an image or poll message.** Raw-message persistence (`store_raw_messages`) now flattens the Beeper extractor's dict `content` (`{"body": ..., "msgtype": "m.image"}`) to its string body before building `MessageDocument`, which previously raised a Pydantic `string_type` error and failed `extract_messages` for every chat with an image.
+- **Email "View Newsletter" link works without a login session.** The `newsletter_html_viewer` endpoint was session-gated (recipients opening the link from their inbox got 401 "not authenticated"); it is now served by an un-gated public router (path containment + HTML-only checks retained). Also fixed a doubled `output/output/...` path in the generated link — the URL is now built relative to the output base and URL-encoded — which previously 404'd even for authenticated users.
+- **A chat with zero featured discussions no longer crashes its per-chat worker.** The empty-newsletter path dropped the target language, sending `None` into the LangTalks i18n resolver, which crashed on `None.lower()` (observed on the English chat when it had no qualifying content). `get_langtalks_i18n` is now null-safe (falls back to the English default), the coerced language is forwarded through the empty-newsletter render path, and the consolidated assembler coerces a null language at its render boundary.
+- **LangGraph checkpointer works with `langgraph-checkpoint-mongodb` 0.4.0.** `MongoDBSaver.setup()` (removed in 0.4.0, which provisions collections lazily) is now called only when the installed version still exposes it, preventing a startup crash on the newer dependency.
+
 ## [1.18.0] - 2026-06-21
 
 ### Added
@@ -374,7 +397,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.18.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/eladlaor/langrag/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/eladlaor/langrag/compare/v1.17.7...v1.18.0
 [1.17.7]: https://github.com/eladlaor/langrag/compare/v1.17.6...v1.17.7
 [1.17.6]: https://github.com/eladlaor/langrag/compare/v1.17.5...v1.17.6

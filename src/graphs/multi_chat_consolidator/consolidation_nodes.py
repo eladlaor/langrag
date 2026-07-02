@@ -38,22 +38,26 @@ from constants import (
     NewsletterVersionType,
     NodeNames,
     DIR_NAME_CONSOLIDATED,
-    DIR_NAME_AGGREGATED_DISCUSSIONS,
-    DIR_NAME_DISCUSSIONS_RANKING,
-    DIR_NAME_NEWSLETTER,
-    DIR_NAME_LINK_ENRICHMENT,
-    DIR_NAME_FINAL_TRANSLATION,
+    DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS,
+    DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING,
+    DIR_NAME_CONSOLIDATED_NEWSLETTER,
+    DIR_NAME_CONSOLIDATED_LINK_ENRICHMENT,
+    DIR_NAME_CONSOLIDATED_FINAL_NEWSLETTER,
     OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS,
     OUTPUT_FILENAME_CROSS_CHAT_RANKING,
     OUTPUT_FILENAME_CONSOLIDATED_NEWSLETTER_JSON,
     OUTPUT_FILENAME_CONSOLIDATED_NEWSLETTER_MD,
     OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_JSON,
     OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_MD,
-    OUTPUT_FILENAME_TRANSLATED_CONSOLIDATED_MD,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_JSON,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_MD,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_HTML,
     RESULT_KEY_NEWSLETTER_SUMMARY_PATH,
     RESULT_KEY_MARKDOWN_PATH,
     OUTPUT_FILENAME_MERGED_DISCUSSIONS,
 )
+from custom_types.newsletter_formats import get_format
+from custom_types.translated_newsletter_schemas import merge_enrichment_only_keys, resolve_translated_newsletter_dict
 from graphs.single_chat_analyzer.generate_content_helpers import simplify_discussions_for_prompt
 from graphs.multi_chat_consolidator.state import ParallelOrchestratorState
 from graphs.subgraphs.state import DiscussionRankerState, LinkEnricherState
@@ -190,11 +194,13 @@ def setup_consolidated_directories(state: ParallelOrchestratorState, config: Run
     # Create subdirectories
     dirs = {
         "consolidated_output_dir": consolidated_output_dir,
-        "consolidated_aggregated_discussions_dir": os.path.join(consolidated_output_dir, DIR_NAME_AGGREGATED_DISCUSSIONS),
-        "consolidated_ranking_dir": os.path.join(consolidated_output_dir, DIR_NAME_DISCUSSIONS_RANKING),
-        "consolidated_newsletter_dir": os.path.join(consolidated_output_dir, DIR_NAME_NEWSLETTER),
-        "consolidated_enrichment_dir": os.path.join(consolidated_output_dir, DIR_NAME_LINK_ENRICHMENT),
-        "consolidated_translation_dir": os.path.join(consolidated_output_dir, DIR_NAME_FINAL_TRANSLATION),
+        "consolidated_aggregated_discussions_dir": os.path.join(consolidated_output_dir, DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS),
+        "consolidated_ranking_dir": os.path.join(consolidated_output_dir, DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING),
+        "consolidated_newsletter_dir": os.path.join(consolidated_output_dir, DIR_NAME_CONSOLIDATED_NEWSLETTER),
+        "consolidated_enrichment_dir": os.path.join(consolidated_output_dir, DIR_NAME_CONSOLIDATED_LINK_ENRICHMENT),
+        # Final deliverable dir. Holds the final_newsletter.{json,md,html} triplet
+        # (the ONLY stage that emits html). Mapped to CONSOLIDATED_TRANSLATION_DIR.
+        "consolidated_translation_dir": os.path.join(consolidated_output_dir, DIR_NAME_CONSOLIDATED_FINAL_NEWSLETTER),
     }
 
     # Create all directories
@@ -215,7 +221,9 @@ def setup_consolidated_directories(state: ParallelOrchestratorState, config: Run
         "expected_consolidated_newsletter_md": os.path.join(dirs["consolidated_newsletter_dir"], OUTPUT_FILENAME_CONSOLIDATED_NEWSLETTER_MD),
         "expected_consolidated_enriched_json": os.path.join(dirs["consolidated_enrichment_dir"], OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_JSON),
         "expected_consolidated_enriched_md": os.path.join(dirs["consolidated_enrichment_dir"], OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_MD),
-        "expected_consolidated_translated_file": os.path.join(dirs["consolidated_translation_dir"], OUTPUT_FILENAME_TRANSLATED_CONSOLIDATED_MD),
+        # Hard-cut (no legacy translated_consolidated.md): the skip/exists probe
+        # now targets the final deliverable md in the triplet.
+        "expected_consolidated_translated_file": os.path.join(dirs["consolidated_translation_dir"], OUTPUT_FILENAME_FINAL_NEWSLETTER_MD),
     }
 
     logger.info("Consolidated directories setup completed")
@@ -345,7 +353,7 @@ async def consolidate_discussions(state: ParallelOrchestratorState, config: Runn
 
             for idx, discussion in enumerate(chat_discussions):
                 # Preserve original ID
-                original_id = discussion.get(DiscussionKeys.ID, f"discussion_{idx+1}")
+                original_id = discussion.get(DiscussionKeys.ID, f"discussion_{idx + 1}")
 
                 # Build the consolidated view as a NEW dict rather than mutating the
                 # loaded object. Rewriting id/original_id/source_chat in place is
@@ -583,7 +591,7 @@ async def merge_similar_discussions(state: ParallelOrchestratorState, config: Ru
         merge_group_summaries = [f"'{mg.suggested_title}' ({len(mg.discussion_ids)} discussions from {', '.join(mg.source_groups)})" for mg in merge_result.merge_groups]
         logger.info(f"Merged {merge_result.merge_operations} groups: {'; '.join(merge_group_summaries)}")
 
-    logger.info(f"Discussion merging complete: {merge_result.original_count} → {merge_result.merged_count} " f"({merge_result.merge_operations} merge operations)")
+    logger.info(f"Discussion merging complete: {merge_result.original_count} → {merge_result.merged_count} ({merge_result.merge_operations} merge operations)")
 
     return {
         OrchestratorKeys.MERGED_DISCUSSIONS_FILE_PATH: merged_file_path,
@@ -956,29 +964,29 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
     ranking_path = state.get(OrchestratorKeys.CONSOLIDATED_RANKING_PATH)
 
     if not ranking_path:
-        raise RuntimeError("Missing consolidated_ranking_path in state. " "The rank_consolidated_discussions node must run before generate_consolidated_newsletter.")
+        raise RuntimeError("Missing consolidated_ranking_path in state. The rank_consolidated_discussions node must run before generate_consolidated_newsletter.")
 
     if not os.path.exists(ranking_path):
-        raise FileNotFoundError(f"Consolidated ranking file not found: {ranking_path}. " "Ensure the rank_consolidated_discussions node completed successfully.")
+        raise FileNotFoundError(f"Consolidated ranking file not found: {ranking_path}. Ensure the rank_consolidated_discussions node completed successfully.")
 
     try:
         # Offload blocking read off the event loop
         ranking_data = await asyncio.to_thread(_load_json_file, ranking_path)
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Invalid JSON in consolidated ranking file {ranking_path}: {e}. " "The ranking file is corrupted or malformed.")
+        raise RuntimeError(f"Invalid JSON in consolidated ranking file {ranking_path}: {e}. The ranking file is corrupted or malformed.")
     except Exception as e:
         raise RuntimeError(f"Failed to read consolidated ranking file {ranking_path}: {e}")
 
     featured_discussion_ids = ranking_data.get(RankingResultKeys.FEATURED_DISCUSSION_IDS)
     if featured_discussion_ids is None:
-        raise RuntimeError(f"Consolidated ranking file {ranking_path} missing 'featured_discussion_ids' field. " "This indicates the ranking was generated with an older version. " "Please re-run with force_refresh_cross_chat_ranking=true.")
+        raise RuntimeError(f"Consolidated ranking file {ranking_path} missing 'featured_discussion_ids' field. This indicates the ranking was generated with an older version. Please re-run with force_refresh_cross_chat_ranking=true.")
 
     brief_mention_items = ranking_data.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])
     logger.info(f"Loaded consolidated ranking: {len(featured_discussion_ids)} featured, {len(brief_mention_items)} brief_mention")
 
     # Filter discussions to only include featured ones
     if not featured_discussion_ids:
-        raise RuntimeError("No featured_discussion_ids found in consolidated ranking. " "The ranking file exists but contains no featured discussions. " "This may indicate all discussions were marked as 'skip'.")
+        raise RuntimeError("No featured_discussion_ids found in consolidated ranking. The ranking file exists but contains no featured discussions. This may indicate all discussions were marked as 'skip'.")
 
     try:
         # Offload blocking read off the event loop
@@ -999,7 +1007,7 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
     featured_discussions = [d for d in all_discussions if d.get(DiscussionKeys.ID) in featured_ids_set]
 
     if not featured_discussions:
-        raise RuntimeError(f"No matching discussions found for featured IDs in consolidated newsletter. " f"Featured IDs from ranking: {featured_discussion_ids}. " f"Discussion IDs in file: {[d.get(DiscussionKeys.ID) for d in all_discussions]}. " "This indicates a mismatch between ranking and aggregated discussions files.")
+        raise RuntimeError(f"No matching discussions found for featured IDs in consolidated newsletter. Featured IDs from ranking: {featured_discussion_ids}. Discussion IDs in file: {[d.get(DiscussionKeys.ID) for d in all_discussions]}. This indicates a mismatch between ranking and aggregated discussions files.")
 
     logger.info(f"Filtered to {len(featured_discussions)} featured discussions out of {len(all_discussions)} total")
 
@@ -1103,7 +1111,7 @@ async def generate_consolidated_newsletter(state: ParallelOrchestratorState, con
                     featured_count=featured_count,
                     brief_mention_count=brief_count,
                 )
-                logger.info(f"Consolidated newsletter scores - " f"Structural: {scores['structural_completeness']:.2f}, " f"Coverage: {scores['ranking_coverage']:.2f}, " f"Balance: {scores['content_balance']:.2f}")
+                logger.info(f"Consolidated newsletter scores - Structural: {scores['structural_completeness']:.2f}, Coverage: {scores['ranking_coverage']:.2f}, Balance: {scores['content_balance']:.2f}")
             except Exception as e:
                 logger.warning(f"Failed to score consolidated newsletter: {e}")
 
@@ -1344,24 +1352,37 @@ async def translate_consolidated_newsletter(state: ParallelOrchestratorState, co
     logger.info("Node: translate_consolidated_newsletter - Starting")
 
     desired_language = state[OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY].lower()
+    is_english_target = desired_language in ENGLISH_LANGUAGE_CODES
 
-    # Check if translation is needed
-    if desired_language in ENGLISH_LANGUAGE_CODES:
-        logger.info("Target language is English, skipping translation")
-        return {OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: None}
+    # Resolve the final deliverable dir + triplet paths. The final dir is the
+    # ONLY stage that emits html (Design Decision: html is final-stage-only), so
+    # it is produced for BOTH English and non-English targets. Rendering it for
+    # English too guarantees the email always resolves the CONSOLIDATED final
+    # html instead of silently falling through to a per-chat newsletter.
+    final_dir = state[OrchestratorKeys.CONSOLIDATED_TRANSLATION_DIR]
+    final_md_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_MD)
+    final_html_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_HTML)
+    final_json_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_JSON)
 
-    # Check if we should skip
-    expected_file = state[OrchestratorKeys.EXPECTED_CONSOLIDATED_TRANSLATED_FILE]
+    # Skip only when the full triplet already exists and no refresh was forced.
     force_refresh = state.get(OrchestratorKeys.FORCE_REFRESH_CONSOLIDATED_TRANSLATION, False)
+    triplet_exists = all(os.path.exists(p) for p in (final_md_path, final_html_path, final_json_path))
+    if triplet_exists and not force_refresh:
+        logger.info("Final consolidated newsletter triplet already exists, skipping translation")
+        return {
+            OrchestratorKeys.CONSOLIDATED_FINAL_JSON_PATH: final_json_path,
+            OrchestratorKeys.CONSOLIDATED_FINAL_MD_PATH: final_md_path,
+            OrchestratorKeys.CONSOLIDATED_FINAL_HTML_PATH: final_html_path,
+            OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: None if is_english_target else final_md_path,
+        }
 
-    if os.path.exists(expected_file) and not force_refresh:
-        logger.info("Translated consolidated newsletter already exists, skipping translation")
-        return {OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: expected_file}
-
-    # Get enriched newsletter MD path (not JSON)
-    enriched_md = state.get(OrchestratorKeys.CONSOLIDATED_ENRICHED_MD_PATH)
-    if not enriched_md or not os.path.exists(enriched_md):
-        error_msg = f"Enriched newsletter markdown not found for translation: {enriched_md}"
+    # Load the enriched structured JSON (source of truth for the triplet), for
+    # BOTH language branches. The structured translate op preserves keys/URLs and
+    # returns a same-shaped dict, so md/html/json all render from the resulting
+    # dict. Fail-fast if missing regardless of target language.
+    enriched_json = state.get(OrchestratorKeys.CONSOLIDATED_ENRICHED_JSON_PATH)
+    if not enriched_json or not os.path.exists(enriched_json):
+        error_msg = f"Enriched newsletter JSON not found for final render: {enriched_json}"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
@@ -1373,40 +1394,70 @@ async def translate_consolidated_newsletter(state: ParallelOrchestratorState, co
         # Get data source info from state
         data_source_name = state[OrchestratorKeys.DATA_SOURCE_NAME]
         summary_format = state[OrchestratorKeys.SUMMARY_FORMAT]
-        start_date = state[OrchestratorKeys.START_DATE]
-        end_date = state[OrchestratorKeys.END_DATE]
 
-        # Use a representative chat name for the content generator
-        # (the translation doesn't use this for actual content, just for factory selection)
-        chat_names = state.get(OrchestratorKeys.CHAT_NAMES, [])
-        representative_chat_name = chat_names[0] if chat_names else "Consolidated"
+        with open(enriched_json, encoding="utf-8") as f:
+            enriched_dict = json.load(f)
 
-        # Create content generator using existing factory
-        content_generator = ContentGeneratorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, source_name=data_source_name, chat_name=representative_chat_name, summary_format=summary_format)
-
-        # Prepare date string
-        if start_date == end_date:
-            date_str = start_date
+        if is_english_target:
+            # No translation needed: render the triplet directly from the enriched
+            # dict (no LLM call). This preserves ALL enrichment-only keys verbatim.
+            translated_dict = enriched_dict
         else:
-            date_str = f"{start_date} to {end_date}"
+            # Use a representative chat name for the content generator
+            # (the translation doesn't use this for actual content, just for
+            # factory selection).
+            chat_names = state.get(OrchestratorKeys.CHAT_NAMES, [])
+            representative_chat_name = chat_names[0] if chat_names else "Consolidated"
 
-        # Translate using existing infrastructure
-        translation_result = await content_generator.generate_content(operation=ContentGenerationOperations.TRANSLATE_SUMMARY, data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, data_source_path=enriched_md, group_name="Consolidated Newsletter", expected_final_translated_file_path=expected_file, date=date_str, desired_language_for_summary=desired_language)
+            content_generator = ContentGeneratorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, source_name=data_source_name, chat_name=representative_chat_name, summary_format=summary_format)
 
-        # Verify output file was created
-        if not os.path.exists(expected_file):
-            raise RuntimeError(f"Translation did not create expected file: {expected_file}")
+            # Structured translate: returns a same-shaped translated dict (keys/URLs
+            # preserved). generate_content still guards for a non-empty
+            # data_source_path, so the enriched JSON path doubles as the source.
+            translation_result = await content_generator.generate_content(
+                operation=ContentGenerationOperations.TRANSLATE_NEWSLETTER_STRUCTURED,
+                data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES,
+                data_source_path=enriched_json,
+                group_name="Consolidated Newsletter",
+                desired_language_for_summary=desired_language,
+            )
 
-        logger.info(f"Consolidated newsletter translated to {desired_language}: {expected_file}")
+            translated_dict = resolve_translated_newsletter_dict(translation_result)
+            # The strict generation schema drops enrichment-only top-level keys
+            # (link_enrichment_metadata, links_inserted, metadata). Re-attach them
+            # from the enriched dict so the non-English final JSON is structurally
+            # identical to the English one (which renders the enriched dict as-is).
+            translated_dict = merge_enrichment_only_keys(translated_dict, enriched_dict)
 
-        # === MONGODB PERSISTENCE: Store translated consolidated newsletter (native async) ===
+        # Render + write the triplet from the resolved dict (shared render/write
+        # path for both language branches).
+        fmt = get_format(summary_format)
+        os.makedirs(final_dir, exist_ok=True)
+
+        with open(final_json_path, "w", encoding="utf-8") as f:
+            json.dump(translated_dict, f, indent=2, ensure_ascii=False)
+        with open(final_md_path, "w", encoding="utf-8") as f:
+            f.write(fmt.render_markdown(translated_dict, desired_language))
+        with open(final_html_path, "w", encoding="utf-8") as f:
+            f.write(fmt.render_html(translated_dict, desired_language))
+
+        for p in (final_json_path, final_md_path, final_html_path):
+            if not os.path.exists(p) or os.path.getsize(p) == 0:
+                raise RuntimeError(f"Final newsletter triplet member missing or empty after render: {p}")
+
+        logger.info(f"Consolidated final newsletter triplet written to {final_dir} (language={desired_language}, english_target={is_english_target})")
+
+        # === MONGODB PERSISTENCE: Store final (translated) consolidated newsletter ===
+        # Only persist a TRANSLATED version when an actual translation was
+        # performed (non-English target); mirrors the per-chat node. For English
+        # the enriched version already reflects the final content.
         mongodb_run_id = state.get(OrchestratorKeys.MONGODB_RUN_ID)
-        if mongodb_run_id:
+        if mongodb_run_id and not is_english_target:
             tracker = get_tracker()
             newsletter_id = f"{mongodb_run_id}_nl_consolidated"
 
-            # Fail-soft: the TRANSLATED consolidated newsletter is a regenerable
-            # derivative, so a late persistence blip must not abort an
+            # Fail-soft: the FINAL/TRANSLATED consolidated newsletter is a
+            # regenerable derivative, so a late persistence blip must not abort an
             # otherwise-complete run. Caught here so it does NOT reach the outer
             # except (which re-raises as RuntimeError). Raw messages /
             # discussions / polls / original newsletter remain fail-hard; see
@@ -1422,14 +1473,19 @@ async def translate_consolidated_newsletter(state: ParallelOrchestratorState, co
                     end_date=state[OrchestratorKeys.END_DATE],
                     summary_format=state[OrchestratorKeys.SUMMARY_FORMAT],
                     desired_language=state[OrchestratorKeys.DESIRED_LANGUAGE_FOR_SUMMARY],
-                    json_path="",  # Not applicable for translated version
-                    md_path=expected_file,
+                    json_path=final_json_path,
+                    md_path=final_md_path,
                     version_type=NewsletterVersionType.TRANSLATED,
                 )
             except Exception as e:
                 logger.error("Failed to persist TRANSLATED consolidated newsletter to MongoDB (fail-soft)", extra={"event": "store_newsletter_failed", "run_id": mongodb_run_id, "newsletter_id": newsletter_id, "version_type": str(NewsletterVersionType.TRANSLATED), "error": str(e)})
 
-        return {OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: expected_file}
+        return {
+            OrchestratorKeys.CONSOLIDATED_FINAL_JSON_PATH: final_json_path,
+            OrchestratorKeys.CONSOLIDATED_FINAL_MD_PATH: final_md_path,
+            OrchestratorKeys.CONSOLIDATED_FINAL_HTML_PATH: final_html_path,
+            OrchestratorKeys.CONSOLIDATED_TRANSLATED_PATH: None if is_english_target else final_md_path,
+        }
 
     except Exception as e:
         error_msg = f"Failed to translate consolidated newsletter: {e}"

@@ -24,7 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from api.sse import STAGE_EXTRACT_IMAGES, with_logging, with_progress
 from config import get_settings, Settings
 from constants import (
-    DIR_NAME_IMAGES,
+    DIR_NAME_PERCHAT_IMAGES,
     NodeNames,
     VisionDescribeScope,
     WORKFLOW_NAME_NEWSLETTER_GENERATION,
@@ -85,10 +85,7 @@ async def extract_images_node(state: SingleChatState, config: RunnableConfig | N
     stats = ImageExtractionStats(enabled=True)
 
     if not chat_name or not data_source_name or not output_dir:
-        logger.error(
-            f"Missing required state fields for image extraction: "
-            f"chat_name={chat_name}, data_source_name={data_source_name}, output_dir={output_dir}"
-        )
+        logger.error(f"Missing required state fields for image extraction: chat_name={chat_name}, data_source_name={data_source_name}, output_dir={output_dir}")
         return {Keys.IMAGE_EXTRACTION_STATS: stats.model_dump()}
 
     try:
@@ -129,7 +126,7 @@ async def extract_images_node(state: SingleChatState, config: RunnableConfig | N
             return {Keys.IMAGE_EXTRACTION_STATS: stats.model_dump()}
 
         # 5. Download images
-        images_dir = os.path.join(output_dir, DIR_NAME_IMAGES)
+        images_dir = os.path.join(output_dir, DIR_NAME_PERCHAT_IMAGES)
         os.makedirs(images_dir, exist_ok=True)
 
         homeserver_url = settings.beeper.base_url
@@ -161,11 +158,7 @@ async def extract_images_node(state: SingleChatState, config: RunnableConfig | N
         async with aiofiles.open(manifest_path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(manifest_data, ensure_ascii=False, indent=2))
 
-        logger.info(
-            f"Image extraction complete for chat_name={chat_name}: "
-            f"found={stats.total_images_found}, downloaded={stats.images_downloaded}, "
-            f"described={stats.images_described}"
-        )
+        logger.info(f"Image extraction complete for chat_name={chat_name}: found={stats.total_images_found}, downloaded={stats.images_downloaded}, described={stats.images_described}")
 
         return {
             Keys.IMAGE_EXTRACTION_STATS: stats.model_dump(),
@@ -197,10 +190,7 @@ async def _deduplicate_images(images: list[ImageMetadata]) -> list[ImageMetadata
         new_images = [img for img in images if img.mxc_url not in existing_urls]
 
         if len(images) != len(new_images):
-            logger.info(
-                f"Deduplication: {len(images)} → {len(new_images)} images "
-                f"({len(images) - len(new_images)} already stored)"
-            )
+            logger.info(f"Deduplication: {len(images)} → {len(new_images)} images ({len(images) - len(new_images)} already stored)")
         return new_images
 
     except Exception as e:
@@ -266,10 +256,7 @@ async def _describe_images(
         from constants import DEFAULT_LLM_PROVIDER
 
         if settings.vision.provider != DEFAULT_LLM_PROVIDER:
-            logger.warning(
-                f"Vision provider '{settings.vision.provider}' not supported for image description, "
-                f"only '{DEFAULT_LLM_PROVIDER}' is currently implemented. Skipping."
-            )
+            logger.warning(f"Vision provider '{settings.vision.provider}' not supported for image description, only '{DEFAULT_LLM_PROVIDER}' is currently implemented. Skipping.")
             return images
 
         llm_provider = OpenAIProvider()

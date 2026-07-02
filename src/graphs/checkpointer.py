@@ -50,7 +50,8 @@ async def get_checkpointer() -> MongoDBSaver:
 
     Fail-Fast Conditions:
         - MongoDB sync client unavailable (raised from get_sync_database)
-        - setup() (collection/index creation) fails
+        - setup() (collection/index creation) fails, when the installed
+          MongoDBSaver still exposes it (0.4.0 provisions lazily instead)
     """
     global _checkpointer
 
@@ -73,7 +74,13 @@ async def get_checkpointer() -> MongoDBSaver:
             writes_collection_name=settings.checkpointer.writes_collection,
             ttl=settings.checkpointer.ttl_seconds,
         )
-        _checkpointer.setup()
+        # langgraph-checkpoint-mongodb removed the explicit setup() step: the
+        # 0.4.0 MongoDBSaver provisions its collections lazily and exposes no
+        # setup attribute. Call it only when present so we stay correct across
+        # builds that still ship it (collection/index creation is otherwise a
+        # no-op MongoDB performs on first write).
+        if hasattr(_checkpointer, "setup"):
+            _checkpointer.setup()
         logger.info(
             "Checkpointer initialized (MongoDB)",
             extra={

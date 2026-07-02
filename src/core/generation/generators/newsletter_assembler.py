@@ -25,6 +25,7 @@ from constants import (
     RESULT_KEY_TRANSLATED_PATH,
     OUTPUT_FILENAME_IMAGE_MANIFEST,
     MAX_IMAGES_TOTAL,
+    DEFAULT_LANGUAGE,
 )
 from custom_types.field_keys import DiscussionKeys, ImageKeys, NewsletterStructureKeys
 from custom_types.newsletter_formats.langtalks.renderer import LangTalksRenderer
@@ -278,7 +279,10 @@ class NewsletterAssembler:
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(newsletter_json, f, indent=2, ensure_ascii=False)
 
-        # Render HTML and MD
+        # Render HTML and MD. Coerce a null/empty language to the default so the
+        # renderer's i18n resolver never receives None (belt-and-braces with the
+        # null-safe get_langtalks_i18n).
+        language = language or DEFAULT_LANGUAGE
         renderer = LangTalksRenderer()
 
         html = renderer.render_html(newsletter_json, language)

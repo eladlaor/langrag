@@ -252,6 +252,11 @@ app.include_router(media.router, prefix=API_V1_PREFIX, tags=["media"])
 # newsletter / runs / schedules / RAG data without a valid session cookie.
 _session_gate = [Depends(require_session)]
 app.include_router(newsletter_gen.router, prefix=API_V1_PREFIX, tags=["newsletter-generation"], dependencies=_session_gate)
+# Public newsletter routes — mounted WITHOUT the session gate on purpose. The
+# email "View Newsletter" link is opened by recipients with no login cookie, so
+# newsletter_html_viewer must be reachable unauthenticated. It is safe: it
+# enforces output-dir path containment (realpath + commonpath) and HTML-only.
+app.include_router(newsletter_gen.public_router, prefix=API_V1_PREFIX, tags=["newsletter-public"])
 # Was previously mounted with no session gate (the only UI-data router lacking
 # one). Closed while hardening the auth boundary: batch orchestration triggers
 # real newsletter runs and must not be reachable unauthenticated.

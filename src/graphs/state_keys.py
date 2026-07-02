@@ -58,6 +58,7 @@ class SingleChatStateKeys:
     CONTENT_DIR = "content_dir"
     LINK_ENRICHMENT_DIR = "link_enrichment_dir"
     FINAL_TRANSLATED_CONTENT_DIR = "final_translated_content_dir"
+    FINAL_NEWSLETTER_DIR = "final_newsletter_dir"
 
     # === Expected File Paths (Set by setup_directories node) ===
     EXPECTED_EXTRACTED_FILE = "expected_extracted_file"
@@ -87,6 +88,11 @@ class SingleChatStateKeys:
     ENRICHED_NEWSLETTER_JSON_PATH = "enriched_newsletter_json_path"
     ENRICHED_NEWSLETTER_MD_PATH = "enriched_newsletter_md_path"
     FINAL_TRANSLATED_FILE_PATH = "final_translated_file_path"
+    # Final deliverable triplet for single-chat (non-consolidated) runs.
+    # Parity with OrchestratorKeys.CONSOLIDATED_FINAL_*; the ONLY html emitter.
+    FINAL_NEWSLETTER_JSON_PATH = "final_newsletter_json_path"
+    FINAL_NEWSLETTER_MD_PATH = "final_newsletter_md_path"
+    FINAL_NEWSLETTER_HTML_PATH = "final_newsletter_html_path"
 
     # === MongoDB Newsletter IDs (Primary - MongoDB-First Architecture) ===
     NEWSLETTER_ID = "newsletter_id"
@@ -221,6 +227,11 @@ class ParallelOrchestratorStateKeys:
     CONSOLIDATED_ENRICHED_JSON_PATH = "consolidated_enriched_json_path"
     CONSOLIDATED_ENRICHED_MD_PATH = "consolidated_enriched_md_path"
     CONSOLIDATED_TRANSLATED_PATH = "consolidated_translated_path"
+    # Final deliverable triplet (rendered from the translated structured dict).
+    # This is the ONLY stage that emits html; the email resolves off it.
+    CONSOLIDATED_FINAL_JSON_PATH = "consolidated_final_json_path"
+    CONSOLIDATED_FINAL_MD_PATH = "consolidated_final_md_path"
+    CONSOLIDATED_FINAL_HTML_PATH = "consolidated_final_html_path"
 
     # === MongoDB Consolidated Newsletter IDs (Primary - MongoDB-First Architecture) ===
     CONSOLIDATED_NEWSLETTER_ID = "consolidated_newsletter_id"

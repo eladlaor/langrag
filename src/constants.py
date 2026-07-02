@@ -155,6 +155,14 @@ SESSION_SUBJECT_VALUE = "langrag-ui"
 SESSION_ROLE_CLAIM = "role"
 SESSION_EPOCH_CLAIM = "epoch"
 
+# Internal machine-to-machine auth on session-gated routes. A request presenting
+# the configured shared secret (LANGRAG_LOGIN_INTERNAL_API_KEY) in this header
+# resolves to the admin-equivalent service principal below, bypassing the cookie.
+INTERNAL_API_KEY_HEADER = "X-Internal-Key"
+# user_id/email assigned to the resolved service principal. Distinct from the
+# dev sentinel's SESSION_SUBJECT_VALUE so the two are unambiguous in logs/audits.
+SERVICE_PRINCIPAL_SUBJECT = "langrag-internal-service"
+
 
 class CookieSameSite(StrEnum):
     """SameSite policy values for the session cookie."""
@@ -277,9 +285,10 @@ LANGTALKS_I18N = {
         "footer_signup_button": "הרשמה לניוזלטר",
         "worth_mentioning_heading": "🧰 נושאים נוספים שעלו",
         "attribution_prefix": "📅 הדיון המלא התחיל בתאריך:",
-        "merged_discussed_in": "📍 נדון ב-{count} קבוצות: {groups}",
+        "merged_discussed_in": "📍 דובר ב-{count} קבוצות: {groups}",
         "merged_attribution_header": "📅 **נדון בקבוצות הבאות:**",
         "merged_started_at": "התחיל ב-{date}, {time}",
+        "engagement_stats": "💬 {messages} הודעות | 👥 {participants} משתתפים",
         "images_shared_heading": "🖼️ תמונות ששותפו",
     },
     "english": {
@@ -293,14 +302,20 @@ LANGTALKS_I18N = {
         "merged_discussed_in": "📍 Discussed in {count} groups: {groups}",
         "merged_attribution_header": "📅 **Discussed in the following groups:**",
         "merged_started_at": "started on {date}, {time}",
+        "engagement_stats": "💬 {messages} messages | 👥 {participants} participants",
         "images_shared_heading": "🖼️ Images shared",
     },
 }
 
 
-def get_langtalks_i18n(desired_language: str) -> dict:
-    """Get LangTalks i18n strings for the given language, defaulting to English."""
-    if desired_language.lower() in HEBREW_LANGUAGE_CODES:
+def get_langtalks_i18n(desired_language: str | None) -> dict:
+    """Get LangTalks i18n strings for the given language, defaulting to English.
+
+    Null-safe: a None/empty language (which can reach this shared sink from the
+    empty-newsletter render path) resolves to the English default rather than
+    raising on ``.lower()``.
+    """
+    if desired_language and desired_language.lower() in HEBREW_LANGUAGE_CODES:
         return LANGTALKS_I18N["hebrew"]
     return LANGTALKS_I18N["english"]
 
@@ -416,11 +431,17 @@ HTTP_STATUS_CONFLICT = 409
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_UNPROCESSABLE_ENTITY = 422
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
+HTTP_STATUS_SERVICE_UNAVAILABLE = 503
 
 # Generic client-facing detail for 5xx responses. Internal exception text
 # (paths, driver errors, stack context) MUST be logged server-side, never
 # returned in the HTTP body where it leaks implementation detail to callers.
 HTTP_DETAIL_INTERNAL_ERROR = "Internal server error"
+
+# Client-facing 503 detail emitted when the RAG concurrency cap is hit.
+HTTP_DETAIL_RAG_OVERLOADED = "RAG service is at capacity. Please retry shortly."
+# Response header name carrying the retry backoff (seconds) on a 503 shed.
+HTTP_HEADER_RETRY_AFTER = "Retry-After"
 
 
 # ============================================================================
@@ -648,6 +669,12 @@ OUTPUT_FILENAME_CONSOLIDATED_NEWSLETTER_MD = "consolidated_newsletter.md"
 OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_JSON = "enriched_consolidated.json"
 OUTPUT_FILENAME_ENRICHED_CONSOLIDATED_MD = "enriched_consolidated.md"
 OUTPUT_FILENAME_TRANSLATED_CONSOLIDATED_MD = "translated_consolidated.md"
+# Final newsletter deliverable triplet (the actual emailed/delivered output).
+# Rendered ONLY at the final stage from the translated structured dict.
+OUTPUT_FILESTEM_FINAL_NEWSLETTER = "final_newsletter"
+OUTPUT_FILENAME_FINAL_NEWSLETTER_JSON = f"{OUTPUT_FILESTEM_FINAL_NEWSLETTER}{FILE_EXT_JSON}"
+OUTPUT_FILENAME_FINAL_NEWSLETTER_MD = f"{OUTPUT_FILESTEM_FINAL_NEWSLETTER}{FILE_EXT_MD}"
+OUTPUT_FILENAME_FINAL_NEWSLETTER_HTML = f"{OUTPUT_FILESTEM_FINAL_NEWSLETTER}{FILE_EXT_HTML}"
 OUTPUT_FILENAME_SENDER_MAP = "sender_map.json"
 OUTPUT_FILENAME_MESSAGE_STATS = "message_stats.json"
 OUTPUT_FILENAME_MESSAGES_PROCESSED_TEMP = "messages_processed_temp.json"
@@ -665,14 +692,33 @@ MAX_IMAGES_TOTAL = 15
 # DIRECTORY CONSTANTS
 # ============================================================================
 
-# Output directory names
+# Output directory names.
+#
+# Two families of stage-dir names coexist:
+#   * NUMBERED stage dirs (below) are what NEW runs WRITE. Each value is prefixed
+#     with its zero-padded pipeline order so a directory listing reads in
+#     pipeline order. Numbers are static, with gaps for optional stages (e.g. the
+#     per-chat images stage is 02 and simply absent when image extraction is off);
+#     no dynamic renumbering.
+#   * The un-numbered LEGACY_* names capture the pre-numbering layout so readers
+#     can still resolve HISTORICAL on-disk runs (Decision 3: reader fallback, no
+#     migration). The same short constant (e.g. DIR_NAME_NEWSLETTER) is shared by
+#     both pipelines at DIFFERENT numbered positions, so it cannot carry a single
+#     numbered value; the numbered writer dirs are therefore SEPARATE per-pipeline
+#     constants and the short names retain their legacy un-numbered values for
+#     backward-compatible READS.
 DIR_NAME_CONSOLIDATED = "consolidated"
 DIR_NAME_PER_CHAT = "per_chat"
+DIR_NAME_DISCUSSIONS_FOR_SELECTION = "discussions_for_selection"
+DIR_NAME_AFTER_SELECTION = "after_selection"
+DIR_NAME_PODCASTS = "podcasts"
+
+# Legacy (pre-numbering) stage-dir names. Values unchanged so readers can still
+# find historical runs written before the numbering scheme.
 DIR_NAME_NEWSLETTER = "newsletter"
 DIR_NAME_LINK_ENRICHMENT = "link_enrichment"
 DIR_NAME_FINAL_TRANSLATION = "final_translation"
-DIR_NAME_DISCUSSIONS_FOR_SELECTION = "discussions_for_selection"
-DIR_NAME_AFTER_SELECTION = "after_selection"
+DIR_NAME_FINAL_NEWSLETTER = "final_newsletter"
 DIR_NAME_AGGREGATED_DISCUSSIONS = "aggregated_discussions"
 DIR_NAME_EXTRACTED = "extracted"
 DIR_NAME_PREPROCESSED = "preprocessed"
@@ -680,7 +726,51 @@ DIR_NAME_TRANSLATED = "translated"
 DIR_NAME_SEPARATE_DISCUSSIONS = "separate_discussions"
 DIR_NAME_DISCUSSIONS_RANKING = "discussions_ranking"
 DIR_NAME_IMAGES = "images"
-DIR_NAME_PODCASTS = "podcasts"
+
+# Numbered CONSOLIDATED stage dirs (what new consolidated runs write).
+DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS = "01_aggregated_discussions"
+DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING = "02_discussions_ranking"
+DIR_NAME_CONSOLIDATED_NEWSLETTER = "03_newsletter"
+DIR_NAME_CONSOLIDATED_LINK_ENRICHMENT = "04_link_enrichment"
+DIR_NAME_CONSOLIDATED_FINAL_NEWSLETTER = "05_final_newsletter"
+
+# Numbered PER-CHAT stage dirs (what new per-chat runs write). 02_images is
+# optional and only created when image extraction is enabled.
+DIR_NAME_PERCHAT_EXTRACTED = "01_extracted"
+DIR_NAME_PERCHAT_IMAGES = "02_images"
+DIR_NAME_PERCHAT_PREPROCESSED = "03_preprocessed"
+DIR_NAME_PERCHAT_TRANSLATED = "04_translated"
+DIR_NAME_PERCHAT_SEPARATE_DISCUSSIONS = "05_separate_discussions"
+DIR_NAME_PERCHAT_DISCUSSIONS_RANKING = "06_discussions_ranking"
+DIR_NAME_PERCHAT_NEWSLETTER = "07_newsletter"
+DIR_NAME_PERCHAT_LINK_ENRICHMENT = "08_link_enrichment"
+DIR_NAME_PERCHAT_FINAL_NEWSLETTER = "09_final_newsletter"
+
+# Candidate dir-name lists for backward-compatible reads: probe the new numbered
+# name first, then the legacy un-numbered name, and use whichever exists on disk.
+# Consolidated final-newsletter stage (numbered -> legacy final_newsletter ->
+# legacy final_translation).
+CONSOLIDATED_FINAL_NEWSLETTER_DIR_CANDIDATES = (
+    DIR_NAME_CONSOLIDATED_FINAL_NEWSLETTER,
+    DIR_NAME_FINAL_NEWSLETTER,
+    DIR_NAME_FINAL_TRANSLATION,
+)
+CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES = (
+    DIR_NAME_CONSOLIDATED_NEWSLETTER,
+    DIR_NAME_NEWSLETTER,
+)
+CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES = (
+    DIR_NAME_CONSOLIDATED_LINK_ENRICHMENT,
+    DIR_NAME_LINK_ENRICHMENT,
+)
+PERCHAT_NEWSLETTER_DIR_CANDIDATES = (
+    DIR_NAME_PERCHAT_NEWSLETTER,
+    DIR_NAME_NEWSLETTER,
+)
+PERCHAT_LINK_ENRICHMENT_DIR_CANDIDATES = (
+    DIR_NAME_PERCHAT_LINK_ENRICHMENT,
+    DIR_NAME_LINK_ENRICHMENT,
+)
 
 # RAG citation snippet max length
 RAG_CITATION_SNIPPET_MAX_LENGTH = 200
@@ -694,6 +784,17 @@ RAG_API_KEY_BEARER_SCHEME = "Bearer"
 RAG_RATE_LIMIT_CHAT = "60/minute"
 RAG_RATE_LIMIT_INGEST = "10/minute"
 RAG_RATE_LIMIT_DEFAULT = "120/minute"
+
+
+class RagAdmissionError(StrEnum):
+    """Machine-readable outcome codes for RAG concurrency admission control.
+
+    Distinct from slowapi rate limiting: this is a hard in-flight concurrency
+    cap, not a requests-per-minute limit. Referenced directly (never via .value).
+    """
+
+    OVERLOADED = "rag_overloaded"
+
 
 # RAG vector search score field (added by $vectorSearch $meta)
 RAG_SEARCH_SCORE_FIELD = "search_score"
@@ -726,7 +827,7 @@ PROGRESS_QUEUE_MAX_SIZE = 1000
 
 # Community structure with grouped chats
 COMMUNITY_STRUCTURE = {
-    "langtalks": {"LangTalks Community": ["LangTalks Community", "LangTalks Community 2", "LangTalks Community 3", "LangTalks Community 4", "LangTalks - Code Generation Agents", "LangTalks - English", "LangTalks - AI driven coding", "LangTalks AI-SDLC"]},
+    "langtalks": {"LangTalks Community": ["LangTalks Community", "LangTalks Community 2", "LangTalks Community 3", "LangTalks Community 4", "LangTalks Community 5", "LangTalks - Code Generation Agents", "LangTalks - English", "LangTalks - AI driven coding", "LangTalks AI-SDLC"]},
     "mcp_israel": {"MCP Israel": ["MCP Israel", "MCP Israel #2", "A2A Israel", "MCP-UI"]},
     "n8n_israel": {"n8n Israel": ["n8n israel - Main 1", "n8n israel - Main 2", "n8n Israel - Main 3"]},
     "ai_transformation_guild": {"AI Transformation Guild": ["AI Transformation Guild"]},
@@ -765,6 +866,10 @@ class PreprocessingOperations(StrEnum):
 class ContentGenerationOperations(StrEnum):
     GENERATE_NEWSLETTER_SUMMARY = "generate_newsletter_summary"
     TRANSLATE_SUMMARY = "translate_summary"
+    # Structured translation of the enriched newsletter dict: translate human-text
+    # field values, preserve JSON keys/structure and every URL verbatim, and return
+    # a same-shaped dict renderable by the format plugins (md/html/json).
+    TRANSLATE_NEWSLETTER_STRUCTURED = "translate_newsletter_structured"
 
 
 class SummaryFormats(StrEnum):
@@ -777,6 +882,7 @@ class LlmInputPurposes(StrEnum):
     SEPARATE_DISCUSSIONS = "separate_whatsapp_group_message_discussions"
     TRANSLATE_WHATSAPP_GROUP_MESSAGES = "translate_whatsapp_group_messages"
     TRANSLATE_SUMMARY = "translate_summary"
+    TRANSLATE_NEWSLETTER_STRUCTURED = "translate_newsletter_structured"
     GENERATE_CONTENT_WA_COMMUNITY_LANGTALKS_NEWSLETTER = "generate_content_wa_community_langtalks_newsletter"
 
     # Vision purposes
@@ -1323,6 +1429,49 @@ class RAGEventType(StrEnum):
     DONE = "done"
     ERROR = "error"
     EVALUATION_SCORE = "evaluation_score"
+
+
+class RAGTraceName(StrEnum):
+    """Langfuse trace names for the live RAG request paths (REST + MCP)."""
+
+    REST_CHAT = "rag_chat"
+    REST_CHAT_STREAM = "rag_chat_stream"
+    MCP_QUERY = "rag_query"
+    MCP_SEARCH = "rag_search"
+
+
+class RAGTraceTag(StrEnum):
+    """Langfuse tag strings for RAG traces. The streaming tag reuses the
+    module-level TAG_STREAMING constant rather than duplicating it here."""
+
+    RAG = "rag"
+    SYNC = "sync"
+    MCP = "mcp"
+
+
+# Langfuse trace metadata keys for the live RAG paths. These are behavior-affecting
+# dict keys read/filtered in the Langfuse UI (dashboards, refusal-rate view), not
+# display text, so they are immutable constants rather than inline literals.
+RAG_TRACE_META_CONTENT_SOURCES = "content_sources"
+RAG_TRACE_META_DATE_START = "date_start"
+RAG_TRACE_META_DATE_END = "date_end"
+RAG_TRACE_META_REFUSAL = "refusal"
+RAG_TRACE_META_CITATION_COUNT = "citation_count"
+RAG_TRACE_META_TRANSPORT = "transport"
+
+# Trace output key for the generated answer text.
+RAG_TRACE_OUTPUT_ANSWER = "answer"
+
+# Query-input truncation bound for trace `input` (matches pipeline span_input[:500]).
+RAG_TRACE_INPUT_MAX = 500
+
+# user_id label attached to MCP-originated RAG traces (no caller identity on the
+# FastMCP tool signature, so a fixed owner label is used).
+MCP_TRACE_USER = "mcp"
+
+# Prefix for the per-call session_id synthesized in the MCP tool wrappers. FastMCP
+# carries no caller identity, so each tool call becomes its own grouped trace.
+MCP_SESSION_ID_PREFIX = "mcp-"
 
 
 class AgentEventType(StrEnum):

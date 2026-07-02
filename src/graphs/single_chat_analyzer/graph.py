@@ -19,6 +19,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import os
 import logging
 import re
@@ -61,14 +62,18 @@ from constants import (
     MESSAGING_PLATFORM_WHATSAPP,
     EXTRACTION_STRATEGY_GROUP_CHAT,
     ENGLISH_LANGUAGE_CODES,
-    DIR_NAME_EXTRACTED,
-    DIR_NAME_PREPROCESSED,
-    DIR_NAME_TRANSLATED,
+    DIR_NAME_PERCHAT_EXTRACTED,
+    DIR_NAME_PERCHAT_PREPROCESSED,
+    DIR_NAME_PERCHAT_TRANSLATED,
     DIR_NAME_DECRYPTED_MESSAGES,
-    DIR_NAME_SEPARATE_DISCUSSIONS,
-    DIR_NAME_DISCUSSIONS_RANKING,
-    DIR_NAME_NEWSLETTER,
-    DIR_NAME_LINK_ENRICHMENT,
+    DIR_NAME_PERCHAT_SEPARATE_DISCUSSIONS,
+    DIR_NAME_PERCHAT_DISCUSSIONS_RANKING,
+    DIR_NAME_PERCHAT_NEWSLETTER,
+    DIR_NAME_PERCHAT_LINK_ENRICHMENT,
+    DIR_NAME_PERCHAT_FINAL_NEWSLETTER,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_JSON,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_MD,
+    OUTPUT_FILENAME_FINAL_NEWSLETTER_HTML,
     OUTPUT_FILENAME_MESSAGES_PROCESSED,
     OUTPUT_FILENAME_MESSAGES_TRANSLATED,
     OUTPUT_FILENAME_SEPARATE_DISCUSSIONS,
@@ -86,6 +91,8 @@ from constants import (
     WORKFLOW_NAME_NEWSLETTER_GENERATION,
 )
 from custom_types.field_keys import RankingResultKeys, ContentResultKeys, DiscussionKeys
+from custom_types.translated_newsletter_schemas import merge_enrichment_only_keys, resolve_translated_newsletter_dict
+from custom_types.newsletter_formats import get_format
 from graphs.single_chat_analyzer.generate_content_helpers import (
     validate_ranking_file,
     validate_discussions_file,
@@ -176,14 +183,17 @@ def setup_directories(state: SingleChatState, config: RunnableConfig | None = No
 
     # Creating directory structure
     dirs = {
-        Keys.EXTRACTION_DIR: os.path.join(output_dir, DIR_NAME_EXTRACTED),
-        Keys.PREPROCESS_DIR: os.path.join(output_dir, DIR_NAME_PREPROCESSED),
-        Keys.TRANSLATION_DIR: os.path.join(output_dir, DIR_NAME_TRANSLATED),
-        Keys.SEPARATE_DISCUSSIONS_DIR: os.path.join(output_dir, DIR_NAME_SEPARATE_DISCUSSIONS),
-        Keys.DISCUSSIONS_RANKING_DIR: os.path.join(output_dir, DIR_NAME_DISCUSSIONS_RANKING),
-        Keys.CONTENT_DIR: os.path.join(output_dir, DIR_NAME_NEWSLETTER),
-        Keys.LINK_ENRICHMENT_DIR: os.path.join(output_dir, DIR_NAME_LINK_ENRICHMENT),
+        Keys.EXTRACTION_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_EXTRACTED),
+        Keys.PREPROCESS_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_PREPROCESSED),
+        Keys.TRANSLATION_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_TRANSLATED),
+        Keys.SEPARATE_DISCUSSIONS_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_SEPARATE_DISCUSSIONS),
+        Keys.DISCUSSIONS_RANKING_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_DISCUSSIONS_RANKING),
+        Keys.CONTENT_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_NEWSLETTER),
+        Keys.LINK_ENRICHMENT_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_LINK_ENRICHMENT),
         Keys.FINAL_TRANSLATED_CONTENT_DIR: os.path.join(output_dir, f"final_{desired_language}_translated_summary"),
+        # Final deliverable dir: holds the final_newsletter.{json,md,html} triplet
+        # (the ONLY stage that emits html) for non-consolidated (per-chat) runs.
+        Keys.FINAL_NEWSLETTER_DIR: os.path.join(output_dir, DIR_NAME_PERCHAT_FINAL_NEWSLETTER),
     }
 
     # Creating all directories
@@ -375,6 +385,7 @@ async def preprocess_messages(state: SingleChatState, config: RunnableConfig | N
             polls = await load_json_async(polls_file)
             if polls:
                 from db.run_tracker import get_tracker
+
                 tracker = get_tracker()
                 try:
                     stored_count = await tracker.store_polls(run_id=mongodb_run_id, chat_name=chat_name, data_source_name=data_source_name, polls=polls)
@@ -866,49 +877,83 @@ async def translate_final_summary(state: SingleChatState, config: RunnableConfig
     ctx = extract_trace_context(config)
     with langfuse_span(name=NodeNames.SingleChatAnalyzer.TRANSLATE_FINAL_SUMMARY, trace_id=ctx.trace_id, parent_span_id=ctx.parent_span_id, input_data={"chat_name": state[Keys.CHAT_NAME], "desired_language": state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY], "source_file": state.get(Keys.ENRICHED_NEWSLETTER_MD_PATH)}, metadata={"source_name": state.get(Keys.DATA_SOURCE_NAME)}) as span:
         desired_language = state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY]
+        is_english_target = desired_language.lower() in ENGLISH_LANGUAGE_CODES
 
-        # Skipping if already in English
-        if desired_language.lower() in ENGLISH_LANGUAGE_CODES:
-            if span:
-                span.update(output={"skipped": True, "reason": "already_english"})
-            return {Keys.FINAL_TRANSLATED_FILE_PATH: None}
+        # Resolve the final deliverable dir + triplet paths. The final dir is the
+        # ONLY stage that emits html (Design Decision: html is final-stage-only),
+        # so it is produced for BOTH English and non-English targets to guarantee
+        # the email always has a final html to send.
+        final_dir = state[Keys.FINAL_NEWSLETTER_DIR]
+        final_json_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_JSON)
+        final_md_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_MD)
+        final_html_path = os.path.join(final_dir, OUTPUT_FILENAME_FINAL_NEWSLETTER_HTML)
 
-        expected_file = state[Keys.EXPECTED_FINAL_TRANSLATED_FILE]
         force_refresh = state.get(Keys.FORCE_REFRESH_FINAL_TRANSLATION, False)
-
-        # Checking for existing file (custom cache check)
-        if not force_refresh and os.path.exists(expected_file):
+        triplet_exists = all(os.path.exists(p) for p in (final_json_path, final_md_path, final_html_path))
+        if triplet_exists and not force_refresh:
             if span:
-                span.update(output={"file_path": expected_file, "reused_existing": True})
-            return {Keys.FINAL_TRANSLATED_FILE_PATH: expected_file}
+                span.update(output={"final_dir": final_dir, "reused_existing": True})
+            return {
+                Keys.FINAL_NEWSLETTER_JSON_PATH: final_json_path,
+                Keys.FINAL_NEWSLETTER_MD_PATH: final_md_path,
+                Keys.FINAL_NEWSLETTER_HTML_PATH: final_html_path,
+                Keys.FINAL_TRANSLATED_FILE_PATH: None if is_english_target else final_md_path,
+            }
 
-        # Translating summary (using ENRICHED newsletter)
-        data_source_path = state[Keys.ENRICHED_NEWSLETTER_MD_PATH]
-        if not os.path.exists(data_source_path):
-            raise FileNotFoundError(f"Enriched Newsletter Markdown file not found: {data_source_path}")
+        # Load the enriched structured JSON (source of truth for the triplet).
+        enriched_json = state.get(Keys.ENRICHED_NEWSLETTER_JSON_PATH)
+        if not enriched_json or not os.path.exists(enriched_json):
+            raise FileNotFoundError(f"Enriched newsletter JSON not found for final render: {enriched_json}")
 
         data_source_name = state[Keys.DATA_SOURCE_NAME]
         chat_name = state[Keys.CHAT_NAME]
         summary_format = state[Keys.SUMMARY_FORMAT]
-        start_date = state[Keys.START_DATE]
-        end_date = state[Keys.END_DATE]
 
-        content_generator = ContentGeneratorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, source_name=data_source_name, chat_name=chat_name, summary_format=summary_format)
+        with open(enriched_json, encoding="utf-8") as f:
+            enriched_dict = json.load(f)
 
-        date_str = start_date if start_date == end_date else f"{start_date} to {end_date}"
+        if is_english_target:
+            # No translation needed: render the triplet from the enriched dict.
+            final_dict = enriched_dict
+        else:
+            # Structured translate: same-shaped dict, keys/URLs preserved.
+            content_generator = ContentGeneratorFactory.create(data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, source_name=data_source_name, chat_name=chat_name, summary_format=summary_format)
+            translation_result = await content_generator.generate_content(
+                operation=ContentGenerationOperations.TRANSLATE_NEWSLETTER_STRUCTURED,
+                data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES,
+                data_source_path=enriched_json,
+                group_name=chat_name,
+                desired_language_for_summary=desired_language,
+            )
+            final_dict = resolve_translated_newsletter_dict(translation_result)
+            # The strict generation schema drops enrichment-only top-level keys
+            # (link_enrichment_metadata, links_inserted, metadata). Re-attach them
+            # from the enriched dict so the non-English final JSON is structurally
+            # identical to the English one (which renders the enriched dict as-is).
+            final_dict = merge_enrichment_only_keys(final_dict, enriched_dict)
 
-        await content_generator.generate_content(operation=ContentGenerationOperations.TRANSLATE_SUMMARY, data_source_type=DataSources.WHATSAPP_GROUP_CHAT_MESSAGES, data_source_path=data_source_path, group_name=chat_name, expected_final_translated_file_path=expected_file, date=date_str, desired_language_for_summary=desired_language)
+        # Render + write the triplet from the resolved dict.
+        fmt = get_format(summary_format)
+        os.makedirs(final_dir, exist_ok=True)
 
-        if not os.path.exists(expected_file):
-            raise RuntimeError(f"Translation did not create expected file: {expected_file}")
+        with open(final_json_path, "w", encoding="utf-8") as f:
+            json.dump(final_dict, f, indent=2, ensure_ascii=False)
+        with open(final_md_path, "w", encoding="utf-8") as f:
+            f.write(fmt.render_markdown(final_dict, desired_language))
+        with open(final_html_path, "w", encoding="utf-8") as f:
+            f.write(fmt.render_html(final_dict, desired_language))
 
-        # Updating span with output
+        for p in (final_json_path, final_md_path, final_html_path):
+            if not os.path.exists(p) or os.path.getsize(p) == 0:
+                raise RuntimeError(f"Final newsletter triplet member missing or empty after render: {p}")
+
         if span:
-            span.update(output={"file_path": expected_file, "target_language": desired_language, "reused_existing": False})
+            span.update(output={"final_dir": final_dir, "target_language": desired_language, "reused_existing": False})
 
-        # Storing translated newsletter to MongoDB (async)
+        # Storing final (translated) newsletter to MongoDB (async), only when an
+        # actual translation was performed (non-English target).
         mongodb_run_id = state.get(Keys.MONGODB_RUN_ID)
-        if mongodb_run_id and expected_file:  # Only if translation was performed
+        if mongodb_run_id and not is_english_target:
             chat_slug = re.sub(r"[^a-z0-9]+", "_", state[Keys.CHAT_NAME].lower()).strip("_")
             newsletter_id = f"{mongodb_run_id}_nl_{chat_slug}"
 
@@ -927,14 +972,19 @@ async def translate_final_summary(state: SingleChatState, config: RunnableConfig
                     end_date=state[Keys.END_DATE],
                     summary_format=state[Keys.SUMMARY_FORMAT],
                     desired_language=state[Keys.DESIRED_LANGUAGE_FOR_SUMMARY],
-                    json_path="",  # Not applicable for translated version
-                    md_path=expected_file,
+                    json_path=final_json_path,
+                    md_path=final_md_path,
                     version_type=NewsletterVersionType.TRANSLATED,
                 )
             except Exception as e:
                 logger.error("Failed to persist TRANSLATED newsletter to MongoDB (fail-soft)", extra={"event": "store_newsletter_failed", "run_id": mongodb_run_id, "newsletter_id": newsletter_id, "version_type": str(NewsletterVersionType.TRANSLATED), "chat_name": state[Keys.CHAT_NAME], "error": str(e)})
 
-        return {Keys.FINAL_TRANSLATED_FILE_PATH: expected_file}
+        return {
+            Keys.FINAL_NEWSLETTER_JSON_PATH: final_json_path,
+            Keys.FINAL_NEWSLETTER_MD_PATH: final_md_path,
+            Keys.FINAL_NEWSLETTER_HTML_PATH: final_html_path,
+            Keys.FINAL_TRANSLATED_FILE_PATH: None if is_english_target else final_md_path,
+        }
 
 
 # ============================================================================

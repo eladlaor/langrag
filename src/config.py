@@ -213,7 +213,7 @@ class LLMSettings(BaseSettings):
         }
         provider_models = model_map.get(self.provider)
         if not provider_models:
-            raise ValueError(f"Unknown LLM provider '{self.provider}'. " f"Available: {list(model_map.keys())}")
+            raise ValueError(f"Unknown LLM provider '{self.provider}'. Available: {list(model_map.keys())}")
         return provider_models[tier]
 
 
@@ -472,13 +472,13 @@ class RankingSettings(BaseSettings):
     """Discussion ranking configuration."""
 
     default_top_k_discussions: int = Field(default=5, description="Default number of top discussions to feature")
-    default_previous_newsletters_to_consider: int = Field(default=8, description="Default number of previous newsletters to load for anti-repetition. " "Set to 0 to disable anti-repetition.")
+    default_previous_newsletters_to_consider: int = Field(default=8, description="Default number of previous newsletters to load for anti-repetition. Set to 0 to disable anti-repetition.")
     default_similarity_threshold: str = Field(default=SimilarityThreshold.MODERATE, description="Default similarity threshold for merging")
     max_discussions_per_merge: int = Field(default=5, description="Maximum discussions per merge group")
 
     # MMR Diversity Settings
-    enable_mmr_diversity: bool = Field(default=True, description="Enable MMR (Maximal Marginal Relevance) diversity reranking. " "When enabled, top-K discussions are selected to balance quality and diversity, " "preventing redundant discussions about the same topic.")
-    mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0, description="MMR diversity weight parameter (0-1). " "Higher values favor quality, lower favor diversity. " "0.7 (default) = 70% quality, 30% diversity. " "1.0 = pure quality (disable diversity). " "0.5 = equal weight.")
+    enable_mmr_diversity: bool = Field(default=True, description="Enable MMR (Maximal Marginal Relevance) diversity reranking. When enabled, top-K discussions are selected to balance quality and diversity, preventing redundant discussions about the same topic.")
+    mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0, description="MMR diversity weight parameter (0-1). Higher values favor quality, lower favor diversity. 0.7 (default) = 70% quality, 30% diversity. 1.0 = pure quality (disable diversity). 0.5 = equal weight.")
 
     model_config = SettingsConfigDict(env_prefix="RANKING_")
 
@@ -532,6 +532,11 @@ class RAGSettings(BaseSettings):
     api_key_pepper: str = Field(default="", description="Server-side pepper appended before hashing API keys. Required when auth_enabled is true.")
     mcp_api_key: str = Field(default="", description="Bearer token validated by the MCP server. Required when running the MCP server publicly.")
     rate_limit_enabled: bool = Field(default=True, description="Apply slowapi rate limits on RAG endpoints.")
+    online_eval_enabled: bool = Field(default=False, description="Master switch: fire background LLM-judge + SE-shadow scoring after each LIVE RAG answer (REST + MCP). Independent of the orphaned rag_conversation graph. Actual work is additionally gated by runtime_eval.enabled and runtime_eval.sampling_rate (single source of truth for judge behavior).")
+
+    # Hard concurrency admission control (independent of slowapi rate limiting)
+    max_concurrent_requests: int = Field(default=50, ge=1, description="Hard cap on simultaneous in-flight RAG executions (REST chat + MCP tools). The (N+1)th concurrent request is rejected with HTTP 503 + Retry-After. Enforced per-process by an asyncio.Semaphore; the nginx edge layer bounds the aggregate across processes (REST :8000 and MCP :8765 are separate processes, so the true app-tier aggregate is up to workers x this value). Env: RAG_MAX_CONCURRENT_REQUESTS.")
+    concurrency_retry_after_seconds: int = Field(default=5, ge=1, description="Value returned in the Retry-After header (seconds) when a RAG request is shed due to the concurrency cap. Env: RAG_CONCURRENCY_RETRY_AFTER_SECONDS.")
 
     model_config = SettingsConfigDict(env_prefix="RAG_")
 
@@ -610,6 +615,7 @@ class LoginSettings(BaseSettings):
     session_key: str = Field(default="", description="urlsafe-base64 32-byte Fernet key signing+encrypting session cookies. Generate with Fernet.generate_key(). Required when enabled. Must stay stable across deploys; rotating it revokes every live session.")
     bootstrap_admin_email: str = Field(default="", validation_alias=ENV_BOOTSTRAP_ADMIN_EMAIL, description="Email of the first admin, seeded on startup only when the users collection is empty. Read from LANGRAG_BOOTSTRAP_ADMIN_EMAIL.")
     bootstrap_admin_password: str = Field(default="", validation_alias=ENV_BOOTSTRAP_ADMIN_PASSWORD, description="Plaintext password for the bootstrap admin, hashed (argon2id) at seed time. Read from LANGRAG_BOOTSTRAP_ADMIN_PASSWORD. Unset it after first login.")
+    internal_api_key: str = Field(default="", description="Shared secret for internal machine-to-machine auth on session-gated routes. When non-empty, a request presenting it in the X-Internal-Key header resolves to an admin-equivalent service principal, bypassing the cookie. Empty (default) DISABLES the header path entirely (fail-closed). Env: LANGRAG_LOGIN_INTERNAL_API_KEY.")
     session_ttl_minutes: int = Field(default=720, description="Session cookie lifetime in minutes (default 12h).")
     cookie_secure: bool = Field(default=True, description="Set the Secure flag on the session cookie. Correct behind Cloudflare Flexible SSL since the browser sees HTTPS.")
     cookie_samesite: CookieSameSite = Field(default=CookieSameSite.LAX, description="SameSite policy for the session cookie (CSRF mitigation).")
@@ -726,7 +732,7 @@ class Settings(BaseSettings):
 
         # Build from components
         if self.database.username and self.database.password:
-            return f"mongodb://{self.database.username}:{self.database.password}" f"@{self.database.host}:{self.database.port}"
+            return f"mongodb://{self.database.username}:{self.database.password}@{self.database.host}:{self.database.port}"
         return f"mongodb://{self.database.host}:{self.database.port}"
 
 

@@ -237,7 +237,12 @@ temp_decrypted_*.json
 references/
 
 # Claude Code
-.claude/
+# Track durable .claude/ artifacts (agents, skills, commands, workflows, CLAUDE.md)
+# on the private repo; keep only per-machine/runtime state local-only.
+# NOTE: the public-repo boundary still strips ALL of .claude/ via /push-public.
+.claude/settings.json
+.claude/settings.local.json
+.claude/agent-memory/
 
 # Cursor
 .cursorignore

@@ -100,8 +100,8 @@ from constants import (
     BatchJobStatus,
     DIR_NAME_DISCUSSIONS_FOR_SELECTION,
     DIR_NAME_AFTER_SELECTION,
-    DIR_NAME_AGGREGATED_DISCUSSIONS,
-    DIR_NAME_DISCUSSIONS_RANKING,
+    DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS,
+    DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING,
     OUTPUT_FILENAME_RANKED_DISCUSSIONS,
     OUTPUT_FILENAME_USER_SELECTIONS,
     OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS,
@@ -116,6 +116,13 @@ from core.generation.generators.factory import ContentGeneratorFactory
 from custom_types.newsletter_formats import list_formats
 
 router = APIRouter()
+
+# Public (un-session-gated) router. Routes here are mounted in main.py WITHOUT
+# the require_session dependency, for endpoints that must be reachable without a
+# login cookie — e.g. the email "View Newsletter" link, which recipients open in
+# a browser that has no session. Only add routes here that are safe to expose:
+# newsletter_html_viewer enforces output-dir path containment + HTML-only.
+public_router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
@@ -142,18 +149,18 @@ def validate_newsletter_request(request: PeriodicNewsletterRequest) -> None:
     """
     # Validating data_source_name
     if request.data_source_name not in KNOWN_WHATSAPP_CHAT_NAMES:
-        raise HTTPException(status_code=400, detail=f"Invalid data_source_name: {request.data_source_name}. " f"Must be one of: {', '.join(KNOWN_WHATSAPP_CHAT_NAMES.keys())}")
+        raise HTTPException(status_code=400, detail=f"Invalid data_source_name: {request.data_source_name}. Must be one of: {', '.join(KNOWN_WHATSAPP_CHAT_NAMES.keys())}")
 
     # Validating chat names
     valid_chat_names = KNOWN_WHATSAPP_CHAT_NAMES[request.data_source_name]
     invalid_chats = [name for name in request.whatsapp_chat_names_to_include if name not in valid_chat_names]
     if invalid_chats:
-        raise HTTPException(status_code=400, detail=f"Invalid chat names: {', '.join(invalid_chats)}. " f"Must be one of: {', '.join(valid_chat_names)}")
+        raise HTTPException(status_code=400, detail=f"Invalid chat names: {', '.join(invalid_chats)}. Must be one of: {', '.join(valid_chat_names)}")
 
     # Validating summary format using auto-discovered format registry
     valid_formats = list_formats()
     if request.summary_format not in valid_formats:
-        raise HTTPException(status_code=400, detail=f"Invalid summary_format: {request.summary_format}. " f"Must be one of: {', '.join(valid_formats)}")
+        raise HTTPException(status_code=400, detail=f"Invalid summary_format: {request.summary_format}. Must be one of: {', '.join(valid_formats)}")
 
     # Validating date format and range
     try:
@@ -183,7 +190,7 @@ def validate_newsletter_request(request: PeriodicNewsletterRequest) -> None:
     all_allowed = list(UNIVERSAL_OUTPUT_ACTIONS) + list(community_allowed)
     for action in resolved_actions:
         if action not in all_allowed:
-            raise HTTPException(status_code=400, detail=f"Output action '{action}' is not configured for community '{request.data_source_name}'. " f"Allowed actions: {', '.join(all_allowed)}")
+            raise HTTPException(status_code=400, detail=f"Output action '{action}' is not configured for community '{request.data_source_name}'. Allowed actions: {', '.join(all_allowed)}")
 
     # Validating action-specific parameters
     if OutputAction.WEBHOOK in resolved_actions and not request.webhook_url:
@@ -191,7 +198,7 @@ def validate_newsletter_request(request: PeriodicNewsletterRequest) -> None:
     if OutputAction.SEND_EMAIL in resolved_actions and not request.email_recipients:
         default_email = os.getenv(ENV_DEFAULT_EMAIL_RECIPIENT)
         if not default_email:
-            raise HTTPException(status_code=400, detail=f"Output action '{OutputAction.SEND_EMAIL}' specified but 'email_recipients' not provided " f"and {ENV_DEFAULT_EMAIL_RECIPIENT} environment variable is not set")
+            raise HTTPException(status_code=400, detail=f"Output action '{OutputAction.SEND_EMAIL}' specified but 'email_recipients' not provided and {ENV_DEFAULT_EMAIL_RECIPIENT} environment variable is not set")
         logger.info(f"Using default email recipient: {default_email}")
     if OutputAction.SEND_SUBSTACK in resolved_actions and not request.substack_blog_id:
         raise HTTPException(status_code=400, detail=f"Output action '{OutputAction.SEND_SUBSTACK}' specified but 'substack_blog_id' not provided")
@@ -402,7 +409,7 @@ async def generate_periodic_newsletter(request: Request, payload: PeriodicNewsle
     # Alias: 'request' is reserved for slowapi's Request param; 'payload' is the Pydantic body
     request = payload  # noqa: F841
     try:
-        logger.info(f"Received periodic newsletter request: {request.data_source_name} " f"({request.start_date} to {request.end_date})")
+        logger.info(f"Received periodic newsletter request: {request.data_source_name} ({request.start_date} to {request.end_date})")
 
         # Comprehensive validation (single source of truth)
         validate_newsletter_request(request)
@@ -874,7 +881,7 @@ async def get_discussion_selection(run_directory: str):
 
     if not os.path.exists(ranked_discussions_path):
         logger.error(f"Ranked discussions file not found: {ranked_discussions_path}")
-        raise HTTPException(status_code=404, detail=f"Ranked discussions not found at {ranked_discussions_path}. " "Please run Phase 1 first with a format that requires HITL selection.")
+        raise HTTPException(status_code=404, detail=f"Ranked discussions not found at {ranked_discussions_path}. Please run Phase 1 first with a format that requires HITL selection.")
 
     # Loading ranked discussions (offload blocking read off the event loop)
     try:
@@ -984,7 +991,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
     selections_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_FOR_SELECTION, OUTPUT_FILENAME_USER_SELECTIONS)
 
     if not os.path.exists(selections_file):
-        raise HTTPException(status_code=404, detail=f"User selections not found at {selections_file}. " "Please save selections first using /api/save_discussion_selections")
+        raise HTTPException(status_code=404, detail=f"User selections not found at {selections_file}. Please save selections first using /api/save_discussion_selections")
 
     try:
         selections_data = await asyncio.to_thread(_read_json_file, selections_file)
@@ -994,10 +1001,10 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
         raise HTTPException(status_code=500, detail=f"Failed to load selections: {e}")
 
     # Loading aggregated discussions (full content)
-    aggregated_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
+    aggregated_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
 
     if not os.path.exists(aggregated_file):
-        raise HTTPException(status_code=404, detail=f"Aggregated discussions not found at {aggregated_file}. " "Please run Phase 1 first.")
+        raise HTTPException(status_code=404, detail=f"Aggregated discussions not found at {aggregated_file}. Please run Phase 1 first.")
 
     try:
         aggregated_data = await asyncio.to_thread(_read_json_file, aggregated_file)
@@ -1016,7 +1023,7 @@ async def generate_newsletter_phase2(request: Phase2GenerationRequest):
 
     # Loading ranking file to get brief_mention_items and format metadata
     # This follows the same pattern as generate_consolidated_newsletter node
-    ranking_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
+    ranking_file = os.path.join(run_directory, DIR_NAME_CONSOLIDATED, DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
 
     if not os.path.exists(ranking_file):
         raise HTTPException(status_code=404, detail=f"Ranking file not found at {ranking_file}. Please run Phase 1 first.")
@@ -1263,7 +1270,7 @@ async def get_newsletter_file_content(file_path: str):
         raise HTTPException(status_code=500, detail=HTTP_DETAIL_INTERNAL_ERROR) from e
 
 
-@router.get(ROUTE_NEWSLETTER_HTML_VIEWER, response_class=HTMLResponse)
+@public_router.get(ROUTE_NEWSLETTER_HTML_VIEWER, response_class=HTMLResponse)
 async def newsletter_html_viewer(path: str):
     """
     Serve newsletter HTML content directly in browser.

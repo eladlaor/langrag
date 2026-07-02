@@ -91,25 +91,30 @@ class LangTalksRenderer:
             raise Exception(error_message) from e
 
     def _render_markdown_attribution(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
-        """Render markdown attribution footer for a discussion."""
+        """Render markdown attribution footer for a discussion, including engagement stats."""
         i18n = get_langtalks_i18n(desired_language)
+        engagement = self._render_engagement_stats(discussion, desired_language)
+        engagement_line = f"\n{engagement}\n" if engagement else ""
 
         if discussion.get(NewsletterStructureKeys.IS_MERGED, False) and discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
+            # Merged: list all groups, attribute start time to the earliest source,
+            # and report a single set of engagement totals.
             result = f"\n{i18n['merged_attribution_header']}\n"
             for source in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS]:
-                timestamp = source.get(NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP, 0)
-                if isinstance(timestamp, (int, float)) and timestamp > 0:
-                    time_str, date_str = self._format_timestamp(timestamp)
-                    group_name = source.get("group", "Unknown Group")
-                    result += f"- {group_name} ({i18n['merged_started_at'].format(date=date_str, time=time_str)})\n"
-            return result
+                group_name = source.get("group", "Unknown Group")
+                result += f"- {group_name}\n"
+            earliest = self._earliest_source_timestamp(discussion)
+            if earliest is not None:
+                time_str, date_str = self._format_timestamp(earliest)
+                result += f"\n{i18n['attribution_prefix']} {time_str} | {date_str}\n"
+            return result + engagement_line
         elif NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in discussion and discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
             timestamp = discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]
             if isinstance(timestamp, (int, float)):
                 time_str, date_str = self._format_timestamp(timestamp)
                 chat_name = discussion.get(NewsletterStructureKeys.CHAT_NAME, LANGTALKS_CHAT_NAME_DEFAULT)
-                return f"\n{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}\n"
-        return ""
+                return f"\n{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}\n{engagement_line}"
+        return engagement_line
 
     def _markdown_links_to_html(self, text: str) -> str:
         """Convert markdown links [text](url) to HTML anchor tags."""
@@ -145,18 +150,52 @@ class LangTalksRenderer:
             return chat_name[len(LANGTALKS_CHAT_PREFIX) :]
         return chat_name
 
-    def _render_discussion_attribution_html(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
-        """Render the attribution line for a single discussion."""
+    def _earliest_source_timestamp(self, discussion: dict) -> int | float | None:
+        """Return the earliest first-message timestamp among a merged discussion's sources.
+
+        The start time of a merged discussion is defined as the earliest moment any
+        source group began talking about the topic — i.e. the group that started first.
+        """
+        candidates = [
+            source.get(NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP, 0)
+            for source in discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS, [])
+        ]
+        valid = [ts for ts in candidates if isinstance(ts, (int, float)) and ts > 0]
+        return min(valid) if valid else None
+
+    def _render_engagement_stats(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
+        """Format the engagement line (total message count + unique participants).
+
+        For merged discussions these are the pre-aggregated totals across all source
+        groups, carried on the discussion itself — not summed here. Returns an empty
+        string when neither count is present so the line is omitted entirely.
+        """
+        messages = discussion.get(NewsletterStructureKeys.NUMBER_OF_MESSAGES)
+        participants = discussion.get(NewsletterStructureKeys.NUMBER_OF_UNIQUE_PARTICIPANTS)
+        if not messages and not participants:
+            return ""
         i18n = get_langtalks_i18n(desired_language)
+        return i18n["engagement_stats"].format(messages=messages or 0, participants=participants or 0)
+
+    def _render_discussion_attribution_html(self, discussion: dict, desired_language: str = DEFAULT_HTML_LANGUAGE) -> str:
+        """Render the attribution line(s) for a single discussion, plus engagement stats."""
+        i18n = get_langtalks_i18n(desired_language)
+        engagement = self._render_engagement_stats(discussion, desired_language)
+        engagement_html = f"<p>{engagement}</p>" if engagement else ""
 
         if discussion.get(NewsletterStructureKeys.IS_MERGED, False) and discussion.get(NewsletterStructureKeys.SOURCE_DISCUSSIONS):
+            # Merged: list every source group, but attribute the start time to the
+            # earliest source and report engagement as a single set of totals.
+            group_names = [source.get("group", "Unknown Group") for source in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS] if source.get("group")]
             lines = []
-            for source in discussion[NewsletterStructureKeys.SOURCE_DISCUSSIONS]:
-                timestamp = source.get(NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP, 0)
-                if isinstance(timestamp, (int, float)) and timestamp > 0:
-                    time_str, date_str = self._format_timestamp(timestamp)
-                    group_name = source.get("group", "Unknown Group")
-                    lines.append(f"<p>{i18n['attribution_prefix']} {group_name} | {time_str} | {date_str}</p>")
+            if group_names:
+                lines.append(f"<p>{i18n['merged_discussed_in'].format(count=len(group_names), groups=', '.join(group_names))}</p>")
+            earliest = self._earliest_source_timestamp(discussion)
+            if earliest is not None:
+                time_str, date_str = self._format_timestamp(earliest)
+                lines.append(f"<p>{i18n['attribution_prefix']} {time_str} | {date_str}</p>")
+            if engagement_html:
+                lines.append(engagement_html)
             return "\n".join(lines)
 
         if NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP in discussion and discussion[NewsletterStructureKeys.FIRST_MESSAGE_TIMESTAMP]:
@@ -164,9 +203,10 @@ class LangTalksRenderer:
             if isinstance(timestamp, (int, float)):
                 time_str, date_str = self._format_timestamp(timestamp)
                 chat_name = self._strip_chat_prefix(discussion.get(NewsletterStructureKeys.CHAT_NAME, LANGTALKS_CHAT_NAME_DEFAULT))
-                return f"<p>{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}</p>"
+                line = f"<p>{i18n['attribution_prefix']} {chat_name} | {time_str} | {date_str}</p>"
+                return f"{line}\n{engagement_html}" if engagement_html else line
 
-        return ""
+        return engagement_html
 
     def _render_bullet_points_html(self, bullet_points: list[dict], ordered: bool = True) -> str:
         """Render bullet points as <ol> or <ul> list items."""

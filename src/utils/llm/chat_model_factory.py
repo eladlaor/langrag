@@ -54,7 +54,7 @@ def create_chat_model(
     elif resolved_provider == GEMINI_LLM_PROVIDER:
         return _create_gemini_model(model, temperature, **kwargs)
     else:
-        raise ValueError(f"Unknown LLM provider '{resolved_provider}'. " f"Available: {DEFAULT_LLM_PROVIDER}, {ANTHROPIC_LLM_PROVIDER}, {GEMINI_LLM_PROVIDER}")
+        raise ValueError(f"Unknown LLM provider '{resolved_provider}'. Available: {DEFAULT_LLM_PROVIDER}, {ANTHROPIC_LLM_PROVIDER}, {GEMINI_LLM_PROVIDER}")
 
 
 def _create_openai_model(model: str, temperature: float, **kwargs: Any) -> BaseChatModel:
@@ -65,6 +65,10 @@ def _create_openai_model(model: str, temperature: float, **kwargs: Any) -> BaseC
         raise RuntimeError("langchain-openai is required for OpenAI provider. Install with: uv add langchain-openai") from e
 
     model_kwargs = kwargs.pop("model_kwargs", {})
+    # Emit token usage on .astream() so streamed responses carry usage -> Langfuse
+    # cost. Top-level ChatOpenAI kwarg (NOT model_kwargs); no-op on .ainvoke().
+    # setdefault so an explicit caller value is never clobbered.
+    kwargs.setdefault("stream_usage", True)
     return ChatOpenAI(model=model, temperature=temperature, model_kwargs=model_kwargs, **kwargs)
 
 

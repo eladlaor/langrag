@@ -105,6 +105,7 @@ services:
       LANGRAG_LOGIN_ENABLED: ${LANGRAG_LOGIN_ENABLED:-true}
       LANGRAG_LOGIN_PASSWORD: ${LANGRAG_LOGIN_PASSWORD:-}
       LANGRAG_LOGIN_SESSION_KEY: ${LANGRAG_LOGIN_SESSION_KEY:-}
+      LANGRAG_LOGIN_INTERNAL_API_KEY: ${LANGRAG_LOGIN_INTERNAL_API_KEY:-}
       LANGRAG_LOGIN_SESSION_TTL_MINUTES: ${LANGRAG_LOGIN_SESSION_TTL_MINUTES:-720}
       LANGRAG_LOGIN_COOKIE_SECURE: ${LANGRAG_LOGIN_COOKIE_SECURE:-true}
       LANGRAG_LOGIN_COOKIE_SAMESITE: ${LANGRAG_LOGIN_COOKIE_SAMESITE:-lax}
@@ -153,9 +154,14 @@ services:
   # ----------------------------------------------------------------------
   # MCP server — exposes rag_query / rag_search / list_rag_sources for
   # Claude Code subagents. Runs alongside the app, behind nginx on
-  # mcp.langrag.ai (HTTP/SSE) in production.
+  # mcp.langrag.ai in production. Transport is FastMCP SSE
+  # (server.run(transport="sse")): clients connect to the /sse endpoint, NOT
+  # a streamable-HTTP endpoint. Gated behind the `production` profile so a
+  # bare `docker compose up` (dev) never starts a public MCP server; bring it
+  # up with `docker compose --profile production up -d mcp-server`.
   # ----------------------------------------------------------------------
   mcp-server:
+    profiles: ["production"]
     build:
       context: .
       dockerfile: Dockerfile
@@ -170,9 +176,22 @@ services:
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongodb:27017/?replicaSet=langrag-mongodb}
       DATABASE_NAME: ${DATABASE_NAME:-langrag}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      RAG_MCP_API_KEY: ${RAG_MCP_API_KEY:-}
+      # Fail loudly at compose-parse time (:?) if the MCP bearer token is unset:
+      # the HTTP transport refuses to start without it (server.py exits 2), so
+      # surface the misconfiguration before the container is even created. Only
+      # evaluated under `--profile production`, so dev compose is unaffected.
+      RAG_MCP_API_KEY: ${RAG_MCP_API_KEY:?RAG_MCP_API_KEY must be set for the MCP server}
       RAG_API_KEY_PEPPER: ${RAG_API_KEY_PEPPER:-}
-      RAG_AUTH_ENABLED: ${RAG_AUTH_ENABLED:-false}
+      # Production default true: the public MCP surface must authenticate.
+      RAG_AUTH_ENABLED: ${RAG_AUTH_ENABLED:-true}
+      # Trace MCP-initiated RAG calls to the same Langfuse backend as REST.
+      # No behavior change when unset (LANGFUSE_ENABLED gates; disabled -> no-op).
+      # LANGFUSE_HOST is overridable so docker-compose.langfuse-remote.yml can
+      # repoint it at the remote Langfuse box's private-net URL.
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-true}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-server:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -183,9 +202,9 @@ services:
       - langrag-network
     restart: unless-stopped
     # The mcp-server reuses the app Dockerfile, whose HEALTHCHECK probes
-    # :8000/health. This service listens on :8765 (FastMCP streamable-http,
+    # :8000/health. This service listens on :8765 (FastMCP SSE transport,
     # no plain /health route), so we override with a stdlib TCP-connect probe
-    # that needs no extra endpoint or auth.
+    # that needs no extra endpoint or auth (transport-agnostic).
     healthcheck:
       test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('localhost',8765),3); s.close()"]
       interval: 30s

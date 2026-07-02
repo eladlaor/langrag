@@ -62,6 +62,7 @@ class SingleChatState(TypedDict):
     content_dir: str | None  # Directory for generated newsletter content
     link_enrichment_dir: str | None  # Directory for link enrichment results
     final_translated_content_dir: str | None  # Directory for final translated summary
+    final_newsletter_dir: str | None  # Directory for the final_newsletter.{json,md,html} triplet
 
     # === Expected File Paths (Set by setup_directories node) ===
     # These are the paths where files SHOULD exist (used for existence checks)
@@ -94,6 +95,10 @@ class SingleChatState(TypedDict):
     enriched_newsletter_json_path: str | None  # Result from enrich_with_links node
     enriched_newsletter_md_path: str | None  # Result from enrich_with_links node (used by translate_final_summary)
     final_translated_file_path: str | None  # Result from translate_final_summary node
+    # Final deliverable triplet paths (the ONLY html emitter), set by translate_final_summary.
+    final_newsletter_json_path: str | None
+    final_newsletter_md_path: str | None
+    final_newsletter_html_path: str | None
 
     # === MongoDB Newsletter IDs (Primary - MongoDB-First Architecture) ===
     newsletter_id: str | None  # MongoDB newsletter ID (format: {run_id}_nl_{chat_slug})
@@ -199,6 +204,7 @@ def create_single_chat_state(*, chat_name: str, data_source_name: str, start_dat
         "content_dir": None,
         "link_enrichment_dir": None,
         "final_translated_content_dir": None,
+        "final_newsletter_dir": None,
         # === Expected File Paths (Set by setup_directories node) ===
         "expected_extracted_file": None,
         "expected_preprocessed_file": None,
@@ -224,6 +230,9 @@ def create_single_chat_state(*, chat_name: str, data_source_name: str, start_dat
         "enriched_newsletter_json_path": None,
         "enriched_newsletter_md_path": None,
         "final_translated_file_path": None,
+        "final_newsletter_json_path": None,
+        "final_newsletter_md_path": None,
+        "final_newsletter_html_path": None,
         # === MongoDB Newsletter IDs (Primary) ===
         "newsletter_id": None,
         "original_newsletter_id": None,

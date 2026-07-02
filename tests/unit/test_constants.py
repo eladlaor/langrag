@@ -217,3 +217,39 @@ class TestRouteConstants:
     def test_newsletter_route(self):
         """Newsletter route is defined."""
         assert ROUTE_GENERATE_PERIODIC_NEWSLETTER == "/generate_periodic_newsletter"
+
+
+class TestGetLangtalksI18n:
+    """Tests for get_langtalks_i18n language resolution and null-safety.
+
+    Regression guard for the empty-newsletter crash: a chat with zero featured
+    discussions rendered an empty newsletter whose desired_language reached this
+    shared sink as None, crashing on ``None.lower()``. The resolver must be
+    null-safe and fall back to the English default.
+    """
+
+    def test_hebrew_resolves_to_hebrew(self):
+        from constants import get_langtalks_i18n, LANGTALKS_I18N
+
+        assert get_langtalks_i18n("hebrew") == LANGTALKS_I18N["hebrew"]
+
+    def test_english_resolves_to_english(self):
+        from constants import get_langtalks_i18n, LANGTALKS_I18N
+
+        assert get_langtalks_i18n("english") == LANGTALKS_I18N["english"]
+
+    def test_none_language_defaults_to_english_without_raising(self):
+        from constants import get_langtalks_i18n, LANGTALKS_I18N
+
+        # Before the fix this raised: 'NoneType' object has no attribute 'lower'
+        assert get_langtalks_i18n(None) == LANGTALKS_I18N["english"]
+
+    def test_empty_language_defaults_to_english_without_raising(self):
+        from constants import get_langtalks_i18n, LANGTALKS_I18N
+
+        assert get_langtalks_i18n("") == LANGTALKS_I18N["english"]
+
+    def test_unknown_language_defaults_to_english(self):
+        from constants import get_langtalks_i18n, LANGTALKS_I18N
+
+        assert get_langtalks_i18n("klingon") == LANGTALKS_I18N["english"]

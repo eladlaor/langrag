@@ -36,7 +36,12 @@ from constants import (
     DIR_NAME_AFTER_SELECTION,
     DIR_NAME_NEWSLETTER,
     DIR_NAME_LINK_ENRICHMENT,
-    DIR_NAME_FINAL_TRANSLATION,
+    CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES,
+    CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES,
+    CONSOLIDATED_FINAL_NEWSLETTER_DIR_CANDIDATES,
+    PERCHAT_NEWSLETTER_DIR_CANDIDATES,
+    PERCHAT_LINK_ENRICHMENT_DIR_CANDIDATES,
+    OUTPUT_FILESTEM_FINAL_NEWSLETTER,
     OUTPUT_FILENAME_RANKED_DISCUSSIONS,
     OUTPUT_FILENAME_NEWSLETTER_JSON,
     OUTPUT_FILENAME_ENRICHED_JSON,
@@ -337,6 +342,21 @@ def _scan_periodic_runs() -> list[RunInfo]:
     return runs
 
 
+def _resolve_stage_dir(parent: str, candidate_names: tuple[str, ...]) -> str | None:
+    """Resolve a stage subdir under `parent` by probing candidate names in order.
+
+    Backward-compat (Decision 3): new numbered dir names come first, legacy
+    un-numbered names after. Returns the absolute path of the first candidate that
+    exists on disk, or None if none exist. No migration — historical runs keep
+    their legacy layout and stay resolvable.
+    """
+    for name in candidate_names:
+        candidate = os.path.join(parent, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
 def _resolve_and_read_newsletter(run_dir: str, source: str, format: str) -> tuple[str | None, str | None, str]:
     """Resolve the newsletter file for a run, read it, and detect text direction.
 
@@ -349,14 +369,29 @@ def _resolve_and_read_newsletter(run_dir: str, source: str, format: str) -> tupl
     search_paths = []
 
     if source == NewsletterType.CONSOLIDATED:
-        # Priority order for consolidated newsletters
-        search_paths = [
-            os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_AFTER_SELECTION, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"),
-            os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"),
-            os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED_SUMMARY}.{format}"),
-            os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_NEWSLETTER, f"{OUTPUT_FILESTEM_NEWSLETTER}.{format}"),
-            os.path.join(run_dir, DIR_NAME_CONSOLIDATED, DIR_NAME_FINAL_TRANSLATION, f"*_translated_summary.{format}"),
-        ]
+        consolidated_dir = os.path.join(run_dir, DIR_NAME_CONSOLIDATED)
+
+        # The canonical deliverable is the FINAL newsletter triplet, rendered ONLY
+        # at the final stage. Resolve its dir with numbered->legacy fallback and
+        # read it first. New runs write `final_newsletter.<ext>` in the numbered
+        # 05_final_newsletter dir; historical runs used final_translation/ with a
+        # `*_translated_summary.<ext>` filename, so we probe both filename shapes.
+        final_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_FINAL_NEWSLETTER_DIR_CANDIDATES)
+        if final_dir:
+            search_paths.append(os.path.join(final_dir, f"{OUTPUT_FILESTEM_FINAL_NEWSLETTER}.{format}"))
+            search_paths.append(os.path.join(final_dir, f"*_translated_summary.{format}"))
+
+        # Enrichment and generation stage dirs (numbered->legacy fallback). These
+        # are pre-final drafts used only when no final deliverable exists.
+        enrichment_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES)
+        newsletter_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES)
+
+        search_paths.append(os.path.join(consolidated_dir, DIR_NAME_AFTER_SELECTION, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"))
+        if enrichment_dir:
+            search_paths.append(os.path.join(enrichment_dir, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"))
+            search_paths.append(os.path.join(enrichment_dir, f"{OUTPUT_FILESTEM_ENRICHED_SUMMARY}.{format}"))
+        if newsletter_dir:
+            search_paths.append(os.path.join(newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{format}"))
 
     # Find first existing file
     content_path = None
@@ -365,7 +400,8 @@ def _resolve_and_read_newsletter(run_dir: str, source: str, format: str) -> tupl
             # Handle glob pattern
             parent = os.path.dirname(path)
             if os.path.isdir(parent):
-                for f in os.listdir(parent):
+                # Sort for deterministic selection when multiple files match.
+                for f in sorted(os.listdir(parent)):
                     if f.endswith(f".{format}"):
                         content_path = os.path.join(parent, f)
                         break
@@ -380,12 +416,15 @@ def _resolve_and_read_newsletter(run_dir: str, source: str, format: str) -> tupl
             if not os.path.isdir(chat_dir) or chat_dir_name in [DIR_NAME_CONSOLIDATED, DIR_NAME_PER_CHAT]:
                 continue
 
-            # Check link_enrichment first
-            per_chat_paths = [
-                os.path.join(chat_dir, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED_SUMMARY}.{format}"),
-                os.path.join(chat_dir, DIR_NAME_LINK_ENRICHMENT, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"),
-                os.path.join(chat_dir, DIR_NAME_NEWSLETTER, f"{OUTPUT_FILESTEM_NEWSLETTER}.{format}"),
-            ]
+            # Check link_enrichment first (numbered->legacy dir fallback).
+            per_chat_enrichment_dir = _resolve_stage_dir(chat_dir, PERCHAT_LINK_ENRICHMENT_DIR_CANDIDATES)
+            per_chat_newsletter_dir = _resolve_stage_dir(chat_dir, PERCHAT_NEWSLETTER_DIR_CANDIDATES)
+            per_chat_paths = []
+            if per_chat_enrichment_dir:
+                per_chat_paths.append(os.path.join(per_chat_enrichment_dir, f"{OUTPUT_FILESTEM_ENRICHED_SUMMARY}.{format}"))
+                per_chat_paths.append(os.path.join(per_chat_enrichment_dir, f"{OUTPUT_FILESTEM_ENRICHED}.{format}"))
+            if per_chat_newsletter_dir:
+                per_chat_paths.append(os.path.join(per_chat_newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{format}"))
             for path in per_chat_paths:
                 if os.path.exists(path):
                     content_path = path
@@ -465,18 +504,27 @@ def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
             if os.path.exists(path):
                 newsletter_paths[f"consolidated_{ext}"] = path
 
-    # Fallback to consolidated/newsletter
+    # Prefer the FINAL newsletter triplet (numbered->legacy dir fallback).
     if not newsletter_paths:
-        newsletter_dir = os.path.join(consolidated_dir, DIR_NAME_NEWSLETTER)
-        if os.path.isdir(newsletter_dir):
+        final_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_FINAL_NEWSLETTER_DIR_CANDIDATES)
+        if final_dir:
+            for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
+                path = os.path.join(final_dir, f"{OUTPUT_FILESTEM_FINAL_NEWSLETTER}.{ext}")
+                if os.path.exists(path):
+                    newsletter_paths[f"consolidated_{ext}"] = path
+
+    # Fallback to consolidated/newsletter (numbered->legacy dir fallback)
+    if not newsletter_paths:
+        newsletter_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES)
+        if newsletter_dir:
             for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
                 path = os.path.join(newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
                 if os.path.exists(path):
                     newsletter_paths[f"consolidated_{ext}"] = path
 
-    # Also check link_enrichment in consolidated root
-    link_enrichment_dir = os.path.join(consolidated_dir, DIR_NAME_LINK_ENRICHMENT)
-    if os.path.isdir(link_enrichment_dir):
+    # Also check link_enrichment in consolidated root (numbered->legacy dir fallback)
+    link_enrichment_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES)
+    if link_enrichment_dir:
         for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
             for prefix in [OUTPUT_FILESTEM_ENRICHED, OUTPUT_FILESTEM_ENRICHED_SUMMARY]:
                 path = os.path.join(link_enrichment_dir, f"{prefix}.{ext}")
@@ -492,9 +540,9 @@ def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
             if not os.path.isdir(chat_dir) or chat_dir_name in [DIR_NAME_CONSOLIDATED, DIR_NAME_PER_CHAT]:
                 continue
 
-            # Check link_enrichment first (enriched newsletter)
-            chat_enrichment_dir = os.path.join(chat_dir, DIR_NAME_LINK_ENRICHMENT)
-            if os.path.isdir(chat_enrichment_dir):
+            # Check link_enrichment first (enriched newsletter, numbered->legacy fallback)
+            chat_enrichment_dir = _resolve_stage_dir(chat_dir, PERCHAT_LINK_ENRICHMENT_DIR_CANDIDATES)
+            if chat_enrichment_dir:
                 for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
                     for prefix in [OUTPUT_FILESTEM_ENRICHED_SUMMARY, OUTPUT_FILESTEM_ENRICHED]:
                         path = os.path.join(chat_enrichment_dir, f"{prefix}.{ext}")
@@ -502,10 +550,10 @@ def get_run_info(run_dir: str, run_type: str) -> RunInfo | None:
                             newsletter_paths[f"per_chat_{ext}"] = path
                             break
 
-            # Fallback to newsletter directory
+            # Fallback to newsletter directory (numbered->legacy fallback)
             if not newsletter_paths:
-                chat_newsletter_dir = os.path.join(chat_dir, DIR_NAME_NEWSLETTER)
-                if os.path.isdir(chat_newsletter_dir):
+                chat_newsletter_dir = _resolve_stage_dir(chat_dir, PERCHAT_NEWSLETTER_DIR_CANDIDATES)
+                if chat_newsletter_dir:
                     for ext in NEWSLETTER_OUTPUT_EXTENSIONS:
                         path = os.path.join(chat_newsletter_dir, f"{OUTPUT_FILESTEM_NEWSLETTER}.{ext}")
                         if os.path.exists(path):
@@ -910,7 +958,7 @@ async def search_discussions(query: str = Query(..., min_length=2, description="
         from db.connection import get_database
         from db.repositories.discussions import DiscussionsRepository
 
-        logger.info(f"Semantic search: query='{query}', time_range={time_range_days}, " f"min_similarity={min_similarity}, limit={limit}")
+        logger.info(f"Semantic search: query='{query}', time_range={time_range_days}, min_similarity={min_similarity}, limit={limit}")
 
         db = await get_database()
         repo = DiscussionsRepository(db)
@@ -1042,7 +1090,19 @@ async def get_mongodb_run_polls(run_id: str, chat_name: str | None = Query(None,
 
         polls = await polls_repo.get_polls_by_run(run_id=run_id, chat_name=chat_name)
 
-        return [PollResponse(poll_id=poll[PollDbKeys.POLL_ID], chat_name=poll.get(PollDbKeys.CHAT_NAME, "unknown"), sender=poll.get(PollDbKeys.SENDER, ""), timestamp=poll.get(PollDbKeys.TIMESTAMP, 0), question=poll.get(PollDbKeys.QUESTION, ""), options=[PollOptionResponse(option_id=opt.get(PollDbKeys.OPTION_ID, ""), text=opt.get(PollDbKeys.OPTION_TEXT, ""), vote_count=opt.get(PollDbKeys.VOTE_COUNT, 0)) for opt in poll.get(PollDbKeys.OPTIONS, [])], total_votes=poll.get(PollDbKeys.TOTAL_VOTES, 0), unique_voter_count=poll.get(PollDbKeys.UNIQUE_VOTER_COUNT, 0)) for poll in polls]
+        return [
+            PollResponse(
+                poll_id=poll[PollDbKeys.POLL_ID],
+                chat_name=poll.get(PollDbKeys.CHAT_NAME, "unknown"),
+                sender=poll.get(PollDbKeys.SENDER, ""),
+                timestamp=poll.get(PollDbKeys.TIMESTAMP, 0),
+                question=poll.get(PollDbKeys.QUESTION, ""),
+                options=[PollOptionResponse(option_id=opt.get(PollDbKeys.OPTION_ID, ""), text=opt.get(PollDbKeys.OPTION_TEXT, ""), vote_count=opt.get(PollDbKeys.VOTE_COUNT, 0)) for opt in poll.get(PollDbKeys.OPTIONS, [])],
+                total_votes=poll.get(PollDbKeys.TOTAL_VOTES, 0),
+                unique_voter_count=poll.get(PollDbKeys.UNIQUE_VOTER_COUNT, 0),
+            )
+            for poll in polls
+        ]
     except Exception as e:
         logger.error(f"Failed to get polls for run {run_id} from MongoDB: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch polls: {str(e)}")

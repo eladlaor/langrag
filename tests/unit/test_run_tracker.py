@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pymongo.errors import OperationFailure
 
+from custom_types.db_schemas import MessageDocument
+from custom_types.field_keys import DbFieldKeys, DecryptionResultKeys, DiscussionKeys, MessageSourceKeys
 from db.run_tracker import RunTracker
 
 
@@ -28,6 +30,14 @@ def _tracker_with_mock_repo(runs_repo: AsyncMock) -> RunTracker:
     tracker = RunTracker()
     tracker._initialized = True
     tracker._runs_repo = runs_repo
+    return tracker
+
+
+def _tracker_with_mock_messages_repo(messages_repo: AsyncMock) -> RunTracker:
+    """Build a RunTracker with its messages repo mocked and init short-circuited."""
+    tracker = RunTracker()
+    tracker._initialized = True
+    tracker._messages_repo = messages_repo
     return tracker
 
 
@@ -97,3 +107,53 @@ async def test_complete_run_passes_metrics_in_single_call():
     assert result is True
     runs_repo.complete_run.assert_awaited_once_with("run-1", "/tmp/out", metrics)
     runs_repo.update_one.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# store_raw_messages content coercion (regression: image/poll messages carry a
+# dict `content` that broke MessageDocument validation -> whole chat failed).
+# ---------------------------------------------------------------------------
+
+
+async def test_store_raw_messages_persists_text_and_image_content():
+    """A text message (str content) and an image message (dict content) both
+    yield valid MessageDocuments with `content` flattened to the expected str.
+
+    Guards the bug where a dict `content` ({"body": ..., "msgtype": "m.image"})
+    raised a Pydantic `string_type` validation error, failing extract_messages
+    for every chat that contained an image.
+    """
+    messages_repo = AsyncMock()
+    messages_repo.insert_batch.return_value = 2
+    tracker = _tracker_with_mock_messages_repo(messages_repo)
+
+    raw_messages = [
+        {
+            DiscussionKeys.ID: "evt_text",
+            MessageSourceKeys.SENDER_ID: "user_1",
+            MessageSourceKeys.TIMESTAMP: 1_700_000_000_000,
+            MessageSourceKeys.CONTENT: "hello world",
+        },
+        {
+            DiscussionKeys.ID: "evt_image",
+            MessageSourceKeys.SENDER_ID: "user_2",
+            MessageSourceKeys.TIMESTAMP: 1_700_000_001_000,
+            MessageSourceKeys.CONTENT: {DecryptionResultKeys.BODY: "photo.jpg", DecryptionResultKeys.MSGTYPE: "m.image"},
+        },
+    ]
+
+    count = await tracker.store_raw_messages(run_id="run-1", chat_name="LangTalks Community", data_source_name="langtalks", messages=raw_messages)
+
+    assert count == 2
+    messages_repo.insert_batch.assert_awaited_once()
+
+    persisted_docs = messages_repo.insert_batch.await_args.args[0]
+    assert len(persisted_docs) == 2
+
+    # Every persisted doc must round-trip through the canonical schema with a str content.
+    for doc in persisted_docs:
+        validated = MessageDocument(**doc)
+        assert isinstance(validated.content, str)
+
+    contents = [doc[DbFieldKeys.CONTENT] for doc in persisted_docs]
+    assert contents == ["hello world", "photo.jpg"]

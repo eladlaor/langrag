@@ -17,18 +17,18 @@ from constants import (
     ContentGenerationOperations,
     DataSources,
     DEFAULT_LANGUAGE,
+    LlmInputPurposes,
     NewsletterType,
     RepetitionScore,
     OUTPUT_FILENAME_NEWSLETTER_JSON,
     OUTPUT_FILENAME_NEWSLETTER_MD,
-    OUTPUT_FILENAME_NEWSLETTER_HTML,
     RESULT_KEY_NEWSLETTER_SUMMARY_PATH,
     RESULT_KEY_MARKDOWN_PATH,
-    RESULT_KEY_HTML_PATH,
 )
 from utils.llm import get_llm_caller
 from custom_types.common import LlmResponseTranslateSummary
 from custom_types.field_keys import NewsletterStructureKeys, ContentResultKeys, RankingResultKeys, DiscussionKeys, LlmInputKeys
+from custom_types.translated_newsletter_schemas import get_translated_newsletter_schema
 from config import get_settings
 from db.repositories.newsletters import NewslettersRepository
 
@@ -65,9 +65,10 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
             DataSources.WHATSAPP_GROUP_CHAT_MESSAGES: {
                 ContentGenerationOperations.GENERATE_NEWSLETTER_SUMMARY: self._generate_newsletter,
                 ContentGenerationOperations.TRANSLATE_SUMMARY: self._translate_summary,
+                ContentGenerationOperations.TRANSLATE_NEWSLETTER_STRUCTURED: self._translate_newsletter_structured,
             }
         }
-        logger.debug(f"Initialized NewsletterContentGenerator with format: {format_name}, " f"mongodb_enabled={newsletters_repo is not None}, " f"file_outputs_enabled={self._settings.database.enable_file_outputs}")
+        logger.debug(f"Initialized NewsletterContentGenerator with format: {format_name}, mongodb_enabled={newsletters_repo is not None}, file_outputs_enabled={self._settings.database.enable_file_outputs}")
 
     async def generate_content(self, operation: str, **kwargs) -> Any:
         """
@@ -123,21 +124,39 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
             # Validate required inputs
             featured_discussions = kwargs.get("featured_discussions")
             if featured_discussions is None:
-                raise ValueError("featured_discussions is required but was not provided. " "The content generator expects pre-filtered discussions from the ranking stage.")
+                raise ValueError("featured_discussions is required but was not provided. The content generator expects pre-filtered discussions from the ranking stage.")
 
             output_dir = kwargs.get("output_dir")
             if not output_dir:
                 raise ValueError("output_dir is required")
 
-            desired_language = kwargs.get("desired_language_for_summary", DEFAULT_LANGUAGE)
+            # `.get(..., default)` only applies when the key is ABSENT; an explicit
+            # None (seen on some chats) slips through and later crashes on
+            # `desired_language.lower()` in the renderer/i18n. Coerce it here.
+            desired_language = kwargs.get("desired_language_for_summary") or DEFAULT_LANGUAGE
 
             os.makedirs(output_dir, exist_ok=True)
-            logger.info(f"Generating {self._format.format_name} newsletter with " f"{len(featured_discussions)} discussions in {desired_language}")
+            logger.info(f"Generating {self._format.format_name} newsletter with {len(featured_discussions)} discussions in {desired_language}")
 
-            # Handle empty discussions
+            # Handle empty discussions. Forward the coerced language (and the
+            # persistence metadata) so the empty newsletter renders in the
+            # intended language instead of hitting the renderer with a None
+            # language via _save_outputs' default.
             if len(featured_discussions) == 0:
                 logger.warning("No discussions found. Creating empty newsletter.")
-                return await self._generate_empty_newsletter(output_dir)
+                return await self._generate_empty_newsletter(
+                    output_dir,
+                    desired_language=desired_language,
+                    newsletter_id=kwargs.get(ContentResultKeys.NEWSLETTER_ID),
+                    run_id=kwargs.get("run_id"),
+                    newsletter_type=kwargs.get("newsletter_type", NewsletterType.PER_CHAT),
+                    data_source_name=kwargs.get("data_source_name"),
+                    start_date=kwargs.get("start_date"),
+                    end_date=kwargs.get("end_date"),
+                    summary_format=kwargs.get("summary_format"),
+                    chat_name=kwargs.get(NewsletterStructureKeys.CHAT_NAME),
+                    featured_discussion_ids=kwargs.get(RankingResultKeys.FEATURED_DISCUSSION_IDS),
+                )
 
             # Filter out high/medium-repetition brief mentions and cap at 10
             brief_mention_items = kwargs.get(RankingResultKeys.BRIEF_MENTION_ITEMS, [])
@@ -146,7 +165,7 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
                 brief_mention_items = [item for item in brief_mention_items if item.get(RankingResultKeys.REPETITION_SCORE) not in (RepetitionScore.HIGH, RepetitionScore.MEDIUM)]
                 filtered_count = original_count - len(brief_mention_items)
                 if filtered_count > 0:
-                    logger.info(f"Anti-repetition: filtered {filtered_count} high/medium-repetition brief mentions " f"({original_count} -> {len(brief_mention_items)})")
+                    logger.info(f"Anti-repetition: filtered {filtered_count} high/medium-repetition brief mentions ({original_count} -> {len(brief_mention_items)})")
                 # Cap at 10 candidates to keep worth_mentioning focused
                 brief_mention_items = brief_mention_items[:10]
 
@@ -283,7 +302,7 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
                     featured_discussion_ids=featured_discussion_ids or [],
                 )
 
-                logger.info(f"Newsletter saved to MongoDB: {newsletter_id} " f"(db_id={mongodb_id}, word_count={stats['word_count']})")
+                logger.info(f"Newsletter saved to MongoDB: {newsletter_id} (db_id={mongodb_id}, word_count={stats['word_count']})")
 
             # Optional file generation (backward compatibility)
             file_paths = {}
@@ -293,7 +312,6 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
 
                 json_path = os.path.join(output_dir, OUTPUT_FILENAME_NEWSLETTER_JSON)
                 md_path = os.path.join(output_dir, OUTPUT_FILENAME_NEWSLETTER_MD)
-                html_path = os.path.join(output_dir, OUTPUT_FILENAME_NEWSLETTER_HTML)
 
                 # Save JSON
                 with open(json_path, "w", encoding="utf-8") as f:
@@ -303,19 +321,20 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
                 with open(md_path, "w", encoding="utf-8") as f:
                     f.write(md_content)
 
-                # Save HTML
-                with open(html_path, "w", encoding="utf-8") as f:
-                    f.write(html_content)
-
+                # HTML is intentionally NOT written at the generation stage.
+                # HTML is a final-stage-only artifact (rendered from the
+                # translated structured dict in the final_newsletter/ triplet).
+                # Writing it here produced a pre-enrichment, untranslated draft
+                # that the email path could silently deliver. See
+                # knowledge/plans/NUMBERED_STAGE_DIRS_AND_FINAL_TRIPLET.md.
                 file_paths = {
                     RESULT_KEY_NEWSLETTER_SUMMARY_PATH: json_path,
                     RESULT_KEY_MARKDOWN_PATH: md_path,
-                    RESULT_KEY_HTML_PATH: html_path,
                 }
 
-                logger.info(f"Newsletter files saved to: {json_path}, {md_path}, and {html_path}")
+                logger.info(f"Newsletter files saved to: {json_path} and {md_path} (html deferred to final stage)")
             else:
-                logger.debug("File outputs disabled (MONGODB_ENABLE_FILE_OUTPUTS=false) - " "newsletter stored in MongoDB only")
+                logger.debug("File outputs disabled (MONGODB_ENABLE_FILE_OUTPUTS=false) - newsletter stored in MongoDB only")
 
             # Return response based on what was saved
             result = {ContentResultKeys.NEWSLETTER_ID: newsletter_id} if newsletter_id else {}
@@ -397,5 +416,68 @@ class NewsletterContentGenerator(ContentGeneratorInterface):
 
         except Exception as e:
             error_message = f"Error translating summary: {e}"
+            logger.error(error_message)
+            raise Exception(error_message) from e
+
+    async def _translate_newsletter_structured(self, **kwargs) -> dict:
+        """
+        Translate the ENRICHED newsletter as a structured dict.
+
+        Loads the enriched newsletter JSON dict, asks the LLM to translate the
+        human-readable text field values into the target language while keeping
+        JSON keys, structure, and every URL verbatim, and returns a same-shaped
+        dict. The returned dict validates to this format's generation schema, so
+        it is directly renderable by ``render_markdown`` / ``render_html`` and by
+        ``json.dump`` — no markdown re-parsing.
+
+        Args:
+            **kwargs: Must include:
+                - data_source_path: Path to the enriched newsletter JSON file,
+                  OR
+                - newsletter_dict: The enriched newsletter dict (in-memory path).
+                - desired_language_for_summary: Target language.
+
+        Returns:
+            The translated newsletter dict (same shape as the enriched dict).
+        """
+        try:
+            newsletter_dict = kwargs.get("newsletter_dict")
+            data_source_path = kwargs.get("data_source_path")
+
+            if newsletter_dict is None:
+                if not data_source_path or not os.path.exists(data_source_path):
+                    raise ValueError(f"Neither newsletter_dict nor a valid data_source_path was provided (data_source_path={data_source_path})")
+                with open(data_source_path, encoding="utf-8") as file:
+                    newsletter_dict = json.load(file)
+
+            if not isinstance(newsletter_dict, dict) or not newsletter_dict:
+                raise ValueError(f"Enriched newsletter dict is empty or not a dict (data_source_path={data_source_path})")
+
+            desired_language_for_summary = kwargs.get("desired_language_for_summary") or DEFAULT_LANGUAGE
+
+            # Resolve the structured-output schema via the canonical resolver: the
+            # translated dict must share the enriched dict's shape so the same
+            # renderers apply. Centralizes the contract in
+            # translated_newsletter_schemas instead of reaching into the format
+            # here, keeping a single source of truth for the translated shape.
+            response_schema = get_translated_newsletter_schema(self._format.format_name)
+
+            client = get_llm_caller()
+            translated_dict = await client.call_with_structured_output(
+                purpose=LlmInputPurposes.TRANSLATE_NEWSLETTER_STRUCTURED,
+                response_schema=response_schema,
+                input_to_translate=newsletter_dict,
+                desired_language_for_summary=desired_language_for_summary,
+            )
+
+            if not isinstance(translated_dict, dict) or not translated_dict:
+                raise ValueError(f"Structured translation returned an empty or non-dict response: {translated_dict}")
+
+            logger.info(f"Structured newsletter translation completed for format={self._format.format_name}, language={desired_language_for_summary}, keys={list(translated_dict.keys())}")
+
+            return translated_dict
+
+        except Exception as e:
+            error_message = f"Error translating newsletter (structured) in _translate_newsletter_structured (format={self._format.format_name}): {e}"
             logger.error(error_message)
             raise Exception(error_message) from e

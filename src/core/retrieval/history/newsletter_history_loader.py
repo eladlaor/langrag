@@ -19,8 +19,10 @@ from constants import (
     DIR_NAME_CONSOLIDATED,
     DIR_NAME_AFTER_SELECTION,
     DIR_NAME_LINK_ENRICHMENT,
-    DIR_NAME_NEWSLETTER,
     DIR_NAME_PER_CHAT,
+    CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES,
+    CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES,
+    PERCHAT_NEWSLETTER_DIR_CANDIDATES,
     OUTPUT_FILENAME_ENRICHED_JSON,
     OUTPUT_FILENAME_ENRICHED_SUMMARY_JSON,
     OUTPUT_FILENAME_NEWSLETTER_JSON,
@@ -85,6 +87,20 @@ def _parse_run_directory_name(dir_name: str) -> tuple[str, str, str] | None:
         return None
 
 
+def _resolve_stage_dir(parent: Path, candidate_names: tuple[str, ...]) -> Path | None:
+    """Resolve a stage subdir under `parent` by probing candidate names in order.
+
+    Backward-compat (Decision 3): new numbered dir names first, legacy un-numbered
+    names after. Returns the first candidate that exists on disk, or None. No
+    migration — historical runs keep their legacy layout and stay resolvable.
+    """
+    for name in candidate_names:
+        candidate = parent / name
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def _find_newsletter_json(run_dir: Path) -> Path | None:
     """
     Find the newsletter JSON file in a run directory.
@@ -106,24 +122,31 @@ def _find_newsletter_json(run_dir: Path) -> Path | None:
     if path.exists():
         return path
 
-    # Priority 2: Consolidated link enrichment
-    path = run_dir / DIR_NAME_CONSOLIDATED / DIR_NAME_LINK_ENRICHMENT / OUTPUT_FILENAME_ENRICHED_SUMMARY_JSON
-    if path.exists():
-        return path
+    # Priority 2: Consolidated link enrichment (numbered->legacy dir fallback)
+    consolidated_dir = run_dir / DIR_NAME_CONSOLIDATED
+    enrichment_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_LINK_ENRICHMENT_DIR_CANDIDATES)
+    if enrichment_dir:
+        path = enrichment_dir / OUTPUT_FILENAME_ENRICHED_SUMMARY_JSON
+        if path.exists():
+            return path
 
-    # Priority 3: Consolidated newsletter
-    path = run_dir / DIR_NAME_CONSOLIDATED / DIR_NAME_NEWSLETTER / OUTPUT_FILENAME_NEWSLETTER_JSON
-    if path.exists():
-        return path
+    # Priority 3: Consolidated newsletter (numbered->legacy dir fallback)
+    newsletter_dir = _resolve_stage_dir(consolidated_dir, CONSOLIDATED_NEWSLETTER_DIR_CANDIDATES)
+    if newsletter_dir:
+        path = newsletter_dir / OUTPUT_FILENAME_NEWSLETTER_JSON
+        if path.exists():
+            return path
 
-    # Priority 4: First per-chat newsletter
+    # Priority 4: First per-chat newsletter (numbered->legacy dir fallback)
     per_chat_dir = run_dir / DIR_NAME_PER_CHAT
     if per_chat_dir.exists():
         for chat_dir in sorted(per_chat_dir.iterdir()):
             if chat_dir.is_dir():
-                path = chat_dir / DIR_NAME_NEWSLETTER / OUTPUT_FILENAME_NEWSLETTER_JSON
-                if path.exists():
-                    return path
+                chat_newsletter_dir = _resolve_stage_dir(chat_dir, PERCHAT_NEWSLETTER_DIR_CANDIDATES)
+                if chat_newsletter_dir:
+                    path = chat_newsletter_dir / OUTPUT_FILENAME_NEWSLETTER_JSON
+                    if path.exists():
+                        return path
 
     return None
 
@@ -288,7 +311,7 @@ def _load_previous_newsletters_from_files(
         Returns empty context if no previous newsletters found (graceful degradation).
     """
     try:
-        logger.info(f"Loading previous newsletters for data_source={data_source_name}, " f"current_start_date={current_start_date}, max={max_newsletters}")
+        logger.info(f"Loading previous newsletters for data_source={data_source_name}, current_start_date={current_start_date}, max={max_newsletters}")
 
         if max_newsletters <= 0:
             logger.info("Anti-repetition disabled (max_newsletters=0)")
@@ -359,7 +382,7 @@ def _load_previous_newsletters_from_files(
             context = _extract_topics_from_newsletter(newsletter_path)
             if context:
                 newsletters.append(context)
-                logger.debug(f"Loaded newsletter from {run_dir.name}: " f"{len(context.primary_topics)} primary, " f"{len(context.secondary_topics)} secondary, " f"{len(context.worth_mentioning)} worth_mentioning")
+                logger.debug(f"Loaded newsletter from {run_dir.name}: {len(context.primary_topics)} primary, {len(context.secondary_topics)} secondary, {len(context.worth_mentioning)} worth_mentioning")
 
         # Build date range string
         date_range = ""
@@ -374,7 +397,7 @@ def _load_previous_newsletters_from_files(
             date_range_covered=date_range,
         )
 
-        logger.info(f"Loaded {len(newsletters)} previous newsletters " f"(requested max: {max_newsletters}), " f"covering date range: {date_range or 'N/A'}")
+        logger.info(f"Loaded {len(newsletters)} previous newsletters (requested max: {max_newsletters}), covering date range: {date_range or 'N/A'}")
 
         return result
 
@@ -407,7 +430,7 @@ async def load_previous_newsletters_from_mongodb(
         Returns empty context if no previous newsletters found (graceful degradation).
     """
     try:
-        logger.info(f"Loading previous newsletters from MongoDB: data_source={data_source_name}, " f"current_start_date={current_start_date}, max={max_newsletters}")
+        logger.info(f"Loading previous newsletters from MongoDB: data_source={data_source_name}, current_start_date={current_start_date}, max={max_newsletters}")
 
         if max_newsletters <= 0:
             logger.info("Anti-repetition disabled (max_newsletters=0)")
@@ -490,7 +513,7 @@ async def load_previous_newsletters_from_mongodb(
                 )
 
                 newsletters.append(context)
-                logger.debug(f"Loaded newsletter {doc.get('newsletter_id')}: " f"{len(primary_topics)} primary, " f"{len(secondary_topics)} secondary, " f"{len(worth_mentioning)} worth_mentioning")
+                logger.debug(f"Loaded newsletter {doc.get('newsletter_id')}: {len(primary_topics)} primary, {len(secondary_topics)} secondary, {len(worth_mentioning)} worth_mentioning")
 
             except Exception as e:
                 logger.error(f"Failed to extract topics from newsletter {doc.get('newsletter_id')}: {e}")
@@ -509,7 +532,7 @@ async def load_previous_newsletters_from_mongodb(
             date_range_covered=date_range,
         )
 
-        logger.info(f"Loaded {len(newsletters)} previous newsletters from MongoDB " f"(requested max: {max_newsletters}), " f"covering date range: {date_range or 'N/A'}")
+        logger.info(f"Loaded {len(newsletters)} previous newsletters from MongoDB (requested max: {max_newsletters}), covering date range: {date_range or 'N/A'}")
 
         return result
 

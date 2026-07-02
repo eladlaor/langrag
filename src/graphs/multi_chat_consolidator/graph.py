@@ -38,6 +38,7 @@ from langgraph.types import Send, Command
 
 from constants import (
     TIMEOUT_HTTP_REQUEST,
+    OUTPUT_BASE_DIR_NAME,
     OutputAction,
     HEADER_CONTENT_TYPE,
     CONTENT_TYPE_JSON,
@@ -48,11 +49,9 @@ from constants import (
     HITL_KEY_TIMEOUT_DEADLINE,
     DIR_NAME_PER_CHAT,
     DIR_NAME_CONSOLIDATED,
-    DIR_NAME_DISCUSSIONS_RANKING,
-    DIR_NAME_AGGREGATED_DISCUSSIONS,
+    DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING,
+    DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS,
     DIR_NAME_DISCUSSIONS_FOR_SELECTION,
-    FILE_EXT_MD,
-    FILE_EXT_HTML,
     DEFAULT_DATA_SOURCE_FALLBACK,
     OUTPUT_FILENAME_CROSS_CHAT_RANKING,
     OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS,
@@ -141,6 +140,12 @@ async def chat_worker_wrapper(state: SingleChatState, config: RunnableConfig | N
             # non-enriched newsletter (or no email at all).
             SingleChatKeys.ENRICHED_NEWSLETTER_JSON_PATH: final_state.get(SingleChatKeys.ENRICHED_NEWSLETTER_JSON_PATH),
             SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH: final_state.get(SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH),
+            # Final deliverable triplet (the ONLY html emitter). Propagated so
+            # _find_best_html_path resolves the per-chat FINAL html for email in
+            # non-consolidated runs.
+            SingleChatKeys.FINAL_NEWSLETTER_JSON_PATH: final_state.get(SingleChatKeys.FINAL_NEWSLETTER_JSON_PATH),
+            SingleChatKeys.FINAL_NEWSLETTER_MD_PATH: final_state.get(SingleChatKeys.FINAL_NEWSLETTER_MD_PATH),
+            SingleChatKeys.FINAL_NEWSLETTER_HTML_PATH: final_state.get(SingleChatKeys.FINAL_NEWSLETTER_HTML_PATH),
             # Discussion count for MongoDB chat-status tracking (read via WorkerResultKeys.DISCUSSION_COUNT).
             WorkerResultKeys.DISCUSSION_COUNT: final_state.get(SingleChatKeys.DISCUSSION_COUNT),
             # NEW: Include paths needed for cross-chat consolidation
@@ -159,7 +164,7 @@ async def chat_worker_wrapper(state: SingleChatState, config: RunnableConfig | N
         start_date = state.get(SingleChatKeys.START_DATE, "unknown")
         end_date = state.get(SingleChatKeys.END_DATE, "unknown")
 
-        error_msg = f"Worker wrapper caught exception for chat '{chat_name}' " f"(date_range: {start_date} to {end_date}): {e}"
+        error_msg = f"Worker wrapper caught exception for chat '{chat_name}' (date_range: {start_date} to {end_date}): {e}"
         logger.error(error_msg, exc_info=True)
 
         error = {
@@ -502,51 +507,43 @@ async def aggregate_results(state: ParallelOrchestratorState, config: RunnableCo
 
 def _find_best_html_path(state: ParallelOrchestratorState, chat_results: list) -> str | None:
     """
-    Find the best available HTML newsletter path.
+    Resolve the FINAL newsletter HTML path for email delivery.
 
-    Priority order:
-    1. Consolidated enriched HTML (cross-chat consolidation with links)
-    2. Consolidated base HTML
-    3. First successful chat's enriched HTML
-    4. First successful chat's base HTML
+    HTML is a final-stage-only artifact: the generation and enrichment stages
+    render md+json only, so there is NO intermediate html to fall back to. The
+    only deliverable html is the final triplet member, rendered from the
+    translated structured dict. This resolver therefore returns:
+
+    1. The consolidated FINAL html (cross-chat consolidation runs), else
+    2. The first successful chat's FINAL html (per-chat non-consolidated runs).
+
+    It deliberately does NOT swap `.md`->`.html` on any generation/enrichment
+    path: those swaps used to surface a pre-enrichment draft html, silently
+    emailing content that was missing links and untranslated. When no final html
+    exists, this returns None so the send path fails loud (fail-fast) rather than
+    delivering a wrong file.
 
     Args:
         state: Orchestrator state
         chat_results: List of chat result dictionaries
 
     Returns:
-        Path to HTML file or None if not found
+        Path to the final HTML file, or None if no final html was produced.
     """
-    # Try consolidated paths first (if cross-chat consolidation was enabled)
-    consolidated_enriched = state.get(OrchestratorKeys.CONSOLIDATED_ENRICHED_MD_PATH)
-    if consolidated_enriched:
-        # Replace .md with .html
-        html_path = consolidated_enriched.replace(FILE_EXT_MD, FILE_EXT_HTML)
-        if os.path.exists(html_path):
-            return html_path
+    # Consolidated final html (cross-chat consolidation).
+    consolidated_final = state.get(OrchestratorKeys.CONSOLIDATED_FINAL_HTML_PATH)
+    if consolidated_final and os.path.exists(consolidated_final):
+        return consolidated_final
 
-    consolidated_base = state.get(OrchestratorKeys.CONSOLIDATED_NEWSLETTER_MD_PATH)
-    if consolidated_base:
-        html_path = consolidated_base.replace(FILE_EXT_MD, FILE_EXT_HTML)
-        if os.path.exists(html_path):
-            return html_path
-
-    # Fall back to first successful chat's HTML
-    # All entries in chat_results are successful (failures go to chat_errors)
-    logger.info(f"_find_best_html_path: checking {len(chat_results)} chat results. HTML paths: {[(r.get(SingleChatKeys.NEWSLETTER_HTML_PATH), r.get(SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH)) for r in chat_results]}")
+    # Per-chat final html (non-consolidated runs). All entries in chat_results
+    # are successful (failures go to chat_errors).
+    logger.info(f"_find_best_html_path: checking {len(chat_results)} chat results for final html: {[r.get(SingleChatKeys.FINAL_NEWSLETTER_HTML_PATH) for r in chat_results]}")
     for result in chat_results:
-        # Try enriched HTML first
-        enriched_md = result.get(SingleChatKeys.ENRICHED_NEWSLETTER_MD_PATH)
-        if enriched_md:
-            html_path = enriched_md.replace(FILE_EXT_MD, FILE_EXT_HTML)
-            if os.path.exists(html_path):
-                return html_path
+        final_html = result.get(SingleChatKeys.FINAL_NEWSLETTER_HTML_PATH)
+        if final_html and os.path.exists(final_html):
+            return final_html
 
-        # Try base HTML
-        newsletter_html = result.get(SingleChatKeys.NEWSLETTER_HTML_PATH)
-        if newsletter_html and os.path.exists(newsletter_html):
-            return newsletter_html
-
+    logger.error("No FINAL newsletter html resolved; email send will be skipped to avoid delivering a pre-enrichment draft (fail-fast)")
     return None
 
 
@@ -566,9 +563,17 @@ def _send_newsletter_email(recipients: list, html_path: str, data_source: str, s
         Exception: If email sending fails
     """
     from core.delivery.email_factory import send_email
+    from urllib.parse import quote
 
-    # Build viewer URL
-    viewer_url = f"{base_url}/api/newsletter_html_viewer?path={html_path}"
+    # Build viewer URL. The viewer resolves `path` RELATIVE to the output base
+    # dir, so strip a leading "<base>/" if present (html_path is stored with it)
+    # to avoid a doubled "output/output/..." that resolves to a 404. URL-encode
+    # so spaces/slashes in the path survive as a query param.
+    viewer_path = html_path
+    base_prefix = f"{OUTPUT_BASE_DIR_NAME}/"
+    if viewer_path.startswith(base_prefix):
+        viewer_path = viewer_path[len(base_prefix) :]
+    viewer_url = f"{base_url}/api/newsletter_html_viewer?path={quote(viewer_path)}"
 
     # Format subject
     date_range = f"{start_date} to {end_date}" if start_date != end_date else start_date
@@ -666,8 +671,12 @@ async def output_handler(state: ParallelOrchestratorState, config: RunnableConfi
             newsletter_html_path = _find_best_html_path(state, chat_results)
 
             if not newsletter_html_path:
-                logger.warning("No HTML newsletter available for email, skipping send_email action")
-                delivery_results[OutputAction.SEND_EMAIL] = {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "No HTML newsletter available"}
+                # Fail-loud: html is a final-stage-only artifact. A missing final
+                # html means translation/rendering did not complete, so there is
+                # NO safe file to email (the old code silently sent a
+                # pre-enrichment draft). Record the failure and skip the send.
+                logger.error("No FINAL newsletter html available for email; refusing to send a pre-enrichment draft (fail-fast). Skipping send_email action.", extra={"event": "email_skipped_no_final_html", "action": str(OutputAction.SEND_EMAIL)})
+                delivery_results[OutputAction.SEND_EMAIL] = {DeliveryResultKeys.SUCCESS: False, DeliveryResultKeys.ERROR: "No final newsletter html available (fail-fast, no draft fallback)"}
                 continue
 
             try:
@@ -780,7 +789,7 @@ def prepare_discussion_selection(state: ParallelOrchestratorState, config: Runna
     logger.info("Node: prepare_discussion_selection - Starting")
 
     # Load ranked discussions from cross-chat consolidation
-    consolidated_ranking_file = os.path.join(state[OrchestratorKeys.BASE_OUTPUT_DIR], DIR_NAME_CONSOLIDATED, DIR_NAME_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
+    consolidated_ranking_file = os.path.join(state[OrchestratorKeys.BASE_OUTPUT_DIR], DIR_NAME_CONSOLIDATED, DIR_NAME_CONSOLIDATED_DISCUSSIONS_RANKING, OUTPUT_FILENAME_CROSS_CHAT_RANKING)
 
     if not os.path.exists(consolidated_ranking_file):
         raise RuntimeError(f"Cross-chat ranking file not found: {consolidated_ranking_file}")
@@ -794,7 +803,7 @@ def prepare_discussion_selection(state: ParallelOrchestratorState, config: Runna
     ranked_discussions = ranking_data.get(RankingResultKeys.RANKED_DISCUSSIONS, [])
 
     # Load full discussion content to get group names
-    aggregated_file = os.path.join(state[OrchestratorKeys.BASE_OUTPUT_DIR], DIR_NAME_CONSOLIDATED, DIR_NAME_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
+    aggregated_file = os.path.join(state[OrchestratorKeys.BASE_OUTPUT_DIR], DIR_NAME_CONSOLIDATED, DIR_NAME_CONSOLIDATED_AGGREGATED_DISCUSSIONS, OUTPUT_FILENAME_AGGREGATED_DISCUSSIONS)
 
     discussions_lookup = {}
     if os.path.exists(aggregated_file):
@@ -841,7 +850,7 @@ def prepare_discussion_selection(state: ParallelOrchestratorState, config: Runna
     timeout_minutes = state.get(OrchestratorKeys.HITL_SELECTION_TIMEOUT_MINUTES, 0)  # Default: 0 (automatic selection)
     timeout_deadline = datetime.now(UTC) + timedelta(minutes=timeout_minutes)
 
-    logger.info(f"HITL selection timeout: {timeout_minutes} minutes ({timeout_minutes/60:.1f} hours)")
+    logger.info(f"HITL selection timeout: {timeout_minutes} minutes ({timeout_minutes / 60:.1f} hours)")
     logger.info(f"Selection expires at: {timeout_deadline.isoformat()}")
 
     # Create selection file

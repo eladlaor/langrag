@@ -25,6 +25,25 @@ from datetime import UTC
 logger = logging.getLogger(__name__)
 
 
+def _coerce_content_to_str(content: object) -> str:
+    """Normalize a raw message ``content`` field to a plain string.
+
+    The Beeper extractor emits ``content`` as a str for plain text messages but
+    as a dict (``{"body": ..., "msgtype": "m.image"}``) for image and poll
+    messages. ``MessageDocument.content`` is typed ``str | None``, so a dict
+    would fail validation. This mirrors the flattening the whatsapp preprocessor
+    already performs, extracting the body via ``DecryptionResultKeys.BODY``.
+
+    A dict without a body key falls back to an empty string. Any non-str,
+    non-dict value is stringified defensively.
+    """
+    if content is None or isinstance(content, str):
+        return content or ""
+    if isinstance(content, dict):
+        return content.get(DecryptionResultKeys.BODY, "") or ""
+    return str(content)
+
+
 class RunTracker:
     """Tracks workflow runs in MongoDB. All methods are fail-soft."""
 
@@ -513,7 +532,7 @@ class RunTracker:
                     DbFieldKeys.DATA_SOURCE_NAME: data_source_name,
                     DbFieldKeys.SENDER: msg.get(MessageSourceKeys.SENDER_ID) or msg.get(MessageSourceKeys.SENDER) or "",
                     DbFieldKeys.TIMESTAMP: msg.get(MessageSourceKeys.TIMESTAMP),
-                    DbFieldKeys.CONTENT: msg.get(MessageSourceKeys.CONTENT, ""),
+                    DbFieldKeys.CONTENT: _coerce_content_to_str(msg.get(MessageSourceKeys.CONTENT, "")),
                     DbFieldKeys.CONTENT_TRANSLATED: None,
                     DbFieldKeys.IS_TRANSLATED: False,
                 }

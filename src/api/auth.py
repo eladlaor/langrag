@@ -23,7 +23,9 @@ dependency attached to every UI data router. `require_admin` layers an ADMIN
 role check on top for the user-management surface.
 """
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+import hmac
+
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 from pymongo.errors import DuplicateKeyError
 
 from config import get_settings
@@ -37,7 +39,9 @@ from constants import (
     ROUTE_AUTH_LOGOUT,
     ROUTE_AUTH_SESSION,
     ROUTE_AUTH_SIGNUP,
+    INTERNAL_API_KEY_HEADER,
     ROUTE_ROOT,
+    SERVICE_PRINCIPAL_SUBJECT,
     SESSION_COOKIE_NAME,
     SESSION_SUBJECT_VALUE,
     SIGNUP_CODE_NOT_ALLOWLISTED,
@@ -99,6 +103,24 @@ def _sentinel_dev_user() -> CurrentUser:
     return CurrentUser(
         user_id=SESSION_SUBJECT_VALUE,
         email=SESSION_SUBJECT_VALUE,
+        role=UserRole.ADMIN,
+        communities=[],
+    )
+
+
+def _service_principal() -> CurrentUser:
+    """CurrentUser returned for an authenticated internal service caller.
+
+    Resolved only when the login gate is enabled AND a non-empty internal API
+    key is configured AND the request presents that exact key in the
+    X-Internal-Key header. Grants ADMIN so headless automation can reach the
+    same session-gated routes a UI admin can, without forging a session cookie
+    or holding a DB-backed account. Distinguished from the dev sentinel by its
+    SERVICE_PRINCIPAL_SUBJECT identity so it is unambiguous in logs/audits.
+    """
+    return CurrentUser(
+        user_id=SERVICE_PRINCIPAL_SUBJECT,
+        email=SERVICE_PRINCIPAL_SUBJECT,
         role=UserRole.ADMIN,
         communities=[],
     )
@@ -305,6 +327,7 @@ async def logout(response: Response) -> SessionResponse:
 
 async def require_session(
     session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    internal_key: str | None = Header(default=None, alias=INTERNAL_API_KEY_HEADER),
 ) -> CurrentUser:
     """FastAPI dependency: resolve the authenticated user from the cookie.
 
@@ -312,11 +335,32 @@ async def require_session(
     the user is missing, disabled, or the token epoch is stale relative to the
     stored epoch. Returns a CurrentUser on success; raises 401 on any failure.
     When the gate is disabled, returns a sentinel ADMIN user so dev is unblocked.
+
+    Internal service path: when the gate is enabled, a non-empty internal API
+    key is configured, and the request presents that exact key in the
+    X-Internal-Key header, the call resolves to the admin-equivalent service
+    principal (no cookie, no DB lookup). A wrong key is an explicit 401 and does
+    NOT fall through to the cookie path. When no key is configured or no header
+    is sent, the header path is inert and the cookie path runs unchanged.
     """
     try:
         settings = get_settings()
         if not settings.login.enabled:
             return _sentinel_dev_user()
+
+        configured = settings.login.internal_api_key
+        if configured and internal_key is not None:
+            if hmac.compare_digest(internal_key, configured):
+                logger.info(
+                    "Internal service auth accepted",
+                    extra={"event": "internal_auth_ok", "function": "require_session"},
+                )
+                return _service_principal()
+            logger.warning(
+                "Internal service auth rejected: key mismatch",
+                extra={"event": "internal_auth_failed", "function": "require_session"},
+            )
+            raise HTTPException(status_code=HTTP_STATUS_UNAUTHORIZED, detail=_NOT_AUTHENTICATED_MESSAGE)
 
         if not session_cookie:
             logger.warning(

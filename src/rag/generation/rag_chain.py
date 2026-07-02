@@ -50,8 +50,14 @@ async def generate_answer(
     date_end: datetime | None = None,
     freshness_warning: bool = False,
     newest_source_date: datetime | None = None,
+    callbacks: list | None = None,
 ) -> str:
-    """Generate an answer using the RAG context and conversation history."""
+    """Generate an answer using the RAG context and conversation history.
+
+    `callbacks` (LangChain callback handlers, e.g. a Langfuse handler) are built
+    by the caller and injected here so this module stays free of API/session
+    concerns (SRP). Default None keeps callers backward compatible.
+    """
     settings = get_settings().rag
     llm = create_chat_model(
         model=settings.rag_llm_model,
@@ -60,15 +66,18 @@ async def generate_answer(
     )
 
     messages = _build_messages(
-        query, context, conversation_history,
+        query,
+        context,
+        conversation_history,
         date_start=date_start,
         date_end=date_end,
         freshness_warning=freshness_warning,
         newest_source_date=newest_source_date,
     )
 
+    invoke_config = {"callbacks": callbacks} if callbacks else {}
     try:
-        response = await llm.ainvoke(messages)
+        response = await llm.ainvoke(messages, config=invoke_config)
         return response.content
     except Exception as e:
         logger.error(f"RAG generation failed: {e}")
@@ -84,8 +93,13 @@ async def generate_answer_stream(
     date_end: datetime | None = None,
     freshness_warning: bool = False,
     newest_source_date: datetime | None = None,
+    callbacks: list | None = None,
 ) -> AsyncIterator[str]:
-    """Stream answer tokens using the RAG context and conversation history."""
+    """Stream answer tokens using the RAG context and conversation history.
+
+    `callbacks` (built by the caller, e.g. a Langfuse handler) are attached to
+    the streamed call. Default None keeps callers backward compatible.
+    """
     settings = get_settings().rag
     llm = create_chat_model(
         model=settings.rag_llm_model,
@@ -94,15 +108,18 @@ async def generate_answer_stream(
     )
 
     messages = _build_messages(
-        query, context, conversation_history,
+        query,
+        context,
+        conversation_history,
         date_start=date_start,
         date_end=date_end,
         freshness_warning=freshness_warning,
         newest_source_date=newest_source_date,
     )
 
+    stream_config = {"callbacks": callbacks} if callbacks else {}
     try:
-        async for chunk in llm.astream(messages):
+        async for chunk in llm.astream(messages, config=stream_config):
             if chunk.content:
                 yield chunk.content
     except Exception as e:

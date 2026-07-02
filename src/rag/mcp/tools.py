@@ -10,10 +10,20 @@ so eval results apply identically.
 from datetime import UTC, datetime
 from typing import Any
 
-from constants import ContentSourceType
+from constants import (
+    ContentSourceType,
+    RAG_TRACE_META_CITATION_COUNT,
+    RAG_TRACE_META_REFUSAL,
+    RAG_TRACE_OUTPUT_ANSWER,
+    RAGTraceName,
+    RAGTraceTag,
+)
 from custom_types.field_keys import RAGChunkKeys
 from db.connection import get_database
 from db.repositories.chunks import ChunksRepository
+from observability.llm.langfuse_client import flush_langfuse, get_langfuse_callback_handler
+from observability.llm.rag_tracing import create_rag_trace, schedule_rag_online_eval
+from rag.concurrency.guard import rag_slot
 from rag.generation.rag_chain import generate_answer, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
 
@@ -40,6 +50,8 @@ async def rag_query(
     communities: list[str] | None = None,
     mmr_lambda: float | None = None,
     include_raw_messages: bool | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the full RAG chain (retrieve + generate) and return a dated answer.
 
@@ -61,44 +73,80 @@ async def rag_query(
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
 
-    # MCP tool signatures carry no caller identity, so per-user MMR lambda is
-    # not resolvable here; retrieval falls through to the config default.
-    pipeline = RetrievalPipeline()
-    retrieval = await pipeline.retrieve(
+    trace, trace_id = create_rag_trace(
+        name=RAGTraceName.MCP_QUERY,
+        user_id=user_id,
+        session_id=session_id,
         query=query,
         content_sources=sources,
         date_start=ds,
         date_end=de,
-        data_source_names=communities,
-        mmr_lambda=mmr_lambda,
-        include_raw_messages=include_raw_messages,
+        tags=[RAGTraceTag.RAG, RAGTraceTag.MCP],
     )
 
-    if not retrieval["context"]:
-        answer = refusal_for_empty_context(ds, de)
-    else:
-        answer = await generate_answer(
-            query=query,
-            context=retrieval["context"],
-            conversation_history=[],
-            date_start=ds,
-            date_end=de,
-            freshness_warning=retrieval["freshness_warning"],
-            newest_source_date=retrieval["newest_source_date"],
-        )
+    # Concurrency admission control against the SAME process-wide budget as the
+    # REST surface. RagCapacityExceeded propagates to the MCP caller (the MCP
+    # framework surfaces it as a tool error); the slot is released in finally,
+    # so a pipeline/generation error never leaks it.
+    try:
+        async with rag_slot():
+            # MCP tool signatures carry no caller identity, so per-user MMR lambda is
+            # not resolvable here; retrieval falls through to the config default.
+            pipeline = RetrievalPipeline()
+            retrieval = await pipeline.retrieve(
+                query=query,
+                content_sources=sources,
+                date_start=ds,
+                date_end=de,
+                data_source_names=communities,
+                mmr_lambda=mmr_lambda,
+                include_raw_messages=include_raw_messages,
+                trace_id=trace_id,
+            )
 
-    return {
-        "answer": answer,
-        "citations": retrieval["citations"],
-        "freshness_warning": retrieval["freshness_warning"],
-        "oldest_source_date": _iso_or_none(retrieval["oldest_source_date"]),
-        "newest_source_date": _iso_or_none(retrieval["newest_source_date"]),
-        "date_filter": {
-            "date_start": _iso_or_none(ds),
-            "date_end": _iso_or_none(de),
-        },
-        "sources": sources or [],
-    }
+            if not retrieval["context"]:
+                answer = refusal_for_empty_context(ds, de)
+                if trace:
+                    trace.update(output={RAG_TRACE_OUTPUT_ANSWER: answer}, metadata={RAG_TRACE_META_REFUSAL: True})
+            else:
+                callback = get_langfuse_callback_handler(trace_id=trace_id, session_id=session_id, user_id=user_id)
+                answer = await generate_answer(
+                    query=query,
+                    context=retrieval["context"],
+                    conversation_history=[],
+                    date_start=ds,
+                    date_end=de,
+                    freshness_warning=retrieval["freshness_warning"],
+                    newest_source_date=retrieval["newest_source_date"],
+                    callbacks=[callback] if callback else None,
+                )
+                if trace:
+                    trace.update(
+                        output={RAG_TRACE_OUTPUT_ANSWER: answer},
+                        metadata={RAG_TRACE_META_REFUSAL: False, RAG_TRACE_META_CITATION_COUNT: len(retrieval["citations"])},
+                    )
+                schedule_rag_online_eval(
+                    session_id=session_id or trace_id or "",
+                    query=query,
+                    answer=answer,
+                    contexts=[retrieval["context"]],
+                    trace_id=trace_id,
+                )
+
+            return {
+                "answer": answer,
+                "citations": retrieval["citations"],
+                "freshness_warning": retrieval["freshness_warning"],
+                "oldest_source_date": _iso_or_none(retrieval["oldest_source_date"]),
+                "newest_source_date": _iso_or_none(retrieval["newest_source_date"]),
+                "date_filter": {
+                    "date_start": _iso_or_none(ds),
+                    "date_end": _iso_or_none(de),
+                },
+                "sources": sources or [],
+            }
+    finally:
+        flush_langfuse()
 
 
 async def rag_search(
@@ -110,6 +158,8 @@ async def rag_search(
     top_k: int | None = None,
     mmr_lambda: float | None = None,
     include_raw_messages: bool | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Run retrieval only — no LLM call. Returns reranked citations with source dates.
 
@@ -126,31 +176,57 @@ async def rag_search(
     ds = _parse_iso_date(date_start, "date_start")
     de = _parse_iso_date(date_end, "date_end")
 
-    # No caller identity on the MCP path: per-user MMR lambda is not resolvable,
-    # so retrieval uses the config default.
-    pipeline = RetrievalPipeline()
-    retrieval = await pipeline.retrieve(
+    trace, trace_id = create_rag_trace(
+        name=RAGTraceName.MCP_SEARCH,
+        user_id=user_id,
+        session_id=session_id,
         query=query,
         content_sources=sources,
         date_start=ds,
         date_end=de,
-        data_source_names=communities,
-        rerank_top_k=top_k,
-        mmr_lambda=mmr_lambda,
-        include_raw_messages=include_raw_messages,
+        tags=[RAGTraceTag.RAG, RAGTraceTag.MCP],
     )
 
-    return {
-        "citations": retrieval["citations"],
-        "freshness_warning": retrieval["freshness_warning"],
-        "oldest_source_date": _iso_or_none(retrieval["oldest_source_date"]),
-        "newest_source_date": _iso_or_none(retrieval["newest_source_date"]),
-        "date_filter": {
-            "date_start": _iso_or_none(ds),
-            "date_end": _iso_or_none(de),
-        },
-        "sources": sources or [],
-    }
+    # Concurrency admission control against the same process-wide budget as the
+    # REST surface (retrieval-only, but still an expensive execution path).
+    try:
+        async with rag_slot():
+            # No caller identity on the MCP path: per-user MMR lambda is not resolvable,
+            # so retrieval uses the config default.
+            pipeline = RetrievalPipeline()
+            retrieval = await pipeline.retrieve(
+                query=query,
+                content_sources=sources,
+                date_start=ds,
+                date_end=de,
+                data_source_names=communities,
+                rerank_top_k=top_k,
+                mmr_lambda=mmr_lambda,
+                include_raw_messages=include_raw_messages,
+                trace_id=trace_id,
+            )
+
+            # Retrieval-only path: no generation, no online eval. An empty
+            # citation set is the refusal signal (nothing matched the query).
+            if trace:
+                citations = retrieval["citations"]
+                trace.update(
+                    metadata={RAG_TRACE_META_REFUSAL: not citations, RAG_TRACE_META_CITATION_COUNT: len(citations)},
+                )
+
+            return {
+                "citations": retrieval["citations"],
+                "freshness_warning": retrieval["freshness_warning"],
+                "oldest_source_date": _iso_or_none(retrieval["oldest_source_date"]),
+                "newest_source_date": _iso_or_none(retrieval["newest_source_date"]),
+                "date_filter": {
+                    "date_start": _iso_or_none(ds),
+                    "date_end": _iso_or_none(de),
+                },
+                "sources": sources or [],
+            }
+    finally:
+        flush_langfuse()
 
 
 async def list_rag_sources() -> dict[str, list[dict[str, Any]]]:

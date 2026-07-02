@@ -11,6 +11,7 @@ export const COMMUNITY_STRUCTURE = {
       "LangTalks Community 2",
       "LangTalks Community 3",
       "LangTalks Community 4",
+      "LangTalks Community 5",
       "LangTalks - Code Generation Agents",
       "LangTalks AI-SDLC",
       "LangTalks - English",

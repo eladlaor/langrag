@@ -127,6 +127,7 @@ class AnthropicProvider(PromptInputBuilderMixin, LLMProviderInterface):
                     LlmInputPurposes.TRANSLATE_WHATSAPP_GROUP_MESSAGES: self._get_input_for_translate_whatsapp_group_messages,
                     LlmInputPurposes.SEPARATE_DISCUSSIONS: self._get_input_for_separate_whatsapp_group_message_discussions,
                     LlmInputPurposes.TRANSLATE_SUMMARY: self._get_input_for_translate_newsletter_summary,
+                    LlmInputPurposes.TRANSLATE_NEWSLETTER_STRUCTURED: self._get_input_for_translate_newsletter_structured,
                     LlmInputPurposes.GENERATE_CONTENT_WA_COMMUNITY_LANGTALKS_NEWSLETTER: self._get_input_for_generate_content_wa_community_langtalks_newsletter,
                 }
             }

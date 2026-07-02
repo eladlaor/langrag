@@ -15,20 +15,18 @@ stdio transport delegates auth to the user's local Claude Code config.
 import argparse
 import logging
 import sys
+import uuid
 
 from mcp.server.fastmcp import FastMCP
 
 from config import get_settings
+from constants import MCP_SESSION_ID_PREFIX, MCP_TRACE_USER
 from rag.mcp.tools import list_rag_sources, rag_query, rag_search
 
 logger = logging.getLogger(__name__)
 
 MCP_SERVER_NAME = "langrag"
-MCP_SERVER_INSTRUCTIONS = (
-    "RAG tools for LangTalks podcasts and past newsletters. Every answer is tagged "
-    "with the source date(s); pass date_start/date_end (YYYY-MM-DD) to scope retrieval "
-    "to a window. Use this when you need grounded, dated context from the LangRAG corpus."
-)
+MCP_SERVER_INSTRUCTIONS = "RAG tools for LangTalks podcasts and past newsletters. Every answer is tagged with the source date(s); pass date_start/date_end (YYYY-MM-DD) to scope retrieval to a window. Use this when you need grounded, dated context from the LangRAG corpus."
 
 
 def build_server() -> FastMCP:
@@ -37,12 +35,7 @@ def build_server() -> FastMCP:
 
     @server.tool(
         name="rag_query",
-        description=(
-            "Run the full RAG chain: retrieve, then generate a date-tagged answer. "
-            "Pass date_start/date_end (YYYY-MM-DD) to constrain to a window. "
-            "sources is an optional list filter, e.g. ['podcast'] or ['newsletter']. "
-            "Returns: answer, citations (with source_date_start/end), freshness flags."
-        ),
+        description=("Run the full RAG chain: retrieve, then generate a date-tagged answer. Pass date_start/date_end (YYYY-MM-DD) to constrain to a window. sources is an optional list filter, e.g. ['podcast'] or ['newsletter']. Returns: answer, citations (with source_date_start/end), freshness flags."),
     )
     async def _rag_query_tool(
         query: str,
@@ -50,15 +43,23 @@ def build_server() -> FastMCP:
         date_end: str | None = None,
         sources: list[str] | None = None,
     ) -> dict:
-        return await rag_query(query=query, date_start=date_start, date_end=date_end, sources=sources)
+        # Concurrency admission control is enforced transitively inside tools.rag_query
+        # (rag_slot from rag.concurrency.guard); no guard needed at this wrapper.
+        # session_id/user_id are server-internal (not tool-declared): FastMCP carries
+        # no caller identity, so we synthesize a per-call session so each call is one
+        # grouped Langfuse trace.
+        return await rag_query(
+            query=query,
+            date_start=date_start,
+            date_end=date_end,
+            sources=sources,
+            session_id=f"{MCP_SESSION_ID_PREFIX}{uuid.uuid4().hex[:8]}",
+            user_id=MCP_TRACE_USER,
+        )
 
     @server.tool(
         name="rag_search",
-        description=(
-            "Retrieval only — no LLM call. Returns top-K reranked chunks with source dates. "
-            "Same date and source filters as rag_query. Useful when the agent wants to "
-            "compose its own answer or cite raw chunks."
-        ),
+        description=("Retrieval only — no LLM call. Returns top-K reranked chunks with source dates. Same date and source filters as rag_query. Useful when the agent wants to compose its own answer or cite raw chunks."),
     )
     async def _rag_search_tool(
         query: str,
@@ -67,20 +68,21 @@ def build_server() -> FastMCP:
         sources: list[str] | None = None,
         top_k: int | None = None,
     ) -> dict:
+        # Concurrency admission control is enforced transitively inside tools.rag_search
+        # (rag_slot from rag.concurrency.guard); no guard needed at this wrapper.
         return await rag_search(
             query=query,
             date_start=date_start,
             date_end=date_end,
             sources=sources,
             top_k=top_k,
+            session_id=f"{MCP_SESSION_ID_PREFIX}{uuid.uuid4().hex[:8]}",
+            user_id=MCP_TRACE_USER,
         )
 
     @server.tool(
         name="list_rag_sources",
-        description=(
-            "List ingested sources (podcasts, newsletters) with chunk counts and the "
-            "earliest/latest source dates per source. Use this to scope queries by date."
-        ),
+        description=("List ingested sources (podcasts, newsletters) with chunk counts and the earliest/latest source dates per source. Use this to scope queries by date."),
     )
     async def _list_rag_sources_tool() -> dict:
         return await list_rag_sources()
@@ -109,10 +111,7 @@ def main() -> int:
 
     settings = get_settings().rag
     if args.transport == "http" and not settings.mcp_api_key:
-        logger.error(
-            "Refusing to start HTTP MCP transport without RAG_MCP_API_KEY configured. "
-            "Set the env var or fall back to stdio for local dev."
-        )
+        logger.error("Refusing to start HTTP MCP transport without RAG_MCP_API_KEY configured. Set the env var or fall back to stdio for local dev.")
         return 2
 
     server = build_server()

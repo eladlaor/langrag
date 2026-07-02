@@ -1,0 +1,35 @@
+# Compose overlay for the 4GB app box: Langfuse runs on a SEPARATE box (Hetzner
+# CX21) reached over the Hetzner private network, NOT co-located on the app box.
+#
+# Running Langfuse (langfuse/langfuse:2) + its Postgres alongside Mongo, mongot,
+# the app, and the MCP server on a single 4GB box OOMs. This override parks the
+# co-located langfuse-server + langfuse-db (profiles: ["never"]) so they never
+# start on the app box, and repoints app + mcp-server LANGFUSE_HOST at the remote
+# box via a REQUIRED (:?) env var so a missing/mistyped host fails loudly at
+# compose-parse time instead of silently no-op'ing traces.
+#
+# Apply with (production profile is still required to bring up mcp-server):
+#   docker compose -f docker-compose.yml -f docker-compose.langfuse-remote.yml \
+#     --profile production up -d
+#
+# The remote box runs its OWN minimal compose (langfuse:2 + postgres); that
+# artifact lives in the deploy runbook (knowledge/deployment/
+# MCP_AND_LANGFUSE_PROD_ENABLEMENT.md), not in this repo's default stack.
+services:
+  langfuse-server:
+    # Parked: never started on the app box. Langfuse lives on the remote box.
+    profiles: ["never"]
+
+  langfuse-db:
+    # Parked with langfuse-server (its backing Postgres).
+    profiles: ["never"]
+
+  app:
+    environment:
+      # Remote Langfuse private-net URL, e.g. http://<langfuse-private-ip>:3000.
+      # Required (:?) so a misconfigured host errors before deploy.
+      LANGFUSE_HOST: ${LANGFUSE_HOST:?set LANGFUSE_HOST to the remote Langfuse private-net URL}
+
+  mcp-server:
+    environment:
+      LANGFUSE_HOST: ${LANGFUSE_HOST:?set LANGFUSE_HOST to the remote Langfuse private-net URL}
