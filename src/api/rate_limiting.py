@@ -16,7 +16,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from constants import RAG_API_KEY_BEARER_SCHEME, RAG_API_KEY_HEADER
+from constants import (
+    HEADER_CF_CONNECTING_IP,
+    HEADER_X_FORWARDED_FOR,
+    RAG_API_KEY_BEARER_SCHEME,
+    RAG_API_KEY_HEADER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,39 @@ def _hashed_key_bucket(api_key: str) -> str:
     RAG_API_KEY_PEPPER is unset, which is wrong for this non-secret use.
     """
     return f"key:{hashlib.sha256(api_key.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the real client IP for per-IP rate limiting behind proxies.
+
+    Behind nginx/Cloudflare, `get_remote_address` returns the PROXY's IP, so the
+    per-IP limit collapses to one global bucket; and a raw X-Forwarded-For is
+    client-spoofable. Resolution order (config-driven, see APISettings):
+
+      1. If Cloudflare is authoritative (cloudflare_authoritative=True), trust the
+         CF-Connecting-IP header. Cloudflare strips a client-supplied one, so this
+         is safe ONLY when Cloudflare is the sole ingress.
+      2. Else, if the immediate TCP peer is in the trusted-proxy allowlist
+         (trusted_proxy_ips), use the LEFTMOST X-Forwarded-For entry (the original
+         client the trusted proxy recorded).
+      3. Else (dev / no proxy / untrusted peer) use the raw peer address — an
+         untrusted or absent XFF is never honored, so it cannot be spoofed.
+    """
+    settings = get_settings().api
+    peer = get_remote_address(request)
+
+    if settings.cloudflare_authoritative:
+        cf_ip = request.headers.get(HEADER_CF_CONNECTING_IP)
+        if cf_ip and cf_ip.strip():
+            return cf_ip.strip()
+
+    if peer in set(settings.trusted_proxy_ips):
+        xff = request.headers.get(HEADER_X_FORWARDED_FOR, "")
+        leftmost = xff.split(",", 1)[0].strip() if xff else ""
+        if leftmost:
+            return leftmost
+
+    return peer
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -49,7 +87,7 @@ def _rate_limit_key(request: Request) -> str:
     if len(parts) == 2 and parts[0].lower() == RAG_API_KEY_BEARER_SCHEME.lower():
         return _hashed_key_bucket(parts[1].strip())
 
-    return f"ip:{get_remote_address(request)}"
+    return f"ip:{_client_ip(request)}"
 
 
 # Single application-wide limiter used by all decorators.
@@ -106,3 +144,13 @@ RATE_ACCESS_REQUEST = "5/minute"
 # Login. Throttles credential-stuffing / brute force AND caps the CPU/memory DoS
 # amplification of the deliberately-expensive argon2id verify run per attempt.
 RATE_LOGIN = "10/minute"
+# Public podcast-MCP key issuance (request-key). Per-IP slowapi cap so a single
+# source cannot mint-spam the endpoint or blast verification emails. This is the
+# per-IP leg; the per-email leg is enforced separately (Mongo-backed count in the
+# consumers repo) because slowapi keys on IP/API-key, not on request-body email.
+RATE_PODCAST_CONSUMER_REQUEST_KEY = "5/hour"
+# Public podcast-MCP key issuance (verify). Verify MINTS a credential, so it must
+# be throttled just like request-key: without this, a leaked/guessed token (or a
+# stolen verify link) could be replayed to hammer key minting / prior-key
+# revocation. Per-IP cap; a legitimate human clicks the link once or twice.
+RATE_PODCAST_CONSUMER_VERIFY = "10/hour"

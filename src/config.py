@@ -26,7 +26,7 @@ from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from constants import ANTHROPIC_LLM_PROVIDER, APP_VERSION, CookieSameSite, DEFAULT_LLM_PROVIDER, ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD, GEMINI_LLM_PROVIDER, SimilarityThreshold, VisionDescribeScope
+from constants import ANTHROPIC_LLM_PROVIDER, APP_VERSION, CookieSameSite, DEFAULT_LLM_PROVIDER, ENV_BOOTSTRAP_ADMIN_EMAIL, ENV_BOOTSTRAP_ADMIN_PASSWORD, GEMINI_LLM_PROVIDER, PODCAST_CONSUMER_MCP_URL_DEFAULT, SimilarityThreshold, VisionDescribeScope
 
 
 # ============================================================================
@@ -354,6 +354,13 @@ class APISettings(BaseSettings):
     # Rate limiting
     rate_limit_storage_uri: str = Field(default="", description="Shared storage backend for rate-limit counters (e.g. redis://host:6379). Empty = in-memory per-process (correct for a single uvicorn worker). MUST be set to a shared store if you run more than one worker or replica, otherwise each process keeps its own counter and the effective limit becomes N× the configured value.")
 
+    # Real-client-IP resolution for per-IP rate limiting. Behind nginx/Cloudflare
+    # the raw peer address is the proxy's IP (so the per-IP limit collapses to a
+    # single global bucket) and X-Forwarded-For is spoofable unless it is only
+    # trusted from a known proxy. See _client_ip in api/rate_limiting.py.
+    cloudflare_authoritative: bool = Field(default=False, description="When true, trust the CF-Connecting-IP header set by Cloudflare as the authoritative client IP for per-IP rate limiting. Only enable when Cloudflare is the sole ingress (it strips client-supplied CF-Connecting-IP), otherwise a client can spoof it. Env: API_CLOUDFLARE_AUTHORITATIVE.")
+    trusted_proxy_ips: list[str] = Field(default=[], description="Peer IPs (the immediate TCP peer, e.g. the local nginx) trusted to have set X-Forwarded-For. Only when the peer is in this allowlist is the leftmost XFF entry used as the client IP; otherwise the raw peer address is used. Empty = never trust XFF (dev/no-proxy: use the peer address directly). Env: API_TRUSTED_PROXY_IPS.")
+
     # SSE streaming settings
     keepalive_interval_seconds: int = Field(default=15, description="SSE keepalive interval in seconds")
     min_event_timeout_seconds: float = Field(default=0.5, description="Minimum event timeout for SSE streaming")
@@ -531,12 +538,36 @@ class RAGSettings(BaseSettings):
     auth_enabled: bool = Field(default=False, description="Require an API key on /api/v1/rag/* endpoints. Disabled by default for local dev; MUST be true in production.")
     api_key_pepper: str = Field(default="", description="Server-side pepper appended before hashing API keys. Required when auth_enabled is true.")
     mcp_api_key: str = Field(default="", description="Bearer token validated by the MCP server. Required when running the MCP server publicly.")
+    mcp_public_mode: bool = Field(default=False, description="Public-tenant MCP mode. When true, the MCP server registers ONLY the frozen public podcast tools (search_podcasts, list_podcasts) and NEVER the internal tools (rag_query, rag_search, list_rag_sources). rag_query (server-side generation on our key) is unreachable in public mode by construction. Default false preserves the current internal deployment (all tools registered). Env: RAG_MCP_PUBLIC_MODE.")
+    mcp_key_reauth_ttl_seconds: int = Field(
+        default=45, ge=0, description="TTL (seconds) for re-authorizing a key on the HTTP/SSE MCP transport. The bearer is resolved once on the GET /sse stream; a revoked/rotated key must not keep working on that long-lived stream, so authorize_current_tool re-resolves it against the live enabled flag once the frozen record is older than this. A revoked key stops working within this many seconds. 0 = re-resolve every call. Env: RAG_MCP_KEY_REAUTH_TTL_SECONDS."
+    )
     rate_limit_enabled: bool = Field(default=True, description="Apply slowapi rate limits on RAG endpoints.")
+
+    # Public podcast-MCP consumer key self-service (langrag.ai/podcasts).
+    mcp_public_url: str = Field(default=PODCAST_CONSUMER_MCP_URL_DEFAULT, description="Public MCP SSE endpoint returned to a consumer on successful key verification (the URL they add to their MCP client). Env: RAG_MCP_PUBLIC_URL.")
+    podcast_consumer_verify_base_url: str = Field(default="https://langrag.ai/podcasts", description="Base URL of the public key-issuance page. The verification email links here with the single-use token appended as ?token=<TOKEN>. Env: RAG_PODCAST_CONSUMER_VERIFY_BASE_URL.")
+    podcast_consumer_token_ttl_minutes: int = Field(default=45, ge=1, description="Lifetime of a single-use podcast-consumer verification token, in minutes. After this it is expired (410 on verify). Env: RAG_PODCAST_CONSUMER_TOKEN_TTL_MINUTES.")
+    podcast_consumer_max_requests_per_email_per_day: int = Field(default=3, ge=1, description="Per-email cap on request-key calls within a rolling 24h window. Beyond it the endpoint still returns the generic 202 (no enumeration) but skips sending and logs. Env: RAG_PODCAST_CONSUMER_MAX_REQUESTS_PER_EMAIL_PER_DAY.")
     online_eval_enabled: bool = Field(default=False, description="Master switch: fire background LLM-judge + SE-shadow scoring after each LIVE RAG answer (REST + MCP). Independent of the orphaned rag_conversation graph. Actual work is additionally gated by runtime_eval.enabled and runtime_eval.sampling_rate (single source of truth for judge behavior).")
 
     # Hard concurrency admission control (independent of slowapi rate limiting)
     max_concurrent_requests: int = Field(default=50, ge=1, description="Hard cap on simultaneous in-flight RAG executions (REST chat + MCP tools). The (N+1)th concurrent request is rejected with HTTP 503 + Retry-After. Enforced per-process by an asyncio.Semaphore; the nginx edge layer bounds the aggregate across processes (REST :8000 and MCP :8765 are separate processes, so the true app-tier aggregate is up to workers x this value). Env: RAG_MAX_CONCURRENT_REQUESTS.")
     concurrency_retry_after_seconds: int = Field(default=5, ge=1, description="Value returned in the Retry-After header (seconds) when a RAG request is shed due to the concurrency cap. Env: RAG_CONCURRENCY_RETRY_AFTER_SECONDS.")
+
+    # Public podcast-MCP cost/abuse controls (COST-1, COST-2, COST-4, COST-5).
+    # Each admitted search_podcasts call triggers one owner-paid OpenAI
+    # text-embedding-3-large embedding, so the search path is guarded BEFORE the
+    # embedding call by a per-key daily quota (COST-1) and an in-process per-key
+    # sliding-window rate limit (COST-2); embeddings are cached (COST-4a) and the
+    # whole surface is bounded by a global daily embedding circuit breaker (COST-4b).
+    mcp_max_queries_per_key_per_day: int = Field(default=500, ge=1, description="Per-key daily quota on public podcast-MCP search calls (keyed by key_id + UTC day). Checked and incremented BEFORE the owner-paid embedding call; over quota returns a clean tool error with no embedding call. Env: RAG_MCP_MAX_QUERIES_PER_KEY_PER_DAY.")
+    mcp_query_rate_per_min: int = Field(default=60, ge=1, description="In-process per-key sliding-window rate limit (requests/min) on the public podcast-MCP search path. Guards the MCP SSE uvicorn (:8765), which slowapi does NOT cover. Over rate returns a clean tool error. Env: RAG_MCP_QUERY_RATE_PER_MIN.")
+    mcp_global_embed_daily_max: int = Field(default=20000, ge=1, description="Global daily hard cap on query embeddings across ALL keys on the podcast-MCP surface (circuit breaker). Past this, search hard-stops with a clean error, bounding total OpenAI embedding exposure regardless of key count. Env: RAG_MCP_GLOBAL_EMBED_DAILY_MAX.")
+    query_embedding_cache_ttl_seconds: int = Field(default=900, ge=0, description="TTL (seconds) for the in-process query-embedding cache. A repeated normalized query within the TTL reuses the cached vector instead of re-embedding (cuts cost + replay abuse). 0 disables the cache. Env: RAG_QUERY_EMBEDDING_CACHE_TTL_SECONDS.")
+    query_embedding_cache_max_size: int = Field(default=2048, ge=1, description="Max entries in the in-process query-embedding cache (bounded LRU). Env: RAG_QUERY_EMBEDDING_CACHE_MAX_SIZE.")
+    mcp_max_concurrent: int = Field(default=6, ge=1, description="Concurrency cap for the MCP process (:8765), SEPARATE from and lower than the REST app's max_concurrent_requests. Right-sizes the 4GB box shared with mongot so the MCP surface cannot alone drive ~50 concurrent retrievals. Env: RAG_MCP_MAX_CONCURRENT.")
+    mcp_max_sse_connections: int = Field(default=100, ge=1, description="Max simultaneous SSE connections accepted by the MCP transport (:8765). Enforcement point is the SSE auth middleware (owned by the auth layer); this is the single source of truth for the cap. Env: RAG_MCP_MAX_SSE_CONNECTIONS.")
 
     model_config = SettingsConfigDict(env_prefix="RAG_")
 

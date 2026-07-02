@@ -6,18 +6,33 @@ import './index.css';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
 import { LoginGate } from './components/LoginGate';
+import { PodcastPortal } from './components/podcast/PodcastPortal';
+import { PODCAST_PAGE_PATH } from './constants/podcast';
 import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
+
+// The public podcast-MCP page is a standalone route that must render WITHOUT
+// the app's auth gate or chrome (external visitors have no account). Branch on
+// the pathname before mounting AuthProvider/LoginGate so a stranger visiting
+// /podcasts never triggers a session probe or sees the login card. nginx's
+// SPA fallback (try_files ... /index.html) makes the deep link resolve here.
+const path = window.location.pathname.replace(/\/+$/, "");
+const isPodcastRoute = path === PODCAST_PAGE_PATH;
+
 root.render(
   <React.StrictMode>
-    <AuthProvider>
-      <LoginGate>
-        <App />
-      </LoginGate>
-    </AuthProvider>
+    {isPodcastRoute ? (
+      <PodcastPortal />
+    ) : (
+      <AuthProvider>
+        <LoginGate>
+          <App />
+        </LoginGate>
+      </AuthProvider>
+    )}
   </React.StrictMode>
 );
 

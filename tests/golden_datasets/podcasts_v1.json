@@ -149,6 +149,40 @@
       "expected_topics": ["evaluation methodology", "DeepEval", "golden datasets"],
       "difficulty": "medium",
       "reasoning": "Self-referential evaluation question; relevant to this very gate."
+    },
+    {
+      "test_id": "podcast_search_001",
+      "mode": "search_podcasts",
+      "query": "What did the LangTalks podcast cover about MCP?",
+      "expected_topics": ["MCP", "Model Context Protocol"],
+      "difficulty": "easy",
+      "reasoning": "EVAL-1: routes through the PUBLIC search_podcasts path (retrieval-only). Scores recall@k, date_filter_honored, and that all sources are pinned to podcast content."
+    },
+    {
+      "test_id": "podcast_search_002_slug",
+      "mode": "search_podcasts",
+      "podcast": "langtalks",
+      "query": "What did the podcast say about AI coding agents?",
+      "expected_topics": ["AI coding agents", "Claude Code", "Cursor"],
+      "difficulty": "easy",
+      "reasoning": "EVAL-1: explicit podcast=langtalks slug filter; asserts non-empty results pinned to that podcast (recall must be > 0)."
+    },
+    {
+      "test_id": "podcast_search_003_no_leak",
+      "mode": "search_podcasts",
+      "query": "What deployment lessons were shared on the podcast?",
+      "expected_topics": ["deployment", "production", "Docker"],
+      "difficulty": "medium",
+      "reasoning": "EVAL-1: asserts sources are pinned to podcast (podcast_source_pinned == 1.0) — no newsletter leakage on the public surface."
+    },
+    {
+      "test_id": "podcast_search_004_dated",
+      "mode": "search_podcasts",
+      "query": "What did the podcast cover in March 2026?",
+      "expected_topics": ["March 2026"],
+      "difficulty": "medium",
+      "reasoning": "EVAL-1: date-scoped search on the public surface; asserts date_filter_honored on retrieval-only.",
+      "date_filter": {"date_start": "2026-03-01", "date_end": "2026-03-31"}
     }
   ]
 }

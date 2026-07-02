@@ -184,6 +184,11 @@ services:
       RAG_API_KEY_PEPPER: ${RAG_API_KEY_PEPPER:-}
       # Production default true: the public MCP surface must authenticate.
       RAG_AUTH_ENABLED: ${RAG_AUTH_ENABLED:-true}
+      # Production default true: public mode registers ONLY search_podcasts /
+      # list_podcasts. rag_query (owner-paid server-side generation + prompt-
+      # injection surface) is never registered when true. Override to false ONLY
+      # for a trusted internal MCP deployment, never on mcp.langrag.ai.
+      RAG_MCP_PUBLIC_MODE: ${RAG_MCP_PUBLIC_MODE:-true}
       # Trace MCP-initiated RAG calls to the same Langfuse backend as REST.
       # No behavior change when unset (LANGFUSE_ENABLED gates; disabled -> no-op).
       # LANGFUSE_HOST is overridable so docker-compose.langfuse-remote.yml can

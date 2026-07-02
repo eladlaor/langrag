@@ -341,6 +341,10 @@ class RAGChunkKeys:
     # Community key, promoted to top-level (out of metadata) so it is filterable
     # in the vector + lexical search indexes. Null for podcast chunks.
     DATA_SOURCE_NAME = "data_source_name"
+    # Podcast tenant slug (multi-podcast platform). Set on podcast-type chunks so
+    # search_podcasts(podcast=<slug>) can scope retrieval to a single show. Null
+    # for non-podcast chunks (newsletters, chat messages).
+    PODCAST_SLUG = "podcast_slug"
 
 
 class RAGChunkMetadataKeys:
@@ -414,6 +418,66 @@ class RAGApiKeyKeys:
     ENABLED = "enabled"
     CREATED_AT = "created_at"
     LAST_USED_AT = "last_used_at"
+    EXPIRES_AT = "expires_at"
+
+
+class PodcastCatalogKeys:
+    """Keys for podcast catalog documents in the podcasts collection.
+
+    One row per podcast (tenant). Adding a new show is an insert here plus its
+    ingest; no schema migration and no client change (the tools are generic).
+    """
+
+    SLUG = "slug"
+    TITLE = "title"
+    DESCRIPTION = "description"
+    ACTIVE = "active"
+    CREATED_AT = "created_at"
+
+
+class PodcastApiConsumerKeys:
+    """Keys for podcast-MCP consumer documents in podcast_api_consumers.
+
+    A SEPARATE lane from `users`: no password, no session, no app authorization.
+    The minted PODCAST_QUERY-scoped key (in rag_api_keys, referenced by KEY_ID)
+    IS the identity. `verification_token_hash` holds the HMAC of the current
+    single-use verification token (never the plaintext); it is cleared once the
+    token is consumed. `revoked` mirrors `enabled: False` on the referenced key.
+    """
+
+    EMAIL = "email"
+    # Canonical dedup/rate-limit bucket derived from EMAIL (plus-tag stripped;
+    # dots removed for gmail). EMAIL stays the real delivery address; DEDUP_KEY is
+    # ONLY the anti-abuse bucket so `user+1@x`, `user+2@x`, `u.ser@gmail` collapse
+    # to one per-email cap and cannot be used to bypass it / email-bomb.
+    DEDUP_KEY = "dedup_key"
+    NAME = "name"
+    KEY_ID = "key_id"
+    CREATED_AT = "created_at"
+    VERIFIED_AT = "verified_at"
+    LAST_USED_AT = "last_used_at"
+    QUOTA = "quota"
+    REVOKED = "revoked"
+    # Verification-token state (single-use, hashed at rest, TTL-bounded).
+    VERIFICATION_TOKEN_HASH = "verification_token_hash"
+    VERIFICATION_TOKEN_EXPIRES_AT = "verification_token_expires_at"
+    # Rolling-window issuance counter timestamps, for the per-email rate limit.
+    REQUEST_TIMESTAMPS = "request_timestamps"
+
+
+class RAGQueryQuotaKeys:
+    """Keys for per-key daily query-quota counter documents in rag_query_quota.
+
+    One document per (key_id, UTC day). COUNT is bumped atomically via
+    $inc on each admitted search BEFORE the embedding call (COST-1); the global
+    embedding circuit breaker (COST-4b) reuses the same shape with the sentinel
+    key_id RAG_GLOBAL_EMBED_QUOTA_KEY_ID. EXPIRES_AT backs a TTL index so old
+    counter rows self-clean.
+    """
+
+    KEY_ID = "key_id"
+    DAY = "day"
+    COUNT = "count"
     EXPIRES_AT = "expires_at"
 
 

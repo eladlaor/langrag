@@ -10,6 +10,26 @@ the date values are not under test.
 from datetime import UTC, datetime
 
 import pytest
+import pytest_asyncio
+
+
+@pytest_asyncio.fixture
+async def db():
+    """Yield a Motor database handle bound to the current event loop.
+
+    Only used by MongoDB-backed tests (which carry the `requires_mongodb` skip).
+    Reset the connection singletons per test so each test's client is bound to
+    the active loop under pytest-asyncio's per-test loop policy.
+    """
+    import db.connection as conn_mod
+
+    conn_mod._client = None
+    conn_mod._database = None
+    database = await conn_mod.get_database()
+    try:
+        yield database
+    finally:
+        await conn_mod.close_connection()
 
 
 DEFAULT_TEST_SOURCE_DATE_START = datetime(2026, 3, 1, tzinfo=UTC)

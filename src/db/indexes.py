@@ -26,6 +26,7 @@ from constants import (
     COLLECTION_DISCUSSIONS,
     COLLECTION_MESSAGES,
     COLLECTION_RAG_CHUNKS,
+    COLLECTION_RAG_QUERY_QUOTA,
     DEFAULT_EMBEDDING_DIMENSION,
     DISCUSSION_VECTOR_INDEX_NAME,
     MIN_SUPPORTED_SCHEMA_VERSIONS,
@@ -34,7 +35,7 @@ from constants import (
     RAG_VECTOR_INDEX_NAME_LEGACY,
     SCHEMA_VERSION_FIELD,
 )
-from custom_types.field_keys import AgentMemoryKeys, DbFieldKeys, RAGChunkKeys
+from custom_types.field_keys import AgentMemoryKeys, DbFieldKeys, RAGChunkKeys, RAGQueryQuotaKeys
 
 # Legacy on-disk text index that no longer has a queryer in the codebase.
 # Kept here so ensure_indexes() can drop it idempotently from existing
@@ -340,6 +341,25 @@ INDEXES = {
         # absent / None) do not collide under the unique constraint.
         {"keys": [("google_sub", ASCENDING)], "unique": True, "sparse": True},
     ],
+    "podcast_api_consumers": [
+        # Unique email: idempotent request-key upsert + the one identity anchor
+        # for the isolated consumer lane (these are NEVER in the users collection).
+        {"keys": [("email", ASCENDING)], "unique": True},
+        # Verify lookup by the current single-use verification-token hash. sparse
+        # so the many verified rows (hash cleared to null) do not bloat the index.
+        {"keys": [("verification_token_hash", ASCENDING)], "sparse": True},
+        # Hot-path last_used_at update + admin/revocation lookups by the minted
+        # key_id. sparse: pending (unverified) rows have key_id null.
+        {"keys": [("key_id", ASCENDING)], "sparse": True},
+        # Per-email rate-cap bucket lookup. count_recent_requests queries by the
+        # canonicalized dedup_key (+tag stripped, gmail dots removed) so plus- and
+        # dot-alias variants share one cap; index it so that check is not a scan.
+        {"keys": [("dedup_key", ASCENDING)]},
+        # NOTE: NO expireAfterSeconds TTL here. The token expiry is enforced in
+        # application logic; a TTL on token expiry would delete the whole consumer
+        # record (including a verified consumer's key reference), not just the
+        # stale token. The token hash is cleared on verify instead.
+    ],
     "access_requests": [
         # Primary lookup by request_id
         {"keys": [("request_id", ASCENDING)], "unique": True},
@@ -377,6 +397,16 @@ INDEXES = {
         {"keys": [("expires_at", ASCENDING)], "expireAfterSeconds": 0},
     ],
 }
+
+# Per-key daily query-quota counters (COST-1) + global embed breaker (COST-4b).
+# Keyed by the constant collection name to avoid a hardcoded literal, and added
+# post-dict since the literals above predate the convention. A compound unique
+# index on (key_id, day) makes the atomic $inc upsert race-free; the expires_at
+# TTL self-cleans stale day-counters.
+INDEXES[COLLECTION_RAG_QUERY_QUOTA] = [
+    {"keys": [(RAGQueryQuotaKeys.KEY_ID, ASCENDING), (RAGQueryQuotaKeys.DAY, ASCENDING)], "unique": True},
+    {"keys": [(RAGQueryQuotaKeys.EXPIRES_AT, ASCENDING)], "expireAfterSeconds": 0},
+]
 
 
 async def ensure_schema_versions(db: AsyncDatabase) -> None:
@@ -700,6 +730,10 @@ async def _ensure_vector_search_index(db: AsyncDatabase) -> None:
                     # out of metadata so it is filterable). Podcast chunks have
                     # it null and are excluded when a community filter is set.
                     {"type": "filter", "path": "data_source_name"},
+                    # Podcast tenant pre-filter (multi-podcast platform): scopes
+                    # search_podcasts(podcast=<slug>) to one show inside the
+                    # $vectorSearch stage. Null on non-podcast chunks.
+                    {"type": "filter", "path": RAGChunkKeys.PODCAST_SLUG},
                 ]
             },
             name=RAG_VECTOR_INDEX_NAME,
@@ -881,6 +915,8 @@ async def _ensure_lexical_search_index(db: AsyncDatabase) -> bool:
                         RAGChunkKeys.SOURCE_DATE_END: {"type": "date"},
                         # Community pre-filter (token for exact-match $in).
                         RAGChunkKeys.DATA_SOURCE_NAME: {"type": "token"},
+                        # Podcast tenant pre-filter (token for exact-match slug).
+                        RAGChunkKeys.PODCAST_SLUG: {"type": "token"},
                     },
                 }
             },

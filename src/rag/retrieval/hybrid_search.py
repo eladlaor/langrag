@@ -76,6 +76,7 @@ async def hybrid_search_chunks(
     date_start: datetime | None = None,
     date_end: datetime | None = None,
     data_source_names: list[str] | None = None,
+    podcast_slug: str | None = None,
     top_k: int = 20,
     vector_weight: float = RAG_HYBRID_VECTOR_WEIGHT,
     lexical_weight: float = RAG_HYBRID_LEXICAL_WEIGHT,
@@ -118,6 +119,9 @@ async def hybrid_search_chunks(
     # Community pre-filter (vector leg). Podcasts (null) excluded when set.
     if data_source_names:
         pre_filter[Keys.DATA_SOURCE_NAME] = {"$in": data_source_names}
+    # Podcast tenant pre-filter (vector leg): scope to a single show.
+    if podcast_slug:
+        pre_filter[Keys.PODCAST_SLUG] = podcast_slug
 
     query_vector_bin = Binary.from_vector(
         list(query_embedding),
@@ -145,7 +149,7 @@ async def hybrid_search_chunks(
     # before scoring, instead of being filtered post-hoc with a downstream
     # $match. This keeps the Lucene candidate set bounded and avoids paying
     # to score documents that will be discarded.
-    lexical_search_stage = _build_lexical_search_stage(query_text, content_sources, date_start, date_end, data_source_names)
+    lexical_search_stage = _build_lexical_search_stage(query_text, content_sources, date_start, date_end, data_source_names, podcast_slug)
     lexical_pipeline: list[dict[str, Any]] = [
         lexical_search_stage,
         {"$limit": top_k * 4},
@@ -206,6 +210,7 @@ def _build_lexical_search_stage(
     date_start: datetime | None,
     date_end: datetime | None,
     data_source_names: list[str] | None = None,
+    podcast_slug: str | None = None,
 ) -> dict[str, Any]:
     """Build the lexical $search stage with filter clauses pushed into compound.
 
@@ -229,6 +234,9 @@ def _build_lexical_search_stage(
     # Community pre-filter (lexical leg), parity with the vector leg.
     if data_source_names:
         filter_clauses.append({"in": {"path": Keys.DATA_SOURCE_NAME, "value": data_source_names}})
+    # Podcast tenant pre-filter (lexical leg), parity with the vector leg.
+    if podcast_slug:
+        filter_clauses.append({"equals": {"path": Keys.PODCAST_SLUG, "value": podcast_slug}})
 
     if not filter_clauses:
         return {

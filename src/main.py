@@ -33,7 +33,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 # Importing routers after logging setup
-from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media, google_oauth, user_preferences
+from api import auth, admin_users, newsletter_gen, async_batch_orchestration, schedules, rag_conversation, images, media, google_oauth, user_preferences, podcast_consumers
 from api.auth import require_session
 from api.observability import metrics_router, runs_router
 from constants import (
@@ -134,6 +134,13 @@ async def lifespan(app: FastAPI):
         await ensure_indexes(db)
         logger.info("Ensuring bootstrap admin...")
         await ensure_bootstrap_admin(db)
+        # F2: seed the podcast catalog so a fresh deploy has list_podcasts() rows.
+        # Idempotent (upsert by slug); inside this try/except so a seed failure
+        # fails startup fast rather than serving an empty public catalog.
+        from db.repositories.podcasts import PodcastsRepository
+
+        logger.info("Seeding podcast catalog...")
+        await PodcastsRepository(db).seed_langtalks()
         logger.info("MongoDB initialization complete")
     except Exception as e:
         logger.error(f"MongoDB initialization failed: {e}")
@@ -239,6 +246,12 @@ app.include_router(auth.router, prefix=API_V1_PREFIX, tags=["auth"])
 # need is only added when enabled, but the disabled-guard returns before any
 # request.session access).
 app.include_router(google_oauth.router, prefix=API_V1_PREFIX, tags=["auth-google"])
+# Public podcast-MCP key self-service. Mounted WITHOUT the session gate on
+# purpose: strangers must reach request-key/verify to obtain a key at all. The
+# endpoints are self-contained (anti-enumeration 202, per-IP + per-email rate
+# limits, single-use tokens). App-wide middleware (security headers, rate
+# limiting) still applies since it is added before any router.
+app.include_router(podcast_consumers.router, prefix=API_V1_PREFIX, tags=["podcast-consumers"])
 # Admin-only user management. The router self-guards every route with
 # require_admin (which depends on require_session), so no _session_gate here.
 app.include_router(admin_users.router, prefix=API_V1_PREFIX, tags=["admin-users"])

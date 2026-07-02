@@ -22,12 +22,29 @@ from observability.metrics.rag_metrics import (
     record_results,
     track_retrieval,
 )
+from rag.cache.query_embedding_cache import QueryEmbeddingCache
 from rag.retrieval.hybrid_search import hybrid_search_chunks
 from rag.retrieval.reranker import rerank_chunks_mmr
 from rag.retrieval.vector_search import vector_search_chunks
 from utils.embedding.factory import EmbeddingProviderFactory
 
 logger = logging.getLogger(__name__)
+
+# Process-wide query-embedding cache (COST-4a). Built lazily from settings so it
+# binds after config load and tests can swap it. A repeated normalized query
+# within the TTL reuses the cached vector instead of paying for a fresh embedding.
+_query_cache_singleton: QueryEmbeddingCache | None = None
+
+
+def _get_query_cache() -> QueryEmbeddingCache:
+    global _query_cache_singleton
+    if _query_cache_singleton is None:
+        rag = get_settings().rag
+        _query_cache_singleton = QueryEmbeddingCache(
+            max_size=rag.query_embedding_cache_max_size,
+            ttl_seconds=rag.query_embedding_cache_ttl_seconds,
+        )
+    return _query_cache_singleton
 
 
 class RetrievalPipeline:
@@ -55,11 +72,13 @@ class RetrievalPipeline:
         date_start: datetime | None = None,
         date_end: datetime | None = None,
         data_source_names: list[str] | None = None,
+        podcast_slug: str | None = None,
         top_k: int | None = None,
         rerank_top_k: int | None = None,
         mmr_lambda: float | None = None,
         enable_mmr: bool | None = None,
         include_raw_messages: bool | None = None,
+        unbounded_default_window: bool = False,
         trace_id: str | None = None,
     ) -> dict[str, Any]:
         """
@@ -109,10 +128,16 @@ class RetrievalPipeline:
         # Soft default date window: when the caller gives NO lower bound, default
         # to the recent window (community discourse ages fast). An explicit
         # date_start always wins, including an older one. 0 days disables it.
+        # F5: the podcast surface passes unbounded_default_window=True — podcasts
+        # are evergreen and sparse, so an unfiltered podcast search must NOT hide
+        # episodes older than the window. The community/newsletter surface keeps
+        # recent-by-default.
         window_days = self._settings.default_retrieval_window_days
-        if date_start is None and window_days > 0:
+        if date_start is None and window_days > 0 and not unbounded_default_window:
             date_start = datetime.now(UTC) - timedelta(days=window_days)
             logger.info(f"No date_start given; applying soft default window of {window_days}d (from {date_start.date()})")
+        elif date_start is None and unbounded_default_window:
+            logger.info("No date_start given; unbounded window requested (podcast surface), skipping soft default window")
 
         # Fail-fast on an out-of-range lambda rather than silently clamping; a
         # bad value almost always means a caller bug we want surfaced.
@@ -147,10 +172,16 @@ class RetrievalPipeline:
 
         with langfuse_span("rag_retrieve", trace_id=trace_id, input_data=span_input) as span, \
              track_retrieval(source_label, date_filter_used):
-            query_embedding = await asyncio.to_thread(self._embedder.embed_text, query)
+            # COST-4a: reuse a cached embedding for a repeated (normalized) query
+            # within the TTL; only pay for a fresh embedding on a miss.
+            cache = _get_query_cache()
+            query_embedding = cache.get(query)
             if query_embedding is None:
-                logger.error(f"Failed to embed query: {query[:100]}")
-                raise RuntimeError("Query embedding failed")
+                query_embedding = await asyncio.to_thread(self._embedder.embed_text, query)
+                if query_embedding is None:
+                    logger.error(f"Failed to embed query: {query[:100]}")
+                    raise RuntimeError("Query embedding failed")
+                cache.put(query, query_embedding)
 
             db = await get_database()
             collection = db[COLLECTION_RAG_CHUNKS]
@@ -164,6 +195,7 @@ class RetrievalPipeline:
                     date_start=date_start,
                     date_end=date_end,
                     data_source_names=data_source_names,
+                    podcast_slug=podcast_slug,
                     top_k=search_top_k,
                     min_vector_score=self._settings.min_similarity_score,
                 )
@@ -175,6 +207,7 @@ class RetrievalPipeline:
                     date_start=date_start,
                     date_end=date_end,
                     data_source_names=data_source_names,
+                    podcast_slug=podcast_slug,
                     top_k=search_top_k,
                     min_score=self._settings.min_similarity_score,
                 )

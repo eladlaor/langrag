@@ -17,6 +17,7 @@ NOTE: For CONFIGURABLE values (that may change per environment or user preferenc
 see config.py instead.
 """
 
+from datetime import UTC, datetime
 from enum import StrEnum
 
 
@@ -90,6 +91,15 @@ ROUTE_AUTH_USERS = "/auth/users"
 ROUTE_AUTH_USER_BY_ID = "/auth/users/{user_id}"
 ROUTE_AUTH_USER_PASSWORD = "/auth/users/{user_id}/password"
 ROUTE_AUTH_USER_DISABLE = "/auth/users/{user_id}/disable"
+
+# Public podcast-MCP key self-service routes (mounted after API_V1_PREFIX).
+# BOTH are fully PUBLIC (no session cookie, no API key): they are how a stranger
+# obtains a key in the first place. request-key always returns 202 with a generic
+# message (no email enumeration); verify exchanges a valid token for a freshly
+# minted PODCAST_QUERY-scoped key (shown once). These MUST stay outside any
+# session-auth gate. Contract is frozen against the langrag.ai/podcasts frontend.
+ROUTE_PODCAST_CONSUMER_REQUEST_KEY = "/podcasts/consumers/request-key"
+ROUTE_PODCAST_CONSUMER_VERIFY = "/podcasts/consumers/verify"
 
 # Self-signup + access-request + Google OAuth routes (mounted after
 # API_V1_PREFIX). The signup, access-request POST, config, and Google routes
@@ -428,6 +438,7 @@ HTTP_STATUS_UNAUTHORIZED = 401
 HTTP_STATUS_FORBIDDEN = 403
 HTTP_STATUS_NOT_FOUND = 404
 HTTP_STATUS_CONFLICT = 409
+HTTP_STATUS_GONE = 410
 HTTP_STATUS_TOO_MANY_REQUESTS = 429
 HTTP_STATUS_UNPROCESSABLE_ENTITY = 422
 HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
@@ -478,6 +489,20 @@ COLLECTION_RAG_CONVERSATIONS = "rag_conversations"
 COLLECTION_RAG_MESSAGES = "rag_messages"
 COLLECTION_RAG_EVALUATIONS = "rag_evaluations"
 COLLECTION_RAG_API_KEYS = "rag_api_keys"
+# Podcast catalog (multi-podcast platform). One row per podcast/tenant; read by
+# list_podcasts() and used to resolve the public `podcast` slug filter.
+COLLECTION_PODCASTS = "podcasts"
+# Public podcast-MCP consumers (external AI engineers who requested an API key
+# for mcp.langrag.ai). A SEPARATE lane from `users`: no app account, no session,
+# no app authorization — the minted PODCAST_QUERY-scoped key IS the identity.
+# These records must NEVER be written to the `users` collection.
+COLLECTION_PODCAST_API_CONSUMERS = "podcast_api_consumers"
+# Per-key daily query-quota counters for the public podcast-MCP search surface.
+# One row per (key_id, UTC day); an atomic increment records each admitted
+# search and is enforced BEFORE the owner-paid embedding call (COST-1). A global
+# per-day row (key_id == the global sentinel) backs the daily embedding circuit
+# breaker (COST-4b). Rows carry a per-day expiry so the collection stays bounded.
+COLLECTION_RAG_QUERY_QUOTA = "rag_query_quota"
 # Agentic chatbot layer (v1.13.0+). See knowledge/plans/AGENTIC_CHATBOT_LAYER.md.
 COLLECTION_USERS = "users"
 COLLECTION_USER_API_KEYS = "user_api_keys"
@@ -779,6 +804,85 @@ RAG_CITATION_SNIPPET_MAX_LENGTH = 200
 RAG_API_KEY_PREFIX = "lrag_"
 RAG_API_KEY_HEADER = "X-API-Key"
 RAG_API_KEY_BEARER_SCHEME = "Bearer"
+# Proxy headers used to resolve the real client IP for per-IP rate limiting.
+# CF-Connecting-IP is set by Cloudflare (and stripped from client input by it);
+# X-Forwarded-For is honored only from a trusted proxy peer. See rate_limiting.
+HEADER_CF_CONNECTING_IP = "CF-Connecting-IP"
+HEADER_X_FORWARDED_FOR = "X-Forwarded-For"
+# Deny-by-default cutoff for empty-scope key resolution (see rag.auth.scopes).
+# A key with an empty/missing scopes list resolves to FULL only if it was created
+# BEFORE this instant (legacy keys minted before scopes existed); an empty-scope
+# key created at/after it resolves to NO scopes. Set to the scopes-enforcement
+# deploy date; do not move it backward (would re-open the legacy carve-out) nor
+# forward (would strip legitimately-legacy keys of FULL).
+RAG_API_KEY_EMPTY_SCOPE_FULL_CUTOFF = datetime(2026, 7, 2, tzinfo=UTC)
+
+# Seed podcast (podcast #1 of the multi-podcast platform). The catalog is seeded
+# idempotently with this slug so `list_podcasts()` and the `podcast` filter work
+# against the existing LangTalks corpus.
+PODCAST_SLUG_LANGTALKS = "langtalks"
+PODCAST_TITLE_LANGTALKS = "LangTalks"
+PODCAST_DESCRIPTION_LANGTALKS = "The LangTalks GenAI podcast: conversations on LLMs, agents, RAG, and applied AI engineering."
+
+# Public MCP tool names — the FROZEN public contract. These names live in every
+# consumer's client config, so renaming them is a breaking change. Do NOT ship
+# LangTalks-specific names (e.g. search_langtalks); the podcast is an argument.
+MCP_TOOL_SEARCH_PODCASTS = "search_podcasts"
+MCP_TOOL_LIST_PODCASTS = "list_podcasts"
+# Internal-only MCP tool names (never exposed in public mode).
+MCP_TOOL_RAG_QUERY = "rag_query"
+MCP_TOOL_RAG_SEARCH = "rag_search"
+MCP_TOOL_LIST_RAG_SOURCES = "list_rag_sources"
+
+# Tool-boundary security bounds for the MCP search surface (resource-exhaustion
+# guards). Applied at the tool boundary before any expensive work (embedding,
+# vector search) so an adversarial caller cannot use tool inputs as a DoS lever.
+MCP_TOP_K_HARD_MAX = 20
+MCP_QUERY_MAX_LENGTH = 8000
+# Latest plausible source date; anything past this is an absurd/garbage range and
+# is rejected at parse time rather than driving a pointless retrieval.
+MCP_DATE_MAX_YEAR = 2100
+
+# Public podcast-MCP consumer key issuance (langrag.ai/podcasts self-service).
+# The verification email links to this page with the single-use token as a query
+# param; the frontend POSTs it back to the verify endpoint. Host is a config
+# value (RAG_PODCAST_CONSUMER_VERIFY_BASE_URL) so it is not hardcoded per-env.
+PODCAST_CONSUMER_TOKEN_QUERY_PARAM = "token"
+# mcp_url returned to the consumer on successful verify — the SSE endpoint they
+# add to their MCP client. Sourced from config (RAG_MCP_PUBLIC_URL) so staging
+# and prod differ without a code change; this is the documented default.
+PODCAST_CONSUMER_MCP_URL_DEFAULT = "https://mcp.langrag.ai/sse"
+# rag_api_keys.name / owner stamped on a consumer-minted key so key listings and
+# Langfuse per-key analytics can distinguish the public lane from internal keys.
+PODCAST_CONSUMER_KEY_NAME = "podcast-consumer"
+PODCAST_CONSUMER_KEY_OWNER_PREFIX = "podcast-consumer:"
+# Generic, byte-identical acknowledgement for EVERY request-key call — new email,
+# already-registered email, per-email rate-limit hit, or a delivery failure. The
+# opaque response is what prevents email enumeration on this public surface.
+PODCAST_CONSUMER_REQUEST_ACK_MESSAGE = "If that email is eligible, a verification link has been sent. Check your inbox."
+# Explicit, distinguishable errors on the verify path (the frontend maps 400 vs
+# 410 to different UX). Verify is NOT anti-enumeration: the caller already holds
+# a token, so a precise error leaks nothing about other emails.
+PODCAST_CONSUMER_TOKEN_INVALID_MESSAGE = "Invalid or already-used verification token."
+PODCAST_CONSUMER_TOKEN_EXPIRED_MESSAGE = "Verification token has expired. Request a new one."
+# Cap on the persisted request_timestamps array (create_or_refresh_pending uses a
+# $slice push to keep only the last N). N must comfortably exceed the per-email
+# daily cap so the rolling-window count is never under-reported, while bounding
+# the array so a persistent abuser (who still gets a 202 while rate-limited)
+# cannot grow the document without limit.
+PODCAST_CONSUMER_REQUEST_TIMESTAMPS_MAX = 50
+# Email-canonicalization inputs for the podcast-consumer anti-abuse bucket
+# (canonicalize_email_for_dedup). The `+` sub-address separator is stripped from
+# every provider's local part; dots are additionally stripped for providers that
+# ignore them (Gmail and its googlemail alias).
+EMAIL_PLUS_TAG_SEPARATOR = "+"
+EMAIL_DOT_IGNORING_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+# Bounds for the optional `podcast` slug filter on the public search tool. The
+# slug goes into a Mongo equality filter, so it is validated at the tool boundary
+# (length + charset) like every other public input rather than trusted as free
+# text. Slugs are lowercase kebab-case identifiers.
+MCP_PODCAST_SLUG_MAX_LENGTH = 64
+MCP_PODCAST_SLUG_PATTERN = r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
 
 # Rate limits for the public RAG API (per API key)
 RAG_RATE_LIMIT_CHAT = "60/minute"
@@ -1421,6 +1525,23 @@ class ContentSourceType(StrEnum):
     CHAT_MESSAGE = "chat_message"
 
 
+class RAGApiKeyScope(StrEnum):
+    """Authorization scopes for RAG API keys.
+
+    FULL is the internal/admin scope: it may invoke every MCP tool and reach the
+    REST + ingest surfaces. PODCAST_QUERY is the public consumer scope: it may
+    ONLY invoke the public podcast tools (search_podcasts / list_podcasts).
+
+    Backward compatibility: existing key records carry no `scopes` field (or an
+    empty list). The auth layer treats a missing/empty scope as FULL so no
+    already-issued key loses access. A key is treated as PODCAST_QUERY-restricted
+    ONLY when PODCAST_QUERY is present AND FULL is absent.
+    """
+
+    FULL = "full"
+    PODCAST_QUERY = "podcast_query"
+
+
 class RAGEventType(StrEnum):
     """SSE event types for RAG chat streaming."""
 
@@ -1472,6 +1593,27 @@ MCP_TRACE_USER = "mcp"
 # Prefix for the per-call session_id synthesized in the MCP tool wrappers. FastMCP
 # carries no caller identity, so each tool call becomes its own grouped trace.
 MCP_SESSION_ID_PREFIX = "mcp-"
+
+# Langfuse trace metadata key carrying the resolved per-key identifier (the key_id
+# / hash, NEVER the raw bearer) so the owner can see per-key analytics on the
+# self-hosted Langfuse (OBS-1). Behavior-affecting dashboard filter key.
+RAG_TRACE_META_KEY_ID = "key_id"
+
+# Sentinel key_id for the process-wide daily embedding circuit-breaker counter
+# row in COLLECTION_RAG_QUERY_QUOTA (COST-4b). Not a real key; namespaced with a
+# leading double-underscore so it can never collide with a minted key_id.
+RAG_GLOBAL_EMBED_QUOTA_KEY_ID = "__global_embed__"
+
+# Reject observability (OBS-2). Emitted (metric + Langfuse event) at every reject
+# point so the owner can watch abuse patterns, not just successes. These reason
+# labels are behavior-affecting (Prometheus label values + Langfuse event names).
+RAG_REJECT_EVENT_NAME = "rag_reject"
+RAG_REJECT_REASON_SCOPE_DENIED = "scope_denied"
+RAG_REJECT_REASON_UNAUTHORIZED = "unauthorized"
+RAG_REJECT_REASON_VALIDATION = "validation_rejected"
+RAG_REJECT_REASON_CAPACITY = "capacity_exceeded"
+# Global embedding circuit-breaker trip reason (COST-4b reject visibility).
+RAG_REJECT_REASON_GLOBAL_EMBED_BREAKER = "global_embed_breaker_open"
 
 
 class AgentEventType(StrEnum):

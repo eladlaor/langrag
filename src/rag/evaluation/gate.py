@@ -45,9 +45,23 @@ from rag.evaluation.custom_metrics import (
     DateGroundingMetric,
     RefusalComplianceMetric,
 )
-from rag.mcp.tools import rag_query
+from rag.mcp.tools import rag_query, search_podcasts
 
 logger = logging.getLogger(__name__)
+
+
+# Case-mode selector: a golden case with this `mode` routes through the public
+# search_podcasts path (retrieval-only) instead of the default rag_query flow, so
+# the public podcast surface gets its own eval coverage (EVAL-1). Behavior-affecting
+# dispatch key read from the golden dataset.
+CASE_MODE_SEARCH_PODCASTS = "search_podcasts"
+
+# Retrieval-only metric asserting every citation on the podcast surface is pinned
+# to podcast-type content (no newsletter leakage). 1.0 = all podcast, 0.0 = leak.
+METRIC_PODCAST_SOURCE_PINNED = "podcast_source_pinned"
+
+# Podcast content_source label expected on every citation from search_podcasts.
+_PODCAST_SOURCE_TYPE = "podcast"
 
 
 # Pass thresholds (the bar before we call this 'proven and reliable')
@@ -59,6 +73,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "date_citation_compliance": 1.00,
     "date_filter_honored": 1.00,
     "refusal_compliance": 1.00,
+    METRIC_PODCAST_SOURCE_PINNED: 1.00,
     RAG_METRIC_DATE_GROUNDING: 1.00,
 }
 
@@ -170,8 +185,73 @@ async def _evaluate_with_deepeval(
     return out
 
 
+def _sources_pinned_to_podcast(citations: list[dict[str, Any]]) -> float:
+    """Return 1.0 if every citation is podcast-sourced, else 0.0 (EVAL-1).
+
+    Guards against newsletter leakage on the public podcast search surface. An
+    empty citation set scores 1.0 vacuously (no leak); recall@k separately
+    penalises empty retrieval.
+    """
+    if not citations:
+        return 1.0
+    for c in citations:
+        if str(c.get("source_type", "")) != _PODCAST_SOURCE_TYPE:
+            return 0.0
+    return 1.0
+
+
+async def _run_search_podcasts_case(case: dict[str, Any]) -> CaseResult:
+    """Run a golden case through the public search_podcasts path (retrieval-only).
+
+    Scores recall@k, date_filter_honored, and podcast-source pinning. There is no
+    generation on this surface, so answer/judge metrics do not apply.
+    """
+    query = case["query"]
+    date_filter = case.get("date_filter") or {}
+    expected_topics: list[str] = case.get("expected_topics", []) or []
+    podcast = case.get("podcast")
+
+    response = await search_podcasts(
+        query=query,
+        podcast=podcast,
+        date_start=date_filter.get("date_start"),
+        date_end=date_filter.get("date_end"),
+    )
+    citations = response["citations"]
+
+    metadata = {
+        "date_filter": response.get("date_filter") or date_filter,
+        "citations": citations,
+        "must_refuse": False,
+        "expected_source_dates": case.get("expected_source_dates") or {},
+    }
+
+    class _TC:
+        actual_output = ""
+        additional_metadata = metadata
+
+    scores: dict[str, float] = {
+        "date_filter_honored": float(DateFilterHonoredMetric().measure(_TC()) or 0.0),  # type: ignore[arg-type]
+        "retrieval_recall_at_5": _topics_overlap(expected_topics, citations[:5]),
+        METRIC_PODCAST_SOURCE_PINNED: _sources_pinned_to_podcast(citations),
+    }
+
+    return CaseResult(
+        test_id=case["test_id"],
+        query=query,
+        answer="",
+        citations=citations,
+        scores=scores,
+        refused=False,
+        expected_refusal=False,
+    )
+
+
 async def _run_case(case: dict[str, Any]) -> CaseResult:
     """Run a single eval case end-to-end and score it."""
+    if case.get("mode") == CASE_MODE_SEARCH_PODCASTS:
+        return await _run_search_podcasts_case(case)
+
     query = case["query"]
     date_filter = case.get("date_filter") or {}
     must_refuse = bool(case.get("must_refuse"))

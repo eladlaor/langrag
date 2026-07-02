@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-07-02
+
+### Added
+- **Public multi-podcast MCP contract (`search_podcasts` / `list_podcasts`).** The public MCP surface now exposes two forward-compatible generic tools instead of the LangTalks-only `rag_query`: `search_podcasts(query, podcast?, date_start?, date_end?, top_k?)` returns dated, source-pinned passages, and `list_podcasts()` returns the catalog with per-podcast chunk counts and date coverage. This freezes the contract before external users onboard, so adding podcast #2+ is additive rather than breaking.
+- **`RAG_MCP_PUBLIC_MODE` public/private tool gating.** When true (the production default), the MCP server registers ONLY the search/list tools; the owner-paid, generation-bearing `rag_query` tool is never registered and is therefore unreachable over the public transport. Set false only for a trusted internal deployment.
+- **Podcasts catalog collection + `podcast_slug` provenance.** A `podcasts` catalog collection (`slug`, `title`, `description`, `active`, dates) is seeded on startup (idempotent) and every RAG chunk now carries a `podcast_slug`, threaded through both the vector and hybrid (`$rankFusion`) retrieval legs and declared in both search indexes, enabling per-podcast filtering. Includes a `--dry-run/--apply` backfill script for existing chunks.
+- **Isolated podcast-consumer API-key lane.** External consumers are provisioned through a dedicated `podcast_api_consumers` collection (never the internal `users` collection): a self-service request/verify flow issues a single-use, email-verified token that mints an API key scoped to `PODCAST_QUERY` only. Keys are hashed (HMAC-SHA-256 + server pepper), reverify rotates the key, and email aliases (plus-tags, gmail dots) are canonicalized to one rate-cap bucket. A public `/podcasts` self-service page ships in the frontend.
+- **Per-key runtime scope enforcement (`FULL` / `PODCAST_QUERY`).** Tool authorization is enforced at the MCP tool boundary independent of routing; on the HTTP transport it fails CLOSED when the caller's key cannot be resolved. `scripts/manage_api_keys.py issue` now requires an explicit `--scope` (deny-by-default) rather than silently minting a `FULL` admin key.
+- **Owner-cost protection for the public embedding path.** Every public query is one owner-paid embedding, so the service now enforces a per-key daily query quota, a per-key sliding-window rate limit on the MCP transport (slowapi never reaches the `:8765` process), a bounded TTL/LRU query-embedding cache, and a global daily embedding circuit breaker. Rejects (401/403/429/validation) emit a Langfuse event and a metric.
+- **Input validation for the public tools.** Query length is capped, `top_k` is clamped to a hard ceiling, date ranges are sanity-checked, and `podcast` slugs are validated against the catalog, all with structured errors.
+- **Per-consumer trace attribution + reject observability.** RAG traces now carry the resolving key's `key_id` so per-consumer usage is visible in Langfuse, and admission rejects are traced and counted.
+- **Eval-gate coverage for the public path.** The RAG eval gate now includes a `search_podcasts` case mode and a source-pinned metric, so the public contract is regression-gated, not just the internal `rag_query` path.
+
+### Changed
+- **Podcast catalog seeded in the app lifespan.** Startup seeds the LangTalks podcast into the catalog (idempotent) so a fresh deploy is never served with an empty catalog.
+- **`docker-compose.yml` defaults `RAG_MCP_PUBLIC_MODE=true`** for the MCP server, with the flag documented in `.env.example`, so a default production bring-up exposes only the safe public tools.
+
 ## [1.19.0] - 2026-07-02
 
 ### Added
@@ -397,7 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/eladlaor/langrag/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/eladlaor/langrag/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/eladlaor/langrag/compare/v1.17.7...v1.18.0
 [1.17.7]: https://github.com/eladlaor/langrag/compare/v1.17.6...v1.17.7

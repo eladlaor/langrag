@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from config import get_settings
-from constants import ContentSourceType, DIR_NAME_PODCASTS
+from constants import ContentSourceType, DIR_NAME_PODCASTS, PODCAST_SLUG_LANGTALKS
 from rag.chunking.transcript_chunker import TranscriptChunker
 from rag.sources.base import ContentChunk, ContentSourceInterface
 from rag.transcription.factory import TranscriptionProviderFactory
@@ -62,6 +62,9 @@ class PodcastSource(ContentSourceInterface):
             **kwargs:
                 title: Optional episode title (defaults to filename stem)
                 episode_date: Optional ISO date string overriding filename/manifest
+                podcast_slug: Optional podcast tenant slug stamped on every chunk
+                    (defaults to the LangTalks corpus). Resolution order:
+                    kwarg -> manifest entry -> PODCAST_SLUG_LANGTALKS.
 
         Returns:
             List of ContentChunk instances
@@ -75,6 +78,7 @@ class PodcastSource(ContentSourceInterface):
         manifest_entry = self._load_manifest_entry(audio_path)
 
         title = kwargs.get("title") or manifest_entry.get("title") or audio_path.stem
+        podcast_slug = kwargs.get("podcast_slug") or manifest_entry.get("podcast_slug") or PODCAST_SLUG_LANGTALKS
         explicit_episode_date = kwargs.get("episode_date") or manifest_entry.get("episode_date")
         episode_date = self._resolve_episode_date(audio_path, explicit_episode_date)
 
@@ -107,7 +111,16 @@ class PodcastSource(ContentSourceInterface):
             metadata=episode_metadata,
         )
 
-        logger.info(f"Podcast extraction complete: {audio_path.name} -> {len(chunks)} chunks")
+        # Stamp the podcast tenant slug on every chunk so search_podcasts can
+        # scope retrieval to a single show. The source owns tenant identity; the
+        # chunker stays tenant-agnostic.
+        for chunk in chunks:
+            chunk.podcast_slug = podcast_slug
+
+        logger.info(
+            f"Podcast extraction complete: {audio_path.name} -> {len(chunks)} chunks "
+            f"(podcast_slug={podcast_slug})"
+        )
         return chunks
 
     async def list_sources(self) -> list[dict]:

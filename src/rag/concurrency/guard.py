@@ -54,14 +54,39 @@ class RagCapacityExceeded(Exception):
 _lock: asyncio.Lock | None = None
 _in_flight: int = 0
 _cap: int | None = None
+# Optional explicit cap override, set once at process startup BEFORE first use
+# (e.g. the MCP process pins its own, lower cap via configure_cap). When set it
+# wins over settings.rag.max_concurrent_requests. See COST-5.
+_cap_override: int | None = None
+
+
+def configure_cap(cap: int) -> None:
+    """Pin an explicit process cap that overrides the settings-derived default.
+
+    Call ONCE at process startup, before the first acquire (e.g. from the MCP
+    server so :8765 runs a lower cap than the REST app). Fail-fast on a bad value.
+    """
+    global _cap_override, _cap
+    if cap < 1:
+        raise ValueError(f"configure_cap: cap must be >= 1, got {cap}")
+    _cap_override = cap
+    _cap = None  # force _ensure_state to re-read using the override
+    logger.info("RAG concurrency cap override configured", extra={"cap": cap})
 
 
 def _ensure_state() -> None:
-    """Build the lock and read the cap from settings on first use (idempotent)."""
+    """Build the lock and read the cap on first use (idempotent).
+
+    The cap resolves to the explicit override when set (COST-5), else the
+    settings value. Read once per process lifetime (until _reset_for_tests).
+    """
     global _lock, _cap
     if _lock is None:
         _lock = asyncio.Lock()
     if _cap is None:
+        if _cap_override is not None:
+            _cap = _cap_override
+            return
         try:
             _cap = get_settings().rag.max_concurrent_requests
         except Exception as e:
@@ -138,7 +163,8 @@ def _reset_for_tests() -> None:
     Tests-only. Resets the in-flight counter, forces the cap to be re-read from
     settings, and drops the lock so it rebinds to the next event loop.
     """
-    global _lock, _in_flight, _cap
+    global _lock, _in_flight, _cap, _cap_override
     _lock = None
     _in_flight = 0
     _cap = None
+    _cap_override = None

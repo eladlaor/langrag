@@ -50,6 +50,11 @@ class _RAGMetrics:
             "Last observed RAG eval score (0..1) per metric",
             ["metric"],
         )
+        self.rejects_total = Counter(
+            "rag_rejects_total",
+            "RAG surface rejects (auth/scope, quota, rate limit, validation) as an abuse-detection signal",
+            ["reason", "tool"],
+        )
 
 
 def _get() -> _RAGMetrics | None:
@@ -97,3 +102,11 @@ def record_eval_score(metric_name: str, score: float) -> None:
     if metrics is None:
         return
     metrics.eval_score.labels(metric_name).set(score)
+
+
+def record_reject(reason: str, tool: str) -> None:
+    """Increment the reject counter for a shed RAG request (OBS-2)."""
+    metrics = _get()
+    if metrics is None:
+        return
+    metrics.rejects_total.labels(reason, tool).inc()

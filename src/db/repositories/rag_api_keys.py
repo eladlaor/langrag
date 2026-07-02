@@ -33,14 +33,22 @@ class RAGApiKeysRepository(BaseRepository):
         self,
         name: str,
         owner: str,
-        scopes: list[str] | None = None,
+        scopes: list[str],
     ) -> tuple[str, str]:
         """
         Issue a fresh API key.
 
-        Returns (key_id, plaintext_key). The plaintext is only available at issue time;
-        callers must capture and persist it themselves.
+        `scopes` is REQUIRED and must be a non-empty list of scope strings. This
+        is deny-by-default at mint time: an empty/missing scopes list resolves to
+        FULL (for backward compat with keys issued before scopes existed), so a
+        caller that forgot to pass scopes would silently mint an admin key. We
+        fail fast here instead — every NEW key carries an explicit scope.
+
+        Returns (key_id, plaintext_key). The plaintext is only available at issue
+        time; callers must capture and persist it themselves.
         """
+        if not scopes:
+            raise ValueError(f"issue_key requires an explicit non-empty scopes list (deny-by-default): name={name}, owner={owner}. Pass e.g. [str(RAGApiKeyScope.PODCAST_QUERY)] or [str(RAGApiKeyScope.FULL)].")
         key_id = str(uuid.uuid4())
         plaintext = f"{RAG_API_KEY_PREFIX}{secrets.token_urlsafe(32)}"
         document = {
@@ -48,19 +56,30 @@ class RAGApiKeysRepository(BaseRepository):
             Keys.KEY_HASH: hash_api_key(plaintext),
             Keys.NAME: name,
             Keys.OWNER: owner,
-            Keys.SCOPES: scopes or [],
+            Keys.SCOPES: list(scopes),
             Keys.ENABLED: True,
             Keys.CREATED_AT: datetime.now(UTC),
             Keys.LAST_USED_AT: None,
             Keys.EXPIRES_AT: None,
         }
         await self.create(document)
-        logger.info(f"Issued RAG API key: key_id={key_id}, name={name}, owner={owner}")
+        logger.info(f"Issued RAG API key: key_id={key_id}, name={name}, owner={owner}, scopes={list(scopes)}")
         return key_id, plaintext
 
     async def find_by_hash(self, key_hash: str) -> dict[str, Any] | None:
         """Find an enabled API key by hash."""
         return await self.find_one({Keys.KEY_HASH: key_hash, Keys.ENABLED: True})
+
+    async def find_enabled_by_key_id(self, key_id: str) -> dict[str, Any] | None:
+        """Find an ENABLED API key by its key_id, or None if unknown/disabled.
+
+        Backs the short-TTL re-authorization on the long-lived MCP/SSE stream: a
+        key revoked mid-session must stop working, so the tool path re-resolves
+        the frozen session record against the live `enabled` flag by key_id. A
+        revoked key (enabled=False) resolves to None here, which the caller
+        treats as fail-closed.
+        """
+        return await self.find_one({Keys.KEY_ID: key_id, Keys.ENABLED: True})
 
     async def revoke(self, key_id: str) -> bool:
         """Disable an API key. Returns True if a record was modified."""

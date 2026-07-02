@@ -27,3 +27,13 @@ export const RAG_API_ROUTES = {
   SOURCES_STATS: "/api/rag/sources/stats",
   EVALUATIONS: "/api/rag/evaluations",
 } as const;
+
+// ============================================================================
+// Public podcast-MCP consumer key issuance (the langrag.ai/podcasts page).
+// These endpoints are PUBLIC (no app session) and live in an isolated consumer
+// lane — see knowledge/plans/PODCAST_MCP_PUBLIC_ACCESS.md.
+// ============================================================================
+export const PODCAST_CONSUMER_API_ROUTES = {
+  REQUEST_KEY: "/api/podcasts/consumers/request-key",
+  VERIFY: "/api/podcasts/consumers/verify",
+} as const;

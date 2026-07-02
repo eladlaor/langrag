@@ -164,6 +164,40 @@ class AccessRequestAck(BaseModel):
     message: str = Field(..., description="Generic acknowledgement message.")
 
 
+# ============= Public Podcast-MCP Consumer Key Issuance =============
+
+
+class PodcastConsumerKeyRequest(BaseModel):
+    """Public request-key body (langrag.ai/podcasts). Email + optional name."""
+
+    email: EmailStr = Field(..., description="Email to send the verification link to.")
+    name: str | None = Field(default=None, description="Optional display name collected on the form.")
+
+
+class PodcastConsumerKeyRequestAck(BaseModel):
+    """Generic 202 acknowledgement for EVERY request-key call.
+
+    Byte-identical for a new email, an already-registered email, a per-email
+    rate-limit hit, and a delivery failure — this opacity is what prevents email
+    enumeration on the public issuance surface.
+    """
+
+    message: str = Field(..., description="Generic acknowledgement message.")
+
+
+class PodcastConsumerVerifyRequest(BaseModel):
+    """Verify body: the single-use token from the emailed link."""
+
+    token: str = Field(..., min_length=1, description="Single-use verification token from the email link.")
+
+
+class PodcastConsumerVerifyResponse(BaseModel):
+    """Verify success: the raw API key (shown ONCE) plus the MCP endpoint URL."""
+
+    api_key: str = Field(..., description="The freshly minted PODCAST_QUERY-scoped API key. Shown once; not recoverable.")
+    mcp_url: str = Field(..., description="MCP SSE endpoint to add to the client's config, with this key as a bearer token.")
+
+
 class AccessRequestView(BaseModel):
     """Admin-facing projection of an access-request document."""
 

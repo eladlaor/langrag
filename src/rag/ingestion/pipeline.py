@@ -128,6 +128,7 @@ class IngestionPipeline:
                 Keys.SOURCE_DATE_START: chunk.source_date_start,
                 Keys.SOURCE_DATE_END: chunk.source_date_end,
                 Keys.DATA_SOURCE_NAME: chunk.data_source_name,
+                Keys.PODCAST_SLUG: chunk.podcast_slug,
                 Keys.METADATA: chunk.metadata,
             })
 
