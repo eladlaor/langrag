@@ -154,9 +154,9 @@ services:
   # ----------------------------------------------------------------------
   # MCP server — exposes rag_query / rag_search / list_rag_sources for
   # Claude Code subagents. Runs alongside the app, behind nginx on
-  # mcp.langrag.ai in production. Transport is FastMCP SSE
-  # (server.run(transport="sse")): clients connect to the /sse endpoint, NOT
-  # a streamable-HTTP endpoint. Gated behind the `production` profile so a
+  # mcp.langrag.ai in production. Transport is FastMCP Streamable HTTP
+  # (stateless): clients connect to the /mcp endpoint. Gated behind the
+  # `production` profile so a
   # bare `docker compose up` (dev) never starts a public MCP server; bring it
   # up with `docker compose --profile production up -d mcp-server`.
   # ----------------------------------------------------------------------
@@ -207,8 +207,8 @@ services:
       - langrag-network
     restart: unless-stopped
     # The mcp-server reuses the app Dockerfile, whose HEALTHCHECK probes
-    # :8000/health. This service listens on :8765 (FastMCP SSE transport,
-    # no plain /health route), so we override with a stdlib TCP-connect probe
+    # :8000/health. This service listens on :8765 (FastMCP Streamable HTTP
+    # transport, no plain /health route), so we override with a stdlib TCP-connect probe
     # that needs no extra endpoint or auth (transport-agnostic).
     healthcheck:
       test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('localhost',8765),3); s.close()"]

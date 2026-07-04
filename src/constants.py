@@ -851,7 +851,7 @@ PODCAST_CONSUMER_TOKEN_QUERY_PARAM = "token"
 # mcp_url returned to the consumer on successful verify — the SSE endpoint they
 # add to their MCP client. Sourced from config (RAG_MCP_PUBLIC_URL) so staging
 # and prod differ without a code change; this is the documented default.
-PODCAST_CONSUMER_MCP_URL_DEFAULT = "https://mcp.langrag.ai/sse"
+PODCAST_CONSUMER_MCP_URL_DEFAULT = "https://mcp.langrag.ai/mcp"
 # rag_api_keys.name / owner stamped on a consumer-minted key so key listings and
 # Langfuse per-key analytics can distinguish the public lane from internal keys.
 PODCAST_CONSUMER_KEY_NAME = "podcast-consumer"

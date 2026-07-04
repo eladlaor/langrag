@@ -1,5 +1,5 @@
 """
-Per-request authentication context for the HTTP/SSE MCP transport.
+Per-request authentication context for the Streamable HTTP MCP transport.
 
 FastMCP's tool invocations carry no caller identity, so scope enforcement needs a
 side channel from the transport (where the bearer token is presented) to the tool
@@ -7,31 +7,29 @@ wrappers (where a tool name is known). This module provides that channel.
 
 Transport reality (mcp 1.27.0, vendored FastMCP under mcp.server.fastmcp):
 
-  - The SSE transport is TWO decoupled HTTP requests. `GET /sse` opens the
-    long-lived stream and runs `_mcp_server.run`, which dispatches each incoming
-    message via `anyio` `task_group.start_soon`. `start_soon` copies the CURRENT
-    context, so a ContextVar set while the GET request is being served IS
-    captured into the per-message tool task. `POST /messages` only writes the raw
-    JSON-RPC message into a memory stream — the tool does NOT execute in the POST
-    request's context.
+  - The Streamable HTTP transport (stateless mode) serves each JSON-RPC message
+    on its own `POST /mcp` request. `ConsumerKeyAuthMiddleware` authenticates the
+    bearer on that request and sets the resolved key record in a ContextVar.
+    The session manager dispatches the per-request server task from WITHIN the
+    request's ASGI call (via an `anyio` task-group start, which copies the
+    CURRENT context), so the record set by the middleware IS captured into the
+    tool task. Unlike the retired SSE transport's decoupled GET-stream/POST
+    split, the authenticating request and the tool-executing request are the
+    same, so identity is naturally per-call.
 
-  - Because the GET-time ContextVar propagates, we set the resolved key record in
-    `ConsumerKeyAuthMiddleware` (which runs on both GET and POST). The record set
-    on the GET request is what the tool task sees. As a belt-and-suspenders
-    fallback (for third-party MCP clients that authenticate only the GET stream),
-    the tool path ALSO reads the bearer off the POST request via FastMCP's
-    per-call `request_context.request`, which SSE populates with the POST
-    `Request` (headers included).
+  - As a belt-and-suspenders fallback (should the ContextVar not propagate), the
+    tool path ALSO reads the bearer off the current request via FastMCP's
+    per-call `request_context.request` (headers included).
 
-Fail-closed (C1): on the HTTP/SSE transport, if NO key record can be resolved at
+Fail-closed (C1): on the HTTP transport, if NO key record can be resolved at
 tool-execution time, the call is REJECTED, never silently allowed. Only the stdio
 transport (local dev, auth delegated to the local client) keeps the no-op.
 
-Live revocation (H1): the GET-time record is frozen for the stream lifetime. To
-honor "keys revocable at any time", `authorize_current_tool` re-resolves the key
-by key_id against the live `enabled` flag on a short TTL
-(rag.mcp_key_reauth_ttl_seconds), so a revoked/rotated key stops working within
-the TTL even on an already-open stream.
+Live revocation (H1): to honor "keys revocable at any time",
+`authorize_current_tool` re-resolves the key by key_id against the live `enabled`
+flag on a short TTL (rag.mcp_key_reauth_ttl_seconds), so a revoked/rotated key
+stops working within the TTL. On the stateless transport records are resolved
+fresh per request, so the TTL re-resolve is a cheap no-op in the common case.
 """
 
 import asyncio
@@ -64,7 +62,7 @@ logger = logging.getLogger(__name__)
 # session-frozen record is trusted before a live re-resolve (H1).
 _current_key_record: ContextVar[dict | None] = ContextVar("mcp_current_key_record", default=None)
 
-# True once the HTTP/SSE transport is active. Distinguishes transport for the
+# True once the Streamable HTTP transport is active. Distinguishes transport for the
 # fail-closed decision: HTTP with no resolvable record MUST reject; stdio no-ops.
 _http_transport_active: ContextVar[bool] = ContextVar("mcp_http_transport_active", default=False)
 
@@ -85,7 +83,7 @@ _background_tasks: set[asyncio.Task] = set()
 
 
 def mark_http_transport_active() -> None:
-    """Flag that the HTTP/SSE transport is running (enables fail-closed enforcement)."""
+    """Flag that the Streamable HTTP transport is running (enables fail-closed enforcement)."""
     _http_transport_active.set(True)
 
 
@@ -146,9 +144,10 @@ async def authorize_current_tool(tool_name: str) -> None:
     """Enforce the current key's scope for `tool_name` (fail-fast, fail-closed on HTTP).
 
     Resolution order at tool-execution time:
-      1. The GET-time ContextVar record (propagated via the anyio task-copy).
-      2. Fallback: the bearer on the POST /messages request, read from FastMCP's
-         per-call request context (for clients that auth only the GET stream).
+      1. The ContextVar record set by the auth middleware on the POST /mcp
+         request (propagated into the tool task via the anyio context copy).
+      2. Fallback: the bearer on the current request, read from FastMCP's
+         per-call request context.
     On the HTTP transport, if neither yields a record the call is REJECTED
     (ScopeForbiddenError). On stdio (no HTTP transport, no record), it is a no-op.
 
@@ -181,13 +180,13 @@ async def authorize_current_tool(tool_name: str) -> None:
 
 
 async def _record_from_request_context() -> dict | None:
-    """Resolve a key record from the POST /messages bearer, if reachable.
+    """Resolve a key record from the current request's bearer, if reachable.
 
-    FastMCP exposes the per-call request context; on the SSE transport its
-    `request` is the POST Starlette Request, whose Authorization header carries
-    the bearer even when the ContextVar did not propagate. Any failure to reach
-    the context resolves to None (caller decides fail-open vs fail-closed by
-    transport).
+    FastMCP exposes the per-call request context; on the Streamable HTTP
+    transport its `request` is the POST /mcp Starlette Request, whose
+    Authorization header carries the bearer even when the ContextVar did not
+    propagate. Any failure to reach the context resolves to None (caller decides
+    fail-open vs fail-closed by transport).
     """
     try:
         from mcp.server.lowlevel.server import request_ctx
@@ -277,11 +276,12 @@ async def resolve_key_record(plaintext: str) -> dict | None:
 class ConsumerKeyAuthMiddleware:
     """ASGI middleware: authenticate the MCP bearer and set the request auth context.
 
-    Applied to the FastMCP SSE Starlette app. Rejects unauthenticated/invalid
-    requests with a flat 401. On success it stashes the resolved key record in the
-    ContextVar so the tool wrappers can enforce scope per invocation. Because the
-    tool executes in the GET /sse stream's task (which copies this context), the
-    record set here on the GET request is what the tool sees.
+    Applied to the FastMCP Streamable HTTP Starlette app. Rejects
+    unauthenticated/invalid requests with a flat 401. On success it stashes the
+    resolved key record in the ContextVar so the tool wrappers can enforce scope
+    per invocation. The tool task is started from within this request's ASGI
+    call (anyio copies the current context), so the record set here is what the
+    tool sees.
     """
 
     def __init__(self, app: ASGIApp) -> None:

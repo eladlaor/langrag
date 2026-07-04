@@ -1,0 +1,11 @@
+{
+  "name": "langrag-podcasts",
+  "version": "0.1.0",
+  "description": "Chat with the LangTalks podcasts via the public langrag.ai MCP server. Date-aware semantic search (search_podcasts + list_podcasts) with source-dated citations; your agent composes the answers on your own LLM. Requires a free API key from https://langrag.ai/podcasts (set LANGRAG_MCP_API_KEY).",
+  "author": {
+    "name": "Elad Laor",
+    "url": "https://github.com/eladlaor"
+  },
+  "homepage": "https://langrag.ai/podcasts",
+  "keywords": ["podcasts", "rag", "mcp", "langtalks", "search"]
+}

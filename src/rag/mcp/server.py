@@ -14,7 +14,8 @@ Two tool surfaces, selected by RAG_MCP_PUBLIC_MODE (settings.rag.mcp_public_mode
 
 Supported transports:
   - stdio (default; for local dev / direct subagent registration)
-  - HTTP/SSE (for the public mcp.langrag.ai endpoint, behind nginx + TLS)
+  - Streamable HTTP (for the public mcp.langrag.ai endpoint, behind nginx + TLS;
+    clients connect to the /mcp endpoint, stateless mode — no session tracking)
 
 Authentication: when running in HTTP mode, an opaque bearer token (RAG_MCP_API_KEY
 or settings.rag.mcp_api_key) MUST be presented in the Authorization header. The
@@ -27,6 +28,7 @@ import sys
 import uuid
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from config import get_settings
 from constants import (
@@ -162,10 +164,32 @@ def build_server(public_mode: bool | None = None) -> FastMCP:
             When None, the config flag is read. In public mode ONLY the public
             podcast tools are registered; rag_query is never reachable.
     """
+    rag_settings = get_settings().rag
     if public_mode is None:
-        public_mode = get_settings().rag.mcp_public_mode
+        public_mode = rag_settings.mcp_public_mode
 
     server = FastMCP(name=MCP_SERVER_NAME, instructions=MCP_SERVER_INSTRUCTIONS)
+
+    # DNS-rebinding guard for the Streamable HTTP transport. The MCP SDK defaults its
+    # allowed_hosts to localhost-only, so a request forwarded by nginx/Cloudflare
+    # with Host: mcp.langrag.ai is rejected with HTTP 421 AFTER auth passes,
+    # blocking every external client. We drive it from config: a non-empty
+    # mcp_allowed_hosts allowlists those hosts; an empty value disables the guard
+    # entirely, which is safe here because nginx is the sole ingress and pins the
+    # vhost to this upstream. Harmless for the stdio transport (never consulted).
+    allowed_hosts_raw = rag_settings.mcp_allowed_hosts.strip()
+    if allowed_hosts_raw:
+        hosts = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
+        origins = [f"https://{h}" for h in hosts]
+        server.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=hosts,
+            allowed_origins=origins,
+        )
+        logger.info("MCP transport DNS-rebinding guard: allowlisting hosts %s", hosts)
+    else:
+        server.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+        logger.info("MCP transport DNS-rebinding guard disabled (nginx is sole ingress)")
 
     # Public tools are always available. In public mode they are the ENTIRE
     # surface; the internal tools (esp. rag_query's server-side generation) are
@@ -181,7 +205,7 @@ def build_server(public_mode: bool | None = None) -> FastMCP:
 
 
 def main() -> int:
-    """Entry point. Defaults to stdio transport; pass --http to run the HTTP/SSE server."""
+    """Entry point. Defaults to stdio transport; pass --transport http to run the Streamable HTTP server."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -193,7 +217,7 @@ def main() -> int:
         "--transport",
         choices=("stdio", "http"),
         default="stdio",
-        help="Transport mode. stdio for local subagents; http for mcp.langrag.ai.",
+        help="Transport mode. stdio for local subagents; http (Streamable HTTP) for mcp.langrag.ai.",
     )
     parser.add_argument("--host", default="0.0.0.0", help="HTTP bind host (http transport only)")
     parser.add_argument("--port", type=int, default=8765, help="HTTP bind port (http transport only)")
@@ -231,19 +255,26 @@ def main() -> int:
     configure_cap(settings.mcp_max_concurrent)
     logger.info("MCP process concurrency cap pinned", extra={"cap": settings.mcp_max_concurrent})
 
-    logger.info("Starting LangRAG MCP server (HTTP/SSE transport) on %s:%s", args.host, args.port)
-    _run_sse_with_auth(server, host=args.host, port=args.port)
+    logger.info("Starting LangRAG MCP server (Streamable HTTP transport) on %s:%s", args.host, args.port)
+    _run_streamable_http_with_auth(server, host=args.host, port=args.port)
     return 0
 
 
-def _run_sse_with_auth(server: FastMCP, *, host: str, port: int) -> None:
-    """Run the SSE transport with the consumer-key auth middleware attached.
+def _run_streamable_http_with_auth(server: FastMCP, *, host: str, port: int) -> None:
+    """Run the Streamable HTTP transport with the consumer-key auth middleware attached.
 
-    FastMCP's `run(transport="sse")` builds the SSE Starlette app internally with
-    no hook to add middleware, so we build the app ourselves, wrap it with
-    ConsumerKeyAuthMiddleware (which authenticates the bearer and sets the
-    per-request key-record context the tool wrappers enforce scope against), and
-    serve it with uvicorn. This mirrors FastMCP.run_sse_async().
+    FastMCP's `run(transport="streamable-http")` builds the Starlette app
+    internally with no hook to add middleware, so we build the app ourselves,
+    wrap it with ConsumerKeyAuthMiddleware (which authenticates the bearer and
+    sets the per-request key-record context the tool wrappers enforce scope
+    against), and serve it with uvicorn. The app's own lifespan runs the
+    StreamableHTTPSessionManager, so uvicorn's lifespan handling covers it.
+
+    Stateless mode: each POST /mcp is authenticated and served independently,
+    with no server-side session tracking. This matches our synthesized per-call
+    Langfuse session ids and means the auth context is set fresh on the exact
+    request whose tool call it authorizes (no cross-request context propagation
+    to reason about, unlike the retired SSE transport's GET/POST split).
 
     Flags the HTTP transport active so the scope gate fails CLOSED: a tool call
     that reaches execution with no resolvable key record is rejected, never
@@ -253,7 +284,8 @@ def _run_sse_with_auth(server: FastMCP, *, host: str, port: int) -> None:
 
     mark_http_transport_active()
 
-    starlette_app = server.sse_app()
+    server.settings.stateless_http = True
+    starlette_app = server.streamable_http_app()
     starlette_app.add_middleware(ConsumerKeyAuthMiddleware)
 
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")

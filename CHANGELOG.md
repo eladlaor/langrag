@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-07-04
+
+### Added
+- **Claude Code plugin marketplace + `langrag-podcasts` plugin.** The repo now ships a public plugin marketplace (`.claude-plugin/marketplace.json`) with a `langrag-podcasts` plugin (`plugins/langrag-podcasts/`): a thin client of the public MCP endpoint bundling the `https://mcp.langrag.ai/mcp` server config (bearer key via `LANGRAG_MCP_API_KEY`), a `podcast-expert` subagent restricted to `search_podcasts`/`list_podcasts` with date-tagged citation rules, and a `podcast-setup` skill covering key issuance and troubleshooting. Install: `/plugin marketplace add eladlaor/langrag`, then `/plugin install langrag-podcasts`. Podcast content lives server-side, so new episodes require no plugin update.
+
+## [1.21.0] - 2026-07-04
+
+### Changed
+- **Public MCP transport migrated from SSE to Streamable HTTP.** The `mcp.langrag.ai` endpoint now serves the MCP Streamable HTTP transport (stateless) at `/mcp` instead of the spec-deprecated SSE transport at `/sse`. Clients register `https://mcp.langrag.ai/mcp` with transport `http`; the key-issuance flow returns the new URL. Auth (bearer + per-key scope enforcement, fail-closed), the public tool surface, quotas, and concurrency caps are unchanged. The stdio transport for local dev is unaffected. Breaking only for clients configured against `/sse`; no consumer keys were issued before this change.
+
+## [1.20.1] - 2026-07-02
+
+### Fixed
+- **Public MCP endpoint rejected every external client with HTTP 421 "Invalid Host header."** `build_server()` never set the FastMCP transport-security settings, so the MCP SDK's DNS-rebinding guard kept its localhost-only default `allowed_hosts` and rejected the `Host: mcp.langrag.ai` that nginx/Cloudflare forward (after auth passed). The guard is now driven by `RAG_MCP_ALLOWED_HOSTS`: a non-empty value allowlists those hosts (with matching `https://` origins); an empty value disables DNS-rebinding protection, which is safe because nginx is the sole ingress and pins the vhost to this upstream. No effect on the stdio transport.
+
 ## [1.20.0] - 2026-07-02
 
 ### Added
@@ -414,7 +429,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/eladlaor/langrag/compare/v1.21.0...v1.22.0
+[1.20.1]: https://github.com/eladlaor/langrag/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/eladlaor/langrag/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/eladlaor/langrag/compare/v1.18.0...v1.19.0
 [1.18.0]: https://github.com/eladlaor/langrag/compare/v1.17.7...v1.18.0
@@ -443,6 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 [1.7.1]: https://github.com/eladlaor/langrag/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/eladlaor/langrag/compare/v1.6.5...v1.7.0
 [1.6.5]: https://github.com/eladlaor/langrag/compare/v1.6.4...v1.6.5
+[1.21.0]: https://github.com/eladlaor/langrag/compare/v1.20.1...v1.21.0
 [1.6.4]: https://github.com/eladlaor/langrag/compare/v1.6.3...v1.6.4
 [1.6.3]: https://github.com/eladlaor/langrag/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/eladlaor/langrag/compare/v1.6.1...v1.6.2

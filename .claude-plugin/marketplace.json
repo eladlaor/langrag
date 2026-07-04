@@ -1,0 +1,24 @@
+{
+  "name": "langrag",
+  "owner": {
+    "name": "Elad Laor",
+    "url": "https://github.com/eladlaor"
+  },
+  "metadata": {
+    "description": "LangRAG plugins: chat with the LangTalks podcast corpus through the public langrag.ai MCP server, with date-aware semantic search and cited answers."
+  },
+  "plugins": [
+    {
+      "name": "langrag-podcasts",
+      "source": "./plugins/langrag-podcasts",
+      "description": "Chat with the LangTalks podcasts: date-aware semantic search over episode transcripts via the public langrag.ai MCP server. Includes a podcast-expert subagent and a setup skill.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Elad Laor",
+        "url": "https://github.com/eladlaor"
+      },
+      "homepage": "https://langrag.ai/podcasts",
+      "keywords": ["podcasts", "rag", "mcp", "langtalks", "search"]
+    }
+  ]
+}
