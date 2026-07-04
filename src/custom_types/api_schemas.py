@@ -584,6 +584,7 @@ class RAGCitationResponse(BaseModel):
     source_date_end: str = Field(..., description="ISO 8601 date(time) of the latest source content")
     snippet: str
     search_score: float
+    evidence_score: float = Field(default=0.0, description="Absolute relevance (normalized vector cosine) of this chunk; comparable against a fixed threshold across queries, unlike the page-normalized search_score on the hybrid path")
     metadata: dict = {}
 
 

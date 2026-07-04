@@ -125,8 +125,8 @@ class ConversationsRepository(BaseRepository):
         """
         client = await get_client()
         try:
-            async with await client.start_session() as mongo_session:
-                async with mongo_session.start_transaction():
+            async with client.start_session() as mongo_session:
+                async with await mongo_session.start_transaction():
                     await self._messages.insert_message(session_id, message, mongo_session=mongo_session)
                     await self.collection.update_one(
                         {Keys.SESSION_ID: session_id},
@@ -195,8 +195,8 @@ class ConversationsRepository(BaseRepository):
 
         client = await get_client()
         try:
-            async with await client.start_session() as mongo_session:
-                async with mongo_session.start_transaction():
+            async with client.start_session() as mongo_session:
+                async with await mongo_session.start_transaction():
                     result = await self.collection.delete_one(query, session=mongo_session)
                     deleted = result.deleted_count > 0
                     if deleted:

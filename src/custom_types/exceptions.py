@@ -67,6 +67,19 @@ class ConfigurationError(LangRAGError):
     pass
 
 
+class EmbeddingDimensionMismatchError(ConfigurationError):
+    """
+    Configured embedding dimensions do not match the built vector index.
+
+    HNSW requires dimension equality; queries against a mismatched index fail
+    (or silently return zero recall). Startup must refuse to proceed so the
+    operator performs a deliberate re-ingest — this error must NEVER be
+    downgraded to a warning by mongot-unavailability tolerance.
+    """
+
+    pass
+
+
 # =============================================================================
 # EXTRACTION / INGESTION ERRORS
 # =============================================================================

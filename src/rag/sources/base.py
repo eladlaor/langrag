@@ -53,6 +53,17 @@ class ContentSourceInterface(ABC):
 
     source_type: ContentSourceType
 
+    def canonical_source_id(self, source_id: str) -> str:
+        """Map a caller-facing source identifier to the source_id stored on chunks.
+
+        The ingestion pipeline's idempotency check (source_exists) and
+        force-refresh delete both key on the STORED chunk source_id. Sources
+        whose extract() stamps chunks with a derived id (e.g. podcasts hash the
+        audio path into a uuid5 episode_id) MUST override this so dedup and
+        refresh target the right documents; the default is identity.
+        """
+        return source_id
+
     @abstractmethod
     async def extract(self, source_id: str, **kwargs) -> list[ContentChunk]:
         """

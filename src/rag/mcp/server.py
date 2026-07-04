@@ -32,6 +32,8 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from config import get_settings
 from constants import (
+    MCP_PROMPT_ASK_PODCASTS,
+    MCP_RESOURCE_ANSWER_GUIDE_URI,
     MCP_SESSION_ID_PREFIX,
     MCP_TOOL_LIST_PODCASTS,
     MCP_TOOL_LIST_RAG_SOURCES,
@@ -51,7 +53,15 @@ from rag.mcp.tools import list_podcasts, list_rag_sources, rag_query, rag_search
 logger = logging.getLogger(__name__)
 
 MCP_SERVER_NAME = "langrag"
-MCP_SERVER_INSTRUCTIONS = "RAG tools for querying podcasts (and, on internal deployments, past newsletters). Every result is tagged with the source date(s); pass date_start/date_end (YYYY-MM-DD) to scope retrieval to a window. Call list_podcasts to discover which shows are queryable, then search_podcasts to retrieve dated, cited chunks and compose your own answer."
+MCP_SERVER_INSTRUCTIONS = (
+    "RAG tools for querying podcasts (and, on internal deployments, past newsletters). "
+    "No API key is required for podcast search (keyless callers get a per-IP daily quota; a free key from the signup page raises it). "
+    "Workflow: call list_podcasts first to discover queryable shows, their slugs, and date coverage; then search_podcasts to retrieve dated, cited transcript chunks. "
+    "There is no server-side generation — compose your answer ONLY from the returned chunks, citing each claim with its episode title and source date (YYYY-MM-DD from source_date_start/end). "
+    "Surface freshness_warning to the reader when it is set, and say the corpus does not cover a topic rather than answering from your own knowledge when citations are empty. "
+    "Pass date_start/date_end (YYYY-MM-DD) to scope retrieval to a window. "
+    "See the ask_podcasts prompt and the answer-guide resource for the full recommended flow."
+)
 
 
 def _new_session_id() -> str:
@@ -99,6 +109,59 @@ def _register_public_tools(server: FastMCP) -> None:
         result = await list_podcasts()
         touch_current_consumer_last_used()
         return result
+
+
+def _register_public_prompts_and_resources(server: FastMCP) -> None:
+    """Register the BYOA guidance surface: a prompt and a resource (both metadata-only, $0).
+
+    These teach a third-party agent to answer "nicely and correctly": grounded
+    only in retrieved chunks, with date-tagged citations. Names/URIs are public
+    contract (constants); quota numbers are interpolated from settings so the
+    guide can never drift from the enforced limits.
+    """
+
+    @server.prompt(
+        name=MCP_PROMPT_ASK_PODCASTS,
+        description="Recommended flow for answering a question from the podcast corpus with grounded, date-tagged citations.",
+    )
+    def _ask_podcasts_prompt(question: str, podcast: str | None = None) -> str:
+        slug_line = f"Filter to the podcast slug '{podcast}'." if podcast else "If you do not know which show covers this, call list_podcasts first and pick a slug (or search all)."
+        return (
+            f"Answer the following question strictly from the podcast corpus, using the langrag MCP tools.\n\n"
+            f"Question: {question}\n\n"
+            f"Steps:\n"
+            f"1. {slug_line}\n"
+            f"2. Call search_podcasts with a focused query (pass date_start/date_end as YYYY-MM-DD if the question implies a time window). If results look weak, reformulate (synonyms, guest names, tool names) and search again.\n"
+            f"3. Compose the answer ONLY from the returned chunks. Never fill gaps from your own knowledge.\n"
+            f"4. Tag every sourced claim with its citation in the form (Episode Title, YYYY-MM-DD), using each chunk's source_title and source_date_start.\n"
+            f"5. If freshness_warning is true, tell the reader the corpus may be missing newer episodes.\n"
+            f"6. If citations come back empty, say the podcasts have not covered the topic (name the date range you searched) and stop.\n"
+        )
+
+    @server.resource(
+        MCP_RESOURCE_ANSWER_GUIDE_URI,
+        name="podcast-answer-guide",
+        description="How to query the LangTalks podcast corpus and compose grounded, date-cited answers; includes access tiers and limits.",
+        mime_type="text/markdown",
+    )
+    def _answer_guide_resource() -> str:
+        rag = get_settings().rag
+        return (
+            "# LangRAG Podcast MCP — Answer Guide\n\n"
+            "## Tools\n"
+            f"- `{MCP_TOOL_LIST_PODCASTS}`: discover queryable shows, their slugs, chunk counts, and date coverage. Call this first.\n"
+            f"- `{MCP_TOOL_SEARCH_PODCASTS}(query, podcast?, date_start?, date_end?, top_k?)`: returns reranked transcript chunks, each tagged with source dates. No server-side generation — YOUR agent composes the answer.\n\n"
+            "## Composing answers\n"
+            "- Ground every claim in a returned chunk; never answer from parametric knowledge.\n"
+            "- Cite as `(Episode Title, YYYY-MM-DD)` from each chunk's `source_title` + `source_date_start`.\n"
+            "- Dates: pass `date_start`/`date_end` as `YYYY-MM-DD`; keep them inside the coverage reported by "
+            f"`{MCP_TOOL_LIST_PODCASTS}` or say the window is uncovered.\n"
+            "- Relay `freshness_warning` to the reader when set.\n"
+            "- Empty `citations` means the corpus does not cover it — refuse instead of guessing.\n\n"
+            "## Access tiers\n"
+            f"- Keyless (no Authorization header): {rag.mcp_anon_max_queries_per_ip_per_day} searches/day per IP, {rag.mcp_anon_query_rate_per_min}/min.\n"
+            f"- Free API key ({rag.podcast_consumer_verify_base_url}): {rag.mcp_max_queries_per_key_per_day} searches/day per key, {rag.mcp_query_rate_per_min}/min. Present it as `Authorization: Bearer <key>`.\n"
+        )
 
 
 def _register_internal_tools(server: FastMCP) -> None:
@@ -195,6 +258,7 @@ def build_server(public_mode: bool | None = None) -> FastMCP:
     # surface; the internal tools (esp. rag_query's server-side generation) are
     # never registered, so they cannot be invoked regardless of routing.
     _register_public_tools(server)
+    _register_public_prompts_and_resources(server)
     if public_mode:
         logger.info("MCP server built in PUBLIC mode: only search_podcasts + list_podcasts registered")
     else:

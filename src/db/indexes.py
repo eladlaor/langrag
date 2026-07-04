@@ -582,7 +582,9 @@ def _validate_embedding_dims_against_index(index_dims: int | None, index_name: s
         configured_dims = EMBEDDING_MODEL_DIMENSIONS.get(rag_model, DEFAULT_EMBEDDING_DIMENSION)
 
     if configured_dims != index_dims:
-        raise RuntimeError(
+        from custom_types.exceptions import EmbeddingDimensionMismatchError
+
+        raise EmbeddingDimensionMismatchError(
             f"Embedding dimension mismatch: vector index '{index_name}' "
             f"was built with numDimensions={index_dims}, but the configured "
             f"embedding produces {configured_dims}-dim vectors. HNSW requires dim "
@@ -753,6 +755,12 @@ async def _ensure_vector_search_index(db: AsyncDatabase) -> None:
             await _drop_legacy_vector_index(collection)
 
     except Exception as e:
+        # A dims mismatch is an operator error, not an environment limitation —
+        # it must fail startup, never be downgraded by the mongot tolerance below.
+        from custom_types.exceptions import EmbeddingDimensionMismatchError
+
+        if isinstance(e, EmbeddingDimensionMismatchError):
+            raise
         # Vector search index creation can fail if mongot is not available
         # (e.g., local dev without Atlas or mongot sidecar). Log and continue.
         logger.warning(
@@ -816,6 +824,11 @@ async def _ensure_discussion_vector_index(db: AsyncDatabase) -> None:
         await _wait_for_search_index_ready(collection, DISCUSSION_VECTOR_INDEX_NAME)
 
     except Exception as e:
+        # Same rule as the RAG chunk index: a dims mismatch fails startup.
+        from custom_types.exceptions import EmbeddingDimensionMismatchError
+
+        if isinstance(e, EmbeddingDimensionMismatchError):
+            raise
         logger.warning(
             f"Could not create vector search index '{DISCUSSION_VECTOR_INDEX_NAME}': {e}. "
             f"Discussion semantic search / anti-repetition will not work until this "

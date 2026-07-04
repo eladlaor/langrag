@@ -53,6 +53,16 @@ class PodcastSource(ContentSourceInterface):
         )
         self._transcription_provider = TranscriptionProviderFactory.create()
 
+    def canonical_source_id(self, source_id: str) -> str:
+        """Chunks are stamped with uuid5(resolved audio path), not the raw path.
+
+        Must stay in lockstep with the episode_id derivation in extract();
+        without this mapping every /ingest/podcasts/scan run duplicated the
+        entire podcast corpus (source_exists never matched the stored id).
+        """
+        audio_path = self._resolve_audio_path(source_id)
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, str(audio_path)))
+
     async def extract(self, source_id: str, **kwargs) -> list[ContentChunk]:
         """
         Transcribe and chunk a podcast audio file.

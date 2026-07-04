@@ -25,6 +25,13 @@ Fail-closed (C1): on the HTTP transport, if NO key record can be resolved at
 tool-execution time, the call is REJECTED, never silently allowed. Only the stdio
 transport (local dev, auth delegated to the local client) keeps the no-op.
 
+Anonymous lane (BYOA): when rag.mcp_anonymous_enabled is true, a request with no
+bearer gets a synthetic podcast_query-scoped record keyed by a hash of the client
+IP (see build_anonymous_record) instead of a 401. A PRESENT but invalid bearer
+still 401s — never a silent downgrade to anonymous. Anonymous principals are
+confined to the public podcast tools by the scope machinery and admitted through
+their own tighter quota stack (rag/quota/admission.py).
+
 Live revocation (H1): to honor "keys revocable at any time",
 `authorize_current_tool` re-resolves the key by key_id against the live `enabled`
 flag on a short TTL (rag.mcp_key_reauth_ttl_seconds), so a revoked/rotated key
@@ -33,6 +40,7 @@ fresh per request, so the TTL re-resolve is a cheap no-op in the common case.
 """
 
 import asyncio
+import hashlib
 import logging
 import time
 from contextvars import ContextVar
@@ -41,9 +49,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from api.client_ip import resolve_client_ip
 from config import get_settings
 from constants import (
     HTTP_STATUS_UNAUTHORIZED,
+    RAG_ANON_IP_HASH_LEN,
+    RAG_ANON_KEY_ID_PREFIX,
+    RAG_ANON_OWNER,
     RAG_API_KEY_BEARER_SCHEME,
     RAGApiKeyScope,
 )
@@ -73,6 +85,35 @@ _INTERNAL_BEARER_KEY_ID = "mcp-internal-bearer"
 
 # Synthetic field: epoch seconds when the record was (re)resolved, for the H1 TTL.
 _RESOLVED_AT = "_resolved_at"
+
+
+def anonymous_key_id_for_ip(client_ip: str) -> str:
+    """Derive the anonymous principal's key_id from the resolved client IP.
+
+    The IP is hashed (SHA-256 prefix) so quota rows, Langfuse trace tags, and
+    logs never carry a raw IP; the id stays stable per IP so per-IP quotas hold.
+    """
+    digest = hashlib.sha256(client_ip.encode("utf-8")).hexdigest()[:RAG_ANON_IP_HASH_LEN]
+    return f"{RAG_ANON_KEY_ID_PREFIX}{digest}"
+
+
+def is_anonymous_key_id(key_id: str | None) -> bool:
+    """True when the key_id denotes a keyless (anonymous) principal."""
+    return bool(key_id) and key_id.startswith(RAG_ANON_KEY_ID_PREFIX)
+
+
+def build_anonymous_record(client_ip: str) -> dict:
+    """Synthesize the key record for a keyless (anonymous) caller.
+
+    SCOPES is an EXPLICIT non-empty list: resolve_scopes() promotes a record with
+    empty/missing scopes and no created_at to FULL (legacy carve-out), which must
+    never happen for an anonymous principal. Regression-tested.
+    """
+    return {
+        RAGApiKeyKeys.KEY_ID: anonymous_key_id_for_ip(client_ip),
+        RAGApiKeyKeys.OWNER: RAG_ANON_OWNER,
+        RAGApiKeyKeys.SCOPES: [str(RAGApiKeyScope.PODCAST_QUERY)],
+    }
 
 _UNAUTHORIZED_MESSAGE = "Invalid or missing MCP API key."
 
@@ -118,7 +159,9 @@ async def _reresolve_if_stale(record: dict) -> dict | None:
     H1 addresses.
     """
     key_id = record.get(RAGApiKeyKeys.KEY_ID)
-    if not key_id or key_id == _INTERNAL_BEARER_KEY_ID:
+    if not key_id or key_id == _INTERNAL_BEARER_KEY_ID or is_anonymous_key_id(key_id):
+        # Internal bearer and anonymous principals have no rag_api_keys row; a
+        # re-resolve would find nothing and wrongly fail-close them.
         return record
 
     resolved_at = record.get(_RESOLVED_AT)
@@ -203,6 +246,14 @@ async def _record_from_request_context() -> dict | None:
         return None
     plaintext = _extract_bearer(headers.get("authorization"))
     if not plaintext:
+        # Mirror the middleware's keyless decision so the fail-closed check does
+        # not reject a legitimate anonymous call if the ContextVar ever fails to
+        # propagate. An anonymous record is only synthesized under the flag.
+        try:
+            if get_settings().rag.mcp_anonymous_enabled:
+                return _stamp(build_anonymous_record(resolve_client_ip(request)))
+        except Exception as e:  # noqa: BLE001 — degrade to no-record, caller fail-closes
+            logger.error("MCP request-context anonymous resolution failed", extra={"event": "mcp_reqctx_anon_error", "error": str(e)})
         return None
     try:
         return _stamp(await resolve_key_record(plaintext))
@@ -222,7 +273,8 @@ def touch_current_consumer_last_used() -> None:
     if record is None:
         return
     key_id = record.get(RAGApiKeyKeys.KEY_ID)
-    if not key_id or key_id == _INTERNAL_BEARER_KEY_ID:
+    if not key_id or key_id == _INTERNAL_BEARER_KEY_ID or is_anonymous_key_id(key_id):
+        # Internal bearer and anonymous principals have no podcast_api_consumers row.
         return
     try:
         task = asyncio.create_task(_touch_last_used(key_id))
@@ -295,6 +347,19 @@ class ConsumerKeyAuthMiddleware:
         request = Request(scope, receive=receive)
         plaintext = _extract_bearer(request.headers.get("authorization"))
         if not plaintext:
+            # Keyless lane (BYOA): no bearer at all — and also an EMPTY bearer
+            # ("Authorization: Bearer " from an unset ${LANGRAG_MCP_API_KEY}
+            # expansion), which _extract_bearer parses to falsy. A PRESENT but
+            # invalid bearer never lands here: it must 401 below, not silently
+            # downgrade to the anonymous tier (revocation semantics).
+            if get_settings().rag.mcp_anonymous_enabled:
+                anon_record = build_anonymous_record(resolve_client_ip(request))
+                token = _current_key_record.set(_stamp(anon_record))
+                try:
+                    await self.app(scope, receive, send)
+                finally:
+                    _current_key_record.reset(token)
+                return
             await self._reject(scope, receive, send)
             return
 

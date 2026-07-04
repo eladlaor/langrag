@@ -27,6 +27,17 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
 
+      # RAG embedding model/dims MUST match what the rag_chunks corpus and the
+      # vector index were built with (startup fail-fasts on a mismatch).
+      # Changing them requires dropping the vector indexes and a full re-ingest.
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-large}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-3072}
+
+      # Discussion-path embedding (separate settings object from RAG above).
+      # Same invariant: must match the discussion_embeddings index dims.
+      EMBEDDING_DEFAULT_MODEL: ${EMBEDDING_DEFAULT_MODEL:-text-embedding-3-large}
+      EMBEDDING_OUTPUT_DIMENSIONS: ${EMBEDDING_OUTPUT_DIMENSIONS:-3072}
+
       # Decryption keys and storage (parameterized paths)
       BEEPER_MATRIX_STORE_PATH: ${BEEPER_MATRIX_STORE_PATH:-/app/secrets/beeper_matrix_store}
       DECRYPTED_KEYS_FILE_PATH: ${DECRYPTED_KEYS_FILE_PATH:-/app/secrets/decrypted-keys.json}
@@ -77,7 +88,7 @@ services:
       RAG_WHISPER_MODEL: ${RAG_WHISPER_MODEL:-whisper-1}
       RAG_VECTOR_SEARCH_TOP_K: ${RAG_VECTOR_SEARCH_TOP_K:-20}
       RAG_RERANK_TOP_K: ${RAG_RERANK_TOP_K:-5}
-      RAG_MIN_SIMILARITY_SCORE: ${RAG_MIN_SIMILARITY_SCORE:-0.7}
+      RAG_MIN_SIMILARITY_SCORE: ${RAG_MIN_SIMILARITY_SCORE:-0.6}
       RAG_LLM_PROVIDER: ${RAG_LLM_PROVIDER:-openai}
       RAG_LLM_MODEL: ${RAG_LLM_MODEL:-gpt-4.1}
 
@@ -189,6 +200,19 @@ services:
       # injection surface) is never registered when true. Override to false ONLY
       # for a trusted internal MCP deployment, never on mcp.langrag.ai.
       RAG_MCP_PUBLIC_MODE: ${RAG_MCP_PUBLIC_MODE:-true}
+      # Keyless (anonymous) BYOA lane: bearer-less requests get full semantic
+      # search under a per-IP daily quota + rate limit + anonymous global daily
+      # breaker (all consumed IN ADDITION to the shared global embed breaker).
+      # Set false to restore key-only access instantly (rollback lever).
+      RAG_MCP_ANONYMOUS_ENABLED: ${RAG_MCP_ANONYMOUS_ENABLED:-true}
+      RAG_MCP_ANON_MAX_QUERIES_PER_IP_PER_DAY: ${RAG_MCP_ANON_MAX_QUERIES_PER_IP_PER_DAY:-200}
+      RAG_MCP_ANON_QUERY_RATE_PER_MIN: ${RAG_MCP_ANON_QUERY_RATE_PER_MIN:-10}
+      RAG_MCP_ANON_GLOBAL_DAILY_MAX: ${RAG_MCP_ANON_GLOBAL_DAILY_MAX:-5000}
+      # Per-IP quota identity: Cloudflare is the sole ingress for mcp.langrag.ai
+      # and strips client-supplied CF-Connecting-IP, so trusting that header is
+      # safe and gives real per-client buckets (the raw TCP peer would be nginx,
+      # collapsing all keyless traffic into one shared bucket).
+      API_CLOUDFLARE_AUTHORITATIVE: ${API_CLOUDFLARE_AUTHORITATIVE:-true}
       # Trace MCP-initiated RAG calls to the same Langfuse backend as REST.
       # No behavior change when unset (LANGFUSE_ENABLED gates; disabled -> no-op).
       # LANGFUSE_HOST is overridable so docker-compose.langfuse-remote.yml can
@@ -266,6 +290,17 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # RAG embedding model/dims MUST match what the rag_chunks corpus and the
+      # vector index were built with (startup fail-fasts on a mismatch).
+      # Changing them requires dropping the vector indexes and a full re-ingest.
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-3-large}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-3072}
+
+      # Discussion-path embedding (separate settings object from RAG above).
+      # Same invariant: must match the discussion_embeddings index dims.
+      EMBEDDING_DEFAULT_MODEL: ${EMBEDDING_DEFAULT_MODEL:-text-embedding-3-large}
+      EMBEDDING_OUTPUT_DIMENSIONS: ${EMBEDDING_OUTPUT_DIMENSIONS:-3072}
 
       # Decryption keys and storage (parameterized paths)
       BEEPER_MATRIX_STORE_PATH: ${BEEPER_MATRIX_STORE_PATH:-/app/secrets/beeper_matrix_store}

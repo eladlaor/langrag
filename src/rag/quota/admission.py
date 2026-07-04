@@ -21,6 +21,10 @@ from __future__ import annotations
 import logging
 
 from config import get_settings
+from constants import (
+    RAG_GLOBAL_ANON_QUOTA_KEY_ID,
+    RAG_REJECT_REASON_ANON_GLOBAL_BREAKER,
+)
 from rag.quota.daily_quota import DailyQueryQuotaRepository
 from rag.quota.rate_limiter import SlidingWindowRateLimiter
 
@@ -46,6 +50,12 @@ ADMISSION_REASON_DAILY_QUOTA = "daily_quota_exceeded"
 
 
 _rate_limiter: SlidingWindowRateLimiter | None = None
+_anon_rate_limiter: SlidingWindowRateLimiter | None = None
+
+
+def _key_signup_hint() -> str:
+    """Point an over-limit anonymous caller at the free keyed tier (URL from config)."""
+    return f"Get a free API key at {get_settings().rag.podcast_consumer_verify_base_url} for higher limits."
 
 
 def _get_rate_limiter() -> SlidingWindowRateLimiter:
@@ -58,6 +68,18 @@ def _get_rate_limiter() -> SlidingWindowRateLimiter:
             window_seconds=60.0,
         )
     return _rate_limiter
+
+
+def _get_anon_rate_limiter() -> SlidingWindowRateLimiter:
+    """Build (once) and return the process-wide anonymous-lane (per-IP) rate limiter."""
+    global _anon_rate_limiter
+    if _anon_rate_limiter is None:
+        rag = get_settings().rag
+        _anon_rate_limiter = SlidingWindowRateLimiter(
+            max_per_window=rag.mcp_anon_query_rate_per_min,
+            window_seconds=60.0,
+        )
+    return _anon_rate_limiter
 
 
 async def enforce_query_admission(key_id: str, *, quota_repo: DailyQueryQuotaRepository) -> None:
@@ -82,7 +104,42 @@ async def enforce_query_admission(key_id: str, *, quota_repo: DailyQueryQuotaRep
         )
 
 
+async def enforce_anonymous_admission(anon_key_id: str, *, quota_repo: DailyQueryQuotaRepository) -> None:
+    """Enforce the anonymous (keyless) lane's admission stack. Raise on rejection.
+
+    Cheapest first, all BEFORE any owner-paid embedding call:
+      1. In-process per-IP sliding-window rate limit (no DB round-trip).
+      2. Per-IP daily quota (Mongo-backed, atomic; keyed by the hashed-IP id).
+      3. Anonymous global daily breaker (single sentinel row across all IPs).
+
+    Rejection messages point at the free key-issuance page since a key unlocks
+    the higher per-key tier.
+    """
+    rag = get_settings().rag
+
+    if not _get_anon_rate_limiter().allow(anon_key_id):
+        raise QueryAdmissionError(
+            f"Rate limit exceeded: max {rag.mcp_anon_query_rate_per_min} queries/min for keyless access. Slow down and retry. {_key_signup_hint()}",
+            reason=ADMISSION_REASON_RATE_LIMIT,
+        )
+
+    within_ip_quota = await quota_repo.check_and_increment_key(anon_key_id, limit=rag.mcp_anon_max_queries_per_ip_per_day)
+    if not within_ip_quota:
+        raise QueryAdmissionError(
+            f"Daily keyless quota exceeded: max {rag.mcp_anon_max_queries_per_ip_per_day} queries/day per IP. Try again tomorrow (UTC). {_key_signup_hint()}",
+            reason=ADMISSION_REASON_DAILY_QUOTA,
+        )
+
+    within_anon_global = await quota_repo.check_and_increment_key(RAG_GLOBAL_ANON_QUOTA_KEY_ID, limit=rag.mcp_anon_global_daily_max)
+    if not within_anon_global:
+        raise QueryAdmissionError(
+            f"Keyless capacity for today is exhausted (global daily cap). Try again tomorrow (UTC). {_key_signup_hint()}",
+            reason=RAG_REJECT_REASON_ANON_GLOBAL_BREAKER,
+        )
+
+
 def _reset_for_tests() -> None:
-    """Drop the cached rate limiter so a test can rebuild it from patched settings."""
-    global _rate_limiter
+    """Drop the cached rate limiters so a test can rebuild them from patched settings."""
+    global _rate_limiter, _anon_rate_limiter
     _rate_limiter = None
+    _anon_rate_limiter = None

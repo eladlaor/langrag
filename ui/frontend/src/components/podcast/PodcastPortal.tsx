@@ -30,7 +30,8 @@ import { logger } from "../../utils/logger";
 import { podcastApi, PodcastApiError } from "../../services/podcastApi";
 import {
   API_KEY_PLACEHOLDER,
-  MCP_SSE_URL,
+  KEYLESS_SETUP_SNIPPETS,
+  MCP_HTTP_URL,
   MCP_TOOLS,
   PODCAST_FAQ,
   PODCAST_LOG_COMPONENT,
@@ -287,7 +288,8 @@ export const PodcastPortal: React.FC = () => {
         <p>
           Query the LangTalks podcast (and future podcasts) from your own AI agent via
           MCP. Your agent&apos;s LLM writes the answers; we serve dated, cited transcript
-          chunks.
+          chunks. Works instantly with no API key — grab a free key below for higher
+          daily limits.
         </p>
       </header>
 
@@ -301,10 +303,13 @@ export const PodcastPortal: React.FC = () => {
           />
         )}
 
+        {/* ---- Keyless quick start: the zero-setup default path ---- */}
+        <KeylessSection mcpUrl={mcpUrl} />
+
         {/* ---- Request-key form (hidden once a key has been shown) ---- */}
         {verifyStatus !== "success" && (
           <Card>
-            <Card.Header>Get an API key</Card.Header>
+            <Card.Header>Get an API key (higher limits)</Card.Header>
             <Card.Body>
               {requestSent ? (
                 <Alert variant="success" className="mb-0">
@@ -436,6 +441,54 @@ const VerifyPanel: React.FC<{
   return null;
 };
 
+// ---- Keyless quick start (zero-setup default) ------------------------------
+
+const KeylessSection: React.FC<{ mcpUrl: string | null }> = ({ mcpUrl }) => {
+  const [active, setActive] = useState<string>(KEYLESS_SETUP_SNIPPETS[0].id);
+  const urlValue = mcpUrl ?? MCP_HTTP_URL;
+
+  const activeSnippet =
+    KEYLESS_SETUP_SNIPPETS.find((s) => s.id === active) ?? KEYLESS_SETUP_SNIPPETS[0];
+  const rendered = activeSnippet.template.replace(/\{URL\}/g, urlValue);
+
+  return (
+    <Card>
+      <Card.Header>
+        Start now — no key needed <Badge bg="success">keyless</Badge>
+      </Card.Header>
+      <Card.Body>
+        <p className="text-muted">
+          Add the endpoint to any MCP-capable agent and start asking about the
+          podcasts immediately. Keyless access has a daily per-IP quota; get a free
+          key below for higher limits.
+        </p>
+        <Nav
+          variant="tabs"
+          activeKey={active}
+          onSelect={(k) => setActive(k || KEYLESS_SETUP_SNIPPETS[0].id)}
+          className="mb-3"
+        >
+          {KEYLESS_SETUP_SNIPPETS.map((s) => (
+            <Nav.Item key={s.id}>
+              <Nav.Link eventKey={s.id}>{s.label}</Nav.Link>
+            </Nav.Item>
+          ))}
+        </Nav>
+        <div className="snippet-wrap">
+          <div className="snippet-copy">
+            <CopyButton
+              value={rendered}
+              label={`${activeSnippet.label} keyless config`}
+              logEvent="copy_keyless_snippet"
+            />
+          </div>
+          <pre className="snippet-block">{rendered}</pre>
+        </div>
+      </Card.Body>
+    </Card>
+  );
+};
+
 // ---- Setup snippets (tabbed) ---------------------------------------------
 
 const SetupSection: React.FC<{ apiKey: string | null; mcpUrl: string | null }> = ({
@@ -445,7 +498,7 @@ const SetupSection: React.FC<{ apiKey: string | null; mcpUrl: string | null }> =
   const [active, setActive] = useState<string>(SETUP_SNIPPETS[0].id);
   const keyValue = apiKey ?? API_KEY_PLACEHOLDER;
   // Prefer the backend-supplied endpoint; fall back to the constant (F3).
-  const urlValue = mcpUrl ?? MCP_SSE_URL;
+  const urlValue = mcpUrl ?? MCP_HTTP_URL;
 
   const activeSnippet =
     SETUP_SNIPPETS.find((s) => s.id === active) ?? SETUP_SNIPPETS[0];
@@ -455,10 +508,10 @@ const SetupSection: React.FC<{ apiKey: string | null; mcpUrl: string | null }> =
 
   return (
     <Card>
-      <Card.Header>Add the MCP server to your client</Card.Header>
+      <Card.Header>Connect with your API key (higher limits)</Card.Header>
       <Card.Body>
         <p className="text-muted">
-          One-time, copy-paste setup. Replace{" "}
+          One-time, copy-paste setup for keyed access. Replace{" "}
           <code>{API_KEY_PLACEHOLDER}</code> with your issued key if it is not already
           filled in. The endpoint is <code>{urlValue}</code>.
         </p>

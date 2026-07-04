@@ -7,12 +7,14 @@ invent new behaviour — every code path is exercised by the REST API too,
 so eval results apply identically.
 """
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from constants import (
     ContentSourceType,
     MCP_TOOL_SEARCH_PODCASTS,
+    RAG_REFUSAL_INSUFFICIENT_EVIDENCE,
     RAG_REJECT_REASON_GLOBAL_EMBED_BREAKER,
     RAG_REJECT_REASON_VALIDATION,
     RAG_TRACE_META_CITATION_COUNT,
@@ -29,13 +31,16 @@ from db.repositories.podcasts import PodcastsRepository
 from observability.llm.langfuse_client import flush_langfuse, get_langfuse_callback_handler
 from observability.llm.rag_tracing import create_rag_trace, schedule_rag_online_eval
 from rag.concurrency.guard import rag_slot
+from rag.generation.grounding import find_ungrounded_date_tags, is_evidence_sufficient
 from rag.generation.rag_chain import generate_answer, refusal_for_empty_context
-from rag.mcp.auth_context import get_current_key_record
+from rag.mcp.auth_context import get_current_key_record, is_anonymous_key_id
 from rag.mcp.validation import MCPToolInputError, clamp_top_k, validate_date_range, validate_podcast_slug, validate_query
 from rag.observability.reject_events import emit_reject
-from rag.quota.admission import QueryAdmissionError, enforce_query_admission
+from rag.quota.admission import QueryAdmissionError, enforce_anonymous_admission, enforce_query_admission
 from rag.quota.daily_quota import DailyQueryQuotaRepository
 from rag.retrieval.pipeline import RetrievalPipeline
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_iso_date(value: str | None, label: str) -> datetime | None:
@@ -153,8 +158,15 @@ async def rag_query(
                 trace_id=trace_id,
             )
 
+            evidence_floor = get_settings().rag.min_answer_evidence_score
             if not retrieval["context"]:
                 answer = refusal_for_empty_context(ds, de)
+                if trace:
+                    trace.update(output={RAG_TRACE_OUTPUT_ANSWER: answer}, metadata={RAG_TRACE_META_REFUSAL: True})
+            elif not is_evidence_sufficient(retrieval["citations"], evidence_floor):
+                # Evidence gate: retrieval returned only weakly-related chunks —
+                # generating would invite a parametric (hallucinated) answer.
+                answer = RAG_REFUSAL_INSUFFICIENT_EVIDENCE
                 if trace:
                     trace.update(output={RAG_TRACE_OUTPUT_ANSWER: answer}, metadata={RAG_TRACE_META_REFUSAL: True})
             else:
@@ -169,18 +181,32 @@ async def rag_query(
                     newest_source_date=retrieval["newest_source_date"],
                     callbacks=[callback] if callback else None,
                 )
+                # Date-tag grounding check: a date tag not covered by any cited
+                # chunk is the signature of a parametric answer dressed up as a
+                # grounded one — replace it with a refusal rather than serve it.
+                ungrounded_tags = find_ungrounded_date_tags(answer, retrieval["citations"])
+                if ungrounded_tags:
+                    logger.error(
+                        "rag_query: answer discarded — ungrounded date tags "
+                        f"{ungrounded_tags} not covered by any citation (query='{query[:120]}')"
+                    )
+                    answer = RAG_REFUSAL_INSUFFICIENT_EVIDENCE
                 if trace:
                     trace.update(
                         output={RAG_TRACE_OUTPUT_ANSWER: answer},
-                        metadata={RAG_TRACE_META_REFUSAL: False, RAG_TRACE_META_CITATION_COUNT: len(retrieval["citations"])},
+                        metadata={
+                            RAG_TRACE_META_REFUSAL: bool(ungrounded_tags),
+                            RAG_TRACE_META_CITATION_COUNT: len(retrieval["citations"]),
+                        },
                     )
-                schedule_rag_online_eval(
-                    session_id=session_id or trace_id or "",
-                    query=query,
-                    answer=answer,
-                    contexts=[retrieval["context"]],
-                    trace_id=trace_id,
-                )
+                if not ungrounded_tags:
+                    schedule_rag_online_eval(
+                        session_id=session_id or trace_id or "",
+                        query=query,
+                        answer=answer,
+                        contexts=[retrieval["context"]],
+                        trace_id=trace_id,
+                    )
 
             return {
                 "answer": answer,
@@ -326,10 +352,16 @@ async def search_podcasts(
         # MCPToolInputError, caught below so a validation reject is observed (OBS-2).
         podcast = validate_podcast_slug(podcast)
 
-        # Guards run only when a key is resolved (public SSE path). On stdio /
-        # internal (no key record) the guards are skipped, preserving behaviour.
+        # Guards run only when a principal is resolved (public HTTP path). On
+        # stdio / internal (no key record) the guards are skipped, preserving
+        # behaviour. Anonymous (keyless) principals get their own tighter
+        # admission stack; BOTH lanes then consume the shared embed breaker, so
+        # total owner-paid embedding exposure stays bounded regardless of lane.
         if key_id is not None:
-            await enforce_query_admission(key_id, quota_repo=await _get_quota_repo())
+            if is_anonymous_key_id(key_id):
+                await enforce_anonymous_admission(key_id, quota_repo=await _get_quota_repo())
+            else:
+                await enforce_query_admission(key_id, quota_repo=await _get_quota_repo())
             await check_global_embed_breaker()
 
         return await rag_search(

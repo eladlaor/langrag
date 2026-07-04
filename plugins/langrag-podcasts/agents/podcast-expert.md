@@ -47,9 +47,12 @@ podcast corpus, accessed through the langrag MCP server.
 
 ## Error handling
 
-- A 401/unauthorized error from the tools means the `LANGRAG_MCP_API_KEY`
-  environment variable is missing, wrong, or revoked. Tell the user to run the
-  plugin's `podcast-setup` skill (keys are self-service at
-  https://langrag.ai/podcasts).
-- A quota/rate-limit error means the free per-key daily budget is exhausted;
+- A 401/unauthorized error from the tools means a PRESENTED key is wrong or
+  revoked (no key at all falls back to keyless access, which needs no setup).
+  Tell the user to run the plugin's `podcast-setup` skill (keys are
+  self-service at https://langrag.ai/podcasts).
+- A keyless ("per IP") quota error means the free daily keyless budget is
+  exhausted; suggest getting a free key for the higher per-key budget, or
+  retrying after the UTC day rolls over.
+- A per-key quota/rate-limit error means the key's daily budget is exhausted;
   report it plainly and suggest retrying later.

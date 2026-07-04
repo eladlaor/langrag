@@ -39,6 +39,7 @@ from collections.abc import Iterable
 
 from constants import (
     RAG_DATE_GROUNDING_TOLERANCE_DAYS,
+    RAG_REFUSAL_INSUFFICIENT_EVIDENCE,
     RAG_REFUSAL_NO_CONTENT,
     RAG_REFUSAL_OUT_OF_RANGE,
 )
@@ -54,6 +55,7 @@ _CITATION_MARKER = re.compile(r"\[\s*\d+\s*\]")
 _REFUSAL_PATTERNS = (
     RAG_REFUSAL_OUT_OF_RANGE.lower(),
     RAG_REFUSAL_NO_CONTENT.lower(),
+    RAG_REFUSAL_INSUFFICIENT_EVIDENCE.lower(),
     "no content was found",
     "no in-range content",
     "no relevant content",

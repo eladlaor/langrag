@@ -394,6 +394,7 @@ ROUTE_RAG_SOURCES_NEWSLETTERS = "/rag/sources/newsletters"
 # derives its match set from them, with a coupling test in test_custom_metrics.py).
 RAG_REFUSAL_OUT_OF_RANGE = "No content was found within the requested date range. Broaden the window or rephrase the question."
 RAG_REFUSAL_NO_CONTENT = "No relevant content found in the indexed sources."
+RAG_REFUSAL_INSUFFICIENT_EVIDENCE = "The indexed sources do not contain enough relevant content to answer this question reliably."
 
 # RAG eval metric identifiers. The legacy three metric keys remain inline string
 # literals in gate.py for historical continuity; new metric keys are defined here.
@@ -909,6 +910,13 @@ RAG_SEARCH_SCORE_FIELD = "search_score"
 # still ranks #1. The vector cosine is the only absolute relevance signal, so we
 # preserve it on each fused chunk to apply a relevance floor on the hybrid path.
 RAG_HYBRID_VECTOR_COSINE_FIELD = "_vector_cosine_score"
+
+# Absolute per-citation relevance surfaced to callers and the answer evidence
+# gate. On the hybrid path this is the preserved vector cosine (see above); on
+# the vector-only path it equals the normalized vectorSearchScore. Unlike
+# `search_score` (page-normalized on the hybrid path), this value is comparable
+# against a fixed threshold across queries.
+RAG_EVIDENCE_SCORE_FIELD = "evidence_score"
 
 
 # ============================================================================
@@ -1614,6 +1622,28 @@ RAG_REJECT_REASON_VALIDATION = "validation_rejected"
 RAG_REJECT_REASON_CAPACITY = "capacity_exceeded"
 # Global embedding circuit-breaker trip reason (COST-4b reject visibility).
 RAG_REJECT_REASON_GLOBAL_EMBED_BREAKER = "global_embed_breaker_open"
+# Anonymous-lane global daily breaker trip reason (keyless BYOA lane).
+RAG_REJECT_REASON_ANON_GLOBAL_BREAKER = "anon_global_breaker_open"
+
+# --- Anonymous (keyless) MCP lane ---------------------------------------------
+# Synthetic key_id prefix for anonymous principals on the public podcast MCP.
+# The suffix is a SHA-256 prefix of the resolved client IP so quota rows, trace
+# tags, and logs never carry a raw IP. Prefix check = principal routing.
+RAG_ANON_KEY_ID_PREFIX = "anon:"
+# Owner label stamped on the synthetic anonymous key record.
+RAG_ANON_OWNER = "anonymous"
+# Hex chars of sha256(ip) kept in the anonymous key_id (collision-safe for quota
+# bucketing; not a security boundary).
+RAG_ANON_IP_HASH_LEN = 16
+# Sentinel key_id for the anonymous-lane global daily counter row in
+# COLLECTION_RAG_QUERY_QUOTA. Namespaced like RAG_GLOBAL_EMBED_QUOTA_KEY_ID so
+# it can never collide with a minted key_id.
+RAG_GLOBAL_ANON_QUOTA_KEY_ID = "__global_anon__"
+
+# --- Public MCP prompt / resource surface (BYOA answer-quality polish) --------
+# Registered names are the public contract; renaming breaks third-party agents.
+MCP_PROMPT_ASK_PODCASTS = "ask_podcasts"
+MCP_RESOURCE_ANSWER_GUIDE_URI = "langrag://podcasts/answer-guide"
 
 
 class AgentEventType(StrEnum):

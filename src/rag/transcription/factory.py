@@ -34,10 +34,9 @@ class TranscriptionProviderFactory:
             return OpenAIWhisperProvider()
 
         if name == TranscriptionProvider.LOCAL:
-            raise NotImplementedError(
-                "Local Whisper provider is not yet implemented. "
-                "Use 'openai' provider or contribute a local_whisper.py implementation."
-            )
+            from rag.transcription.local_transcripts import LocalTranscriptsProvider
+
+            return LocalTranscriptsProvider()
 
         raise ValueError(
             f"Unknown transcription provider '{name}'. "

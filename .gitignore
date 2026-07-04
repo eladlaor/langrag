@@ -295,5 +295,8 @@ data/podcasts/*.ogg
 data/podcasts/*.flac
 data/podcasts/*.webm
 
+# Local diarized transcripts (regenerable ingestion input, not source)
+data/podcasts/transcripts/
+
 # LangGraph checkpoints (local persistence)
 data/checkpoints/

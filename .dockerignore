@@ -59,7 +59,6 @@ test_*.py
 # Documentation (keep CLAUDE.md for runtime context)
 *.md
 !README.md
-!CLAUDE.md
 docs/
 knowledge/
 

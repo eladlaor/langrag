@@ -9,16 +9,14 @@ import hashlib
 import logging
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.client_ip import resolve_client_ip
 from config import get_settings
 from constants import (
-    HEADER_CF_CONNECTING_IP,
-    HEADER_X_FORWARDED_FOR,
     RAG_API_KEY_BEARER_SCHEME,
     RAG_API_KEY_HEADER,
 )
@@ -38,39 +36,6 @@ def _hashed_key_bucket(api_key: str) -> str:
     return f"key:{hashlib.sha256(api_key.encode('utf-8')).hexdigest()[:32]}"
 
 
-def _client_ip(request: Request) -> str:
-    """Resolve the real client IP for per-IP rate limiting behind proxies.
-
-    Behind nginx/Cloudflare, `get_remote_address` returns the PROXY's IP, so the
-    per-IP limit collapses to one global bucket; and a raw X-Forwarded-For is
-    client-spoofable. Resolution order (config-driven, see APISettings):
-
-      1. If Cloudflare is authoritative (cloudflare_authoritative=True), trust the
-         CF-Connecting-IP header. Cloudflare strips a client-supplied one, so this
-         is safe ONLY when Cloudflare is the sole ingress.
-      2. Else, if the immediate TCP peer is in the trusted-proxy allowlist
-         (trusted_proxy_ips), use the LEFTMOST X-Forwarded-For entry (the original
-         client the trusted proxy recorded).
-      3. Else (dev / no proxy / untrusted peer) use the raw peer address — an
-         untrusted or absent XFF is never honored, so it cannot be spoofed.
-    """
-    settings = get_settings().api
-    peer = get_remote_address(request)
-
-    if settings.cloudflare_authoritative:
-        cf_ip = request.headers.get(HEADER_CF_CONNECTING_IP)
-        if cf_ip and cf_ip.strip():
-            return cf_ip.strip()
-
-    if peer in set(settings.trusted_proxy_ips):
-        xff = request.headers.get(HEADER_X_FORWARDED_FOR, "")
-        leftmost = xff.split(",", 1)[0].strip() if xff else ""
-        if leftmost:
-            return leftmost
-
-    return peer
-
-
 def _rate_limit_key(request: Request) -> str:
     """Per-caller rate-limit key: prefer the RAG API key, fall back to client IP.
 
@@ -87,7 +52,7 @@ def _rate_limit_key(request: Request) -> str:
     if len(parts) == 2 and parts[0].lower() == RAG_API_KEY_BEARER_SCHEME.lower():
         return _hashed_key_bucket(parts[1].strip())
 
-    return f"ip:{_client_ip(request)}"
+    return f"ip:{resolve_client_ip(request)}"
 
 
 # Single application-wide limiter used by all decorators.

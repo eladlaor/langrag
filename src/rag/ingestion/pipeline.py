@@ -66,8 +66,12 @@ class IngestionPipeline:
         db = await get_database()
         chunks_repo = ChunksRepository(db)
 
+        # Idempotency + refresh both key on the source_id actually STORED on
+        # chunks, which sources may derive from the caller-facing identifier.
+        stored_source_id = source.canonical_source_id(source_id)
+
         # Idempotency check
-        if not force_refresh and await chunks_repo.source_exists(source_id):
+        if not force_refresh and await chunks_repo.source_exists(stored_source_id):
             logger.info(f"Source already ingested, skipping: source_id={source_id}")
             return {
                 "source_id": source_id,
@@ -78,7 +82,7 @@ class IngestionPipeline:
 
         # Delete existing chunks if force_refresh
         if force_refresh:
-            deleted = await chunks_repo.delete_source_chunks(source_id)
+            deleted = await chunks_repo.delete_source_chunks(stored_source_id)
             logger.info(f"Force refresh: deleted {deleted} existing chunks for source_id={source_id}")
 
         # Step 1: Extract and chunk

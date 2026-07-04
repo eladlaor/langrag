@@ -17,6 +17,8 @@ from graphs.state_keys import RAGConversationStateKeys as Keys
 from rag.evaluation.runtime.scorer import score_response
 from rag.evaluation.runtime.se_shadow import shadow_score_se
 from rag.retrieval.pipeline import RetrievalPipeline
+from constants import RAG_REFUSAL_INSUFFICIENT_EVIDENCE
+from rag.generation.grounding import find_ungrounded_date_tags, is_evidence_sufficient
 from rag.generation.rag_chain import generate_answer
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,13 @@ async def generate_node(state: RAGConversationState) -> dict[str, Any]:
             )
         return {Keys.ANSWER: answer}
 
+    # Evidence gate: refuse instead of generating when nothing retrieved is
+    # strong enough to ground an answer (see rag.generation.grounding).
+    citations = state.get(Keys.CITATIONS, [])
+    if not is_evidence_sufficient(citations, get_settings().rag.min_answer_evidence_score):
+        logger.warning(f"RAG generate: evidence below floor, refusing (query='{query[:80]}')")
+        return {Keys.ANSWER: RAG_REFUSAL_INSUFFICIENT_EVIDENCE}
+
     logger.info(f"RAG generate: query='{query[:80]}...', context_len={len(context)}")
 
     answer = await generate_answer(
@@ -126,6 +135,15 @@ async def generate_node(state: RAGConversationState) -> dict[str, Any]:
         freshness_warning=state.get(Keys.FRESHNESS_WARNING, False),
         newest_source_date=state.get(Keys.NEWEST_SOURCE_DATE),
     )
+
+    # Date-tag grounding check: discard answers carrying date tags no citation covers.
+    ungrounded_tags = find_ungrounded_date_tags(answer, citations)
+    if ungrounded_tags:
+        logger.error(
+            "RAG generate: answer discarded — ungrounded date tags "
+            f"{ungrounded_tags} not covered by any citation (query='{query[:80]}')"
+        )
+        return {Keys.ANSWER: RAG_REFUSAL_INSUFFICIENT_EVIDENCE}
 
     return {Keys.ANSWER: answer}
 

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from config import get_settings
-from constants import COLLECTION_MESSAGES, COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_HYBRID_VECTOR_COSINE_FIELD, RAG_SEARCH_SCORE_FIELD
+from constants import COLLECTION_MESSAGES, COLLECTION_RAG_CHUNKS, RAG_CITATION_SNIPPET_MAX_LENGTH, RAG_EVIDENCE_SCORE_FIELD, RAG_HYBRID_VECTOR_COSINE_FIELD, RAG_SEARCH_SCORE_FIELD, ContentSourceType
 from custom_types.field_keys import DbFieldKeys, RAGChunkKeys as Keys, RAGChunkMetadataKeys
 from db.connection import get_database
 from observability.llm.langfuse_client import langfuse_span
@@ -132,6 +132,15 @@ class RetrievalPipeline:
         # are evergreen and sparse, so an unfiltered podcast search must NOT hide
         # episodes older than the window. The community/newsletter surface keeps
         # recent-by-default.
+        # Podcast-only retrieval is evergreen regardless of which surface asked:
+        # a March episode must stay reachable in July. Without this, rag_query /
+        # REST chat scoped to podcasts silently hides every episode older than
+        # the window and then refuses.
+        podcast_only = bool(content_sources) and set(content_sources) == {str(ContentSourceType.PODCAST)}
+        if podcast_only and not unbounded_default_window:
+            logger.info("Podcast-only retrieval; treating default window as unbounded")
+            unbounded_default_window = True
+
         window_days = self._settings.default_retrieval_window_days
         if date_start is None and window_days > 0 and not unbounded_default_window:
             date_start = datetime.now(UTC) - timedelta(days=window_days)
@@ -246,6 +255,16 @@ class RetrievalPipeline:
         # only when the caller/agent asked for it.
         if effective_include_raw:
             await self._expand_with_parents(reranked)
+
+        # Stamp the absolute relevance score on each chunk BEFORE the internal
+        # hybrid cosine field is stripped below. On the hybrid path the fused
+        # `search_score` is page-normalized (top hit ~1.0 even when everything
+        # is irrelevant), so the preserved vector cosine is the only signal the
+        # answer evidence gate can compare against a fixed threshold.
+        for chunk in reranked:
+            chunk[RAG_EVIDENCE_SCORE_FIELD] = chunk.get(
+                RAG_HYBRID_VECTOR_COSINE_FIELD, chunk.get(RAG_SEARCH_SCORE_FIELD, 0.0)
+            )
 
         context, citations = self._format_context(reranked)
         freshness_warning, oldest, newest = self._evaluate_freshness(reranked)
@@ -416,6 +435,7 @@ class RetrievalPipeline:
                 "source_date_end": _to_iso(date_end),
                 "snippet": content[:RAG_CITATION_SNIPPET_MAX_LENGTH],
                 "search_score": chunk.get(RAG_SEARCH_SCORE_FIELD, 0.0),
+                RAG_EVIDENCE_SCORE_FIELD: chunk.get(RAG_EVIDENCE_SCORE_FIELD, 0.0),
                 "metadata": metadata,
                 RAGChunkMetadataKeys.PARENT_MESSAGES: parent_messages,
             }

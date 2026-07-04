@@ -504,6 +504,7 @@ class RAGSettings(BaseSettings):
     rerank_top_k: int = Field(default=5, description="Top-K chunks after reranking for context window")
     hybrid_enabled: bool = Field(default=True, description="When true, retrieve via MongoDB 8.1+ $rankFusion (server-side RRF over vector + lexical) instead of vector-only search. Requires the lexical Atlas Search index 'rag_chunks_lexical' to be built (created automatically on startup by ensure_indexes()).")
     min_similarity_score: float = Field(default=0.5, description="Minimum NORMALIZED Atlas vectorSearchScore (1+cosine)/2, in [0,1], NOT raw cosine. Compared directly against $meta:'vectorSearchScore' by both the vector-only and hybrid retrieval paths. With text-embedding-3-small, normalized question->passage scores cluster in the 0.5-0.75 range; values >=0.7 starve retrieval. Override per deployment.")
+    min_answer_evidence_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Answer evidence gate: minimum absolute evidence_score (normalized vector cosine, same scale as min_similarity_score) the BEST retrieved chunk must reach before an LLM answer is generated; below it every generation surface refuses. 0.0 disables. Must exceed min_similarity_score to have effect; tune per deployment.")
     max_conversation_history: int = Field(default=10, description="Maximum number of previous messages to include as conversation context")
 
     # MMR Diversity Settings (server default; overridable per user and per request)
@@ -522,7 +523,9 @@ class RAGSettings(BaseSettings):
     newsletter_chunk_overlap: int = Field(default=300, description="Character overlap between consecutive newsletter chunks")
 
     # Transcription
-    transcription_provider: str = Field(default="openai", description="Transcription provider: 'openai' (Whisper API) or 'local' (Docker sidecar)")
+    transcription_provider: str = Field(default="openai", description="Transcription provider: 'openai' (Whisper API) or 'local' (pre-computed speaker-diarized transcripts from data/podcasts/transcripts/, produced by the extract-podcasts pipeline; fail-fast if missing)")
+    local_transcripts_dir: str = Field(default="data/podcasts/transcripts", description="Directory holding pre-computed per-episode transcript folders (segments.json + turns.json) for the 'local' transcription provider")
+    local_transcripts_language: str = Field(default="he", description="Language code stamped on transcripts loaded by the 'local' transcription provider")
     whisper_model: str = Field(default="whisper-1", description="OpenAI Whisper model name")
     local_whisper_url: str = Field(default="http://whisper:9000", description="Local Whisper Docker service URL")
 
@@ -568,6 +571,16 @@ class RAGSettings(BaseSettings):
     query_embedding_cache_ttl_seconds: int = Field(default=900, ge=0, description="TTL (seconds) for the in-process query-embedding cache. A repeated normalized query within the TTL reuses the cached vector instead of re-embedding (cuts cost + replay abuse). 0 disables the cache. Env: RAG_QUERY_EMBEDDING_CACHE_TTL_SECONDS.")
     query_embedding_cache_max_size: int = Field(default=2048, ge=1, description="Max entries in the in-process query-embedding cache (bounded LRU). Env: RAG_QUERY_EMBEDDING_CACHE_MAX_SIZE.")
     mcp_max_concurrent: int = Field(default=6, ge=1, description="Concurrency cap for the MCP process (:8765), SEPARATE from and lower than the REST app's max_concurrent_requests. Right-sizes the 4GB box shared with mongot so the MCP surface cannot alone drive ~50 concurrent retrievals. Env: RAG_MCP_MAX_CONCURRENT.")
+
+    # Anonymous (keyless) lane on the public podcast MCP ("Bring Your Own Agent").
+    # A request with NO bearer gets a synthetic podcast_query-scoped principal
+    # keyed by a hash of the client IP; it gets full semantic search under its
+    # own tighter admission stack, bounded additionally by the shared global
+    # embed breaker above. Keys remain the higher-limit tier.
+    mcp_anonymous_enabled: bool = Field(default=True, description="Allow keyless (anonymous) access to the public podcast-MCP tools. When false, requests without a bearer are 401-rejected exactly as before (rollback lever). Env: RAG_MCP_ANONYMOUS_ENABLED.")
+    mcp_anon_max_queries_per_ip_per_day: int = Field(default=200, ge=1, description="Anonymous-lane per-IP daily quota on search_podcasts (keyed by hashed client IP + UTC day). Checked BEFORE the owner-paid embedding call. Env: RAG_MCP_ANON_MAX_QUERIES_PER_IP_PER_DAY.")
+    mcp_anon_query_rate_per_min: int = Field(default=10, ge=1, description="In-process per-IP sliding-window rate limit (requests/min) for the anonymous lane; deliberately lower than the keyed mcp_query_rate_per_min since an unauthenticated flood is the primary abuse vector. Env: RAG_MCP_ANON_QUERY_RATE_PER_MIN.")
+    mcp_anon_global_daily_max: int = Field(default=5000, ge=1, description="Global daily cap on anonymous-lane search calls across ALL IPs (anonymous breaker), consumed IN ADDITION to mcp_global_embed_daily_max. Past it, keyless search returns a clean tool error suggesting a free API key. Env: RAG_MCP_ANON_GLOBAL_DAILY_MAX.")
     mcp_max_sse_connections: int = Field(default=100, ge=1, description="Max simultaneous SSE connections accepted by the MCP transport (:8765). Enforcement point is the SSE auth middleware (owned by the auth layer); this is the single source of truth for the cap. Env: RAG_MCP_MAX_SSE_CONNECTIONS.")
 
     model_config = SettingsConfigDict(env_prefix="RAG_")

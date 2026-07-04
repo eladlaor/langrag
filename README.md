@@ -37,6 +37,7 @@
   - [n8n Israel](#n8n-israel)
   - [AI Transformation Guild](#ai-transformation-guild)
   - [AIL - AI Leaders](#ail---ai-leaders)
+- [Chat with the LangTalks Podcasts](#chat-with-the-langtalks-podcasts)
 - [How It Works](#how-it-works)
   - [Newsletter Generation Pipeline](#newsletter-generation-pipeline)
   - [What Gives This Solution an Edge](#what-gives-this-solution-an-edge)
@@ -149,6 +150,40 @@ Founded by [Gilad Shoham](https://www.linkedin.com/in/shohamgilad/), [Leon Melam
 [Apply to join](https://docs.google.com/forms/d/e/1FAIpQLScU8vIRAG_QlMqX3zlbhVc8etyVpeZcjb7xbe__sA2ajKp2sQ/viewform)
 
 <br clear="left">
+
+---
+
+## Chat with the LangTalks Podcasts
+
+You don't need this repo (or any setup) to chat with the LangTalks podcast corpus. The public MCP server at `https://mcp.langrag.ai/mcp` serves date-tagged, cited transcript search to **any MCP-capable agent** — your agent's LLM composes the answers ("Bring Your Own Agent"). Keyless access works out of the box with a daily per-IP quota; a free API key from [langrag.ai/podcasts](https://langrag.ai/podcasts) raises the limit.
+
+**Claude Code (one line):**
+
+```bash
+claude mcp add --transport http podcasts https://mcp.langrag.ai/mcp
+```
+
+**Claude Code plugin** (adds a podcast-expert subagent + setup skill):
+
+```
+/plugin marketplace add eladlaor/langrag
+/plugin install langrag-podcasts
+```
+
+**Any other MCP client:**
+
+```json
+{
+  "mcpServers": {
+    "podcasts": {
+      "type": "http",
+      "url": "https://mcp.langrag.ai/mcp"
+    }
+  }
+}
+```
+
+Then ask your agent things like *"What did the guests say about LangGraph state management?"* — it will call `list_podcasts` / `search_podcasts` and answer with date-tagged citations.
 
 ---
 

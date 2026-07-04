@@ -20,10 +20,12 @@ export const PODCAST_PAGE_PATH = "/podcasts";
 // name is the behavioral contract with the backend email template.
 export const PODCAST_VERIFY_TOKEN_PARAM = "token";
 
-// Hosted MCP endpoint (SSE transport). One endpoint for ALL podcasts — never a
-// per-podcast host. The `/sse` suffix is the transport path clients connect to.
+// Hosted MCP endpoint (Streamable HTTP transport). One endpoint for ALL
+// podcasts — never a per-podcast host. The `/mcp` suffix is the transport path
+// clients connect to. No API key is required (keyless callers get a per-IP
+// daily quota); a free key raises the limit.
 export const MCP_BASE_URL = "https://mcp.langrag.ai";
-export const MCP_SSE_URL = `${MCP_BASE_URL}/sse`;
+export const MCP_HTTP_URL = `${MCP_BASE_URL}/mcp`;
 
 // Placeholder token users replace with their issued key inside setup snippets.
 export const API_KEY_PLACEHOLDER = "YOUR_KEY";
@@ -49,17 +51,46 @@ export const MCP_TOOLS = [
 ] as const;
 
 /**
- * Client setup snippets. `{KEY}` is substituted with the issued key when one is
- * available (else API_KEY_PLACEHOLDER); `{URL}` is substituted with the endpoint
- * the backend returned on verify (result.mcp_url), falling back to MCP_SSE_URL
- * when absent — so staging/prod can differ without a frontend rebuild (F3).
+ * Keyless setup snippets — the zero-setup path shown FIRST. No key, no email:
+ * add the URL and start searching (per-IP daily quota applies). `{URL}` is
+ * substituted with the endpoint the backend advertises, falling back to
+ * MCP_HTTP_URL.
+ */
+export const KEYLESS_SETUP_SNIPPETS = [
+  {
+    id: "claude-code-keyless",
+    label: "Claude Code",
+    language: "bash",
+    template: `claude mcp add --transport http ${MCP_SERVER_NAME} {URL}`,
+  },
+  {
+    id: "generic-http-keyless",
+    label: "Cursor / generic MCP",
+    language: "json",
+    template: `{
+  "mcpServers": {
+    "${MCP_SERVER_NAME}": {
+      "type": "http",
+      "url": "{URL}"
+    }
+  }
+}`,
+  },
+] as const;
+
+/**
+ * Keyed setup snippets (higher limits). `{KEY}` is substituted with the issued
+ * key when one is available (else API_KEY_PLACEHOLDER); `{URL}` is substituted
+ * with the endpoint the backend returned on verify (result.mcp_url), falling
+ * back to MCP_HTTP_URL when absent — so staging/prod can differ without a
+ * frontend rebuild (F3).
  */
 export const SETUP_SNIPPETS = [
   {
     id: "claude-code",
     label: "Claude Code",
     language: "bash",
-    template: `claude mcp add --transport sse ${MCP_SERVER_NAME} {URL} --header "Authorization: Bearer {KEY}"`,
+    template: `claude mcp add --transport http ${MCP_SERVER_NAME} {URL} --header "Authorization: Bearer {KEY}"`,
   },
   {
     id: "cursor",
@@ -75,13 +106,13 @@ export const SETUP_SNIPPETS = [
 }`,
   },
   {
-    id: "generic-sse",
-    label: "Generic MCP (SSE)",
+    id: "generic-http",
+    label: "Generic MCP (HTTP)",
     language: "json",
     template: `{
   "mcpServers": {
     "${MCP_SERVER_NAME}": {
-      "type": "sse",
+      "type": "http",
       "url": "{URL}",
       "headers": { "Authorization": "Bearer {KEY}" }
     }
@@ -98,8 +129,12 @@ export const PODCAST_FAQ = [
     a: "No. It is search-only: the MCP returns dated, cited transcript chunks. Your own agent's LLM reads those chunks and writes the answer. You pay only your own model's tokens — never our generation cost.",
   },
   {
+    q: "Do I need an API key?",
+    a: "No. Keyless access works out of the box with a per-IP daily quota. Getting a free key (email verification below) raises your daily limit and gives you a stable per-key budget that doesn't depend on your network.",
+  },
+  {
     q: "Are there rate limits or quotas?",
-    a: "Yes. Requests are rate-limited and each key has a usage quota. Heavy or abusive traffic will be throttled.",
+    a: "Yes. Keyless callers get a per-IP daily quota and a per-minute rate limit; keyed callers get a higher per-key quota. Heavy or abusive traffic will be throttled.",
   },
   {
     q: "Can my key be revoked?",

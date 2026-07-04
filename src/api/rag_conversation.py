@@ -44,6 +44,7 @@ from constants import (
     RAGTraceName,
     RAGTraceTag,
     TAG_STREAMING,
+    RAG_REFUSAL_INSUFFICIENT_EVIDENCE,
     RAG_TRACE_META_CITATION_COUNT,
     RAG_TRACE_META_REFUSAL,
     RAG_TRACE_OUTPUT_ANSWER,
@@ -67,6 +68,7 @@ from rag.auth.dependencies import require_api_key
 from rag.auth.rate_limit import limiter
 from rag.concurrency.guard import RagCapacityExceeded, capacity, current_in_flight, rag_slot, release, try_acquire
 from rag.conversation.manager import ConversationManager
+from rag.generation.grounding import find_ungrounded_date_tags, is_evidence_sufficient
 from rag.generation.rag_chain import generate_answer, generate_answer_stream, refusal_for_empty_context
 from rag.retrieval.pipeline import RetrievalPipeline
 from rag.sources.podcast_source import PODCAST_DATA_DIR, SUPPORTED_AUDIO_EXTENSIONS, PodcastSource
@@ -103,6 +105,7 @@ def _citation_to_response(c: dict) -> RAGCitationResponse:
         source_date_end=c.get("source_date_end") or "",
         snippet=c.get("snippet", ""),
         search_score=c.get("search_score", 0.0),
+        evidence_score=c.get("evidence_score", 0.0),
         metadata=c.get("metadata", {}),
     )
 
@@ -200,6 +203,15 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
                 full_answer = refusal
                 citations = []
                 yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': refusal})}\n\n"
+            elif not is_evidence_sufficient(citations, get_settings().rag.min_answer_evidence_score):
+                # Evidence gate: only weakly-related chunks came back — streaming a
+                # generated answer here risks parametric hallucination, and streamed
+                # tokens cannot be retracted. Refuse up front instead.
+                refused = True
+                refusal = RAG_REFUSAL_INSUFFICIENT_EVIDENCE
+                full_answer = refusal
+                citations = []
+                yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': refusal})}\n\n"
             else:
                 # Handler built by the caller (SRP): threads the request's trace
                 # onto the gpt-4.1 generation so token usage -> Langfuse cost.
@@ -217,6 +229,16 @@ async def rag_chat_stream(request: Request, body: RAGChatRequest, key_record: di
                 ):
                     full_answer += token
                     yield f"event: {RAGEventType.TOKEN}\ndata: {json.dumps({'token': token})}\n\n"
+
+                # Streamed tokens cannot be retracted, so this is observability-only:
+                # surface fabricated date tags loudly for the eval/alerting loop. The
+                # pre-generation evidence gate above is the enforced protection.
+                ungrounded_tags = find_ungrounded_date_tags(full_answer, citations)
+                if ungrounded_tags:
+                    logger.error(
+                        "rag_chat_stream: streamed answer contains ungrounded date tags "
+                        f"{ungrounded_tags} not covered by any citation (query='{body.query[:120]}')"
+                    )
 
             for citation in citations:
                 yield f"event: {RAGEventType.CITATION}\ndata: {json.dumps(citation, default=str)}\n\n"
@@ -516,6 +538,27 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
                     newest_source_date=None,
                 )
 
+            # Evidence gate: retrieval returned something, but nothing strong
+            # enough to ground an answer — refuse rather than let the LLM fill
+            # the gap from parametric knowledge.
+            if not is_evidence_sufficient(citations, get_settings().rag.min_answer_evidence_score):
+                answer = RAG_REFUSAL_INSUFFICIENT_EVIDENCE
+                if trace:
+                    trace.update(output={RAG_TRACE_OUTPUT_ANSWER: answer}, metadata={RAG_TRACE_META_REFUSAL: True})
+                await manager.add_assistant_message(
+                    session_id=session_id,
+                    content=answer,
+                    citations=[],
+                )
+                return RAGChatResponse(
+                    session_id=session_id,
+                    answer=answer,
+                    citations=[],
+                    freshness_warning=False,
+                    oldest_source_date=None,
+                    newest_source_date=None,
+                )
+
             # Handler built by the caller (SRP): threads the request's trace onto
             # the gpt-4.1 generation so token usage -> Langfuse cost.
             callback = get_langfuse_callback_handler(trace_id=trace_id, session_id=session_id, user_id=owner)
@@ -530,6 +573,17 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
                 callbacks=[callback] if callback else None,
             )
 
+            # Date-tag grounding check: a date tag not covered by any cited chunk
+            # means the model answered from its own knowledge — discard the answer.
+            ungrounded_tags = find_ungrounded_date_tags(answer, citations)
+            if ungrounded_tags:
+                logger.error(
+                    "rag_chat: answer discarded — ungrounded date tags "
+                    f"{ungrounded_tags} not covered by any citation (query='{body.query[:120]}')"
+                )
+                answer = RAG_REFUSAL_INSUFFICIENT_EVIDENCE
+                citations = []
+
             await manager.add_assistant_message(
                 session_id=session_id,
                 content=answer,
@@ -539,7 +593,7 @@ async def rag_chat(request: Request, body: RAGChatRequest, key_record: dict = De
             if trace:
                 trace.update(
                     output={RAG_TRACE_OUTPUT_ANSWER: answer},
-                    metadata={RAG_TRACE_META_REFUSAL: False, RAG_TRACE_META_CITATION_COUNT: len(citations)},
+                    metadata={RAG_TRACE_META_REFUSAL: bool(ungrounded_tags), RAG_TRACE_META_CITATION_COUNT: len(citations)},
                 )
             schedule_rag_online_eval(
                 session_id=session_id,

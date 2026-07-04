@@ -114,8 +114,8 @@ async def get_client() -> AsyncMongoClient:
     transaction across collections, e.g.::
 
         client = await get_client()
-        async with await client.start_session() as session:
-            async with session.start_transaction():
+        async with client.start_session() as session:
+            async with await session.start_transaction():
                 ...
 
     Raises:

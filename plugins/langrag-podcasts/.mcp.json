@@ -4,7 +4,7 @@
       "type": "http",
       "url": "https://mcp.langrag.ai/mcp",
       "headers": {
-        "Authorization": "Bearer ${LANGRAG_MCP_API_KEY}"
+        "Authorization": "Bearer ${LANGRAG_MCP_API_KEY:-}"
       }
     }
   }

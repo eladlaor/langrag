@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-07-04
+
+### Added
+- **Keyless ("Bring Your Own Agent") access to the public podcast MCP.** Any MCP-capable agent can now add `https://mcp.langrag.ai/mcp` and search the podcasts immediately — no API key or email verification. Bearer-less requests get a synthetic `podcast_query`-scoped principal keyed by a hashed client IP, with full semantic (hybrid) search under a tighter admission stack: per-IP daily quota (`RAG_MCP_ANON_MAX_QUERIES_PER_IP_PER_DAY`, default 200), per-IP rate limit (`RAG_MCP_ANON_QUERY_RATE_PER_MIN`, default 10/min), and an anonymous global daily breaker (`RAG_MCP_ANON_GLOBAL_DAILY_MAX`, default 5000) consumed in addition to the shared global embed breaker. A present-but-invalid bearer still 401s (no silent downgrade); `RAG_MCP_ANONYMOUS_ENABLED=false` restores key-only access. Existing keys remain the higher-limit tier (500/day).
+- **MCP guidance surface for third-party agents.** The public server now registers an `ask_podcasts` prompt and a `langrag://podcasts/answer-guide` resource teaching any agent the grounded answering flow: list → search → compose only from chunks → `(Episode Title, YYYY-MM-DD)` citations → refuse on empty citations. Quota numbers in the guide are interpolated from live settings.
+- **Shared trusted-proxy client-IP resolver** (`src/api/client_ip.py`): CF-Connecting-IP under `API_CLOUDFLARE_AUTHORITATIVE`, leftmost X-Forwarded-For only from allowlisted peers, raw peer otherwise; now used by both the REST rate limiter and the MCP anonymous lane.
+
+### Changed
+- **langrag.ai/podcasts portal rewritten for keyless-first onboarding** and migrated off the dead SSE snippets: setup snippets now use Streamable HTTP (`https://mcp.langrag.ai/mcp`, `--transport http`), with the keyless path shown first and keyed setup repositioned as the higher-limits tier.
+- **`langrag-podcasts` Claude Code plugin works keyless out of the box**: an unset `LANGRAG_MCP_API_KEY` now falls back to anonymous access instead of failing auth; the setup skill and podcast-expert agent describe the key as an optional upgrade.
+- **Local pre-computed transcript provider for podcast ingestion.** `RAG_TRANSCRIPTION_PROVIDER=local` reads per-episode `segments.json` + diarization `turns.json` from `data/podcasts/transcripts/` (produced offline by faster-whisper large-v3 + pyannote) instead of calling the OpenAI Whisper API: better Hebrew quality, speaker labels on every segment, zero API cost. Fail-fast when an episode's transcript is missing.
+- **Answer grounding guards against parametric hallucination.** Two new defenses on every RAG generation surface (MCP `rag_query`, REST chat streaming + non-streaming, LangGraph conversation node): an opt-in pre-generation evidence gate that refuses when the best retrieved chunk's absolute relevance (`evidence_score`, the normalized vector cosine now surfaced on every citation) is below the configurable `rag.min_answer_evidence_score` floor (default 0.0 = disabled; set `RAG_MIN_ANSWER_EVIDENCE_SCORE` to enable), and an always-on post-generation date-tag grounding check that discards any answer carrying a `[date: ...]` tag not covered by a cited chunk's date range. Closes the verified failure where a question about a non-ingested episode produced a fully fabricated episode with fake date tags and mismatched citations. The fabricated-episode query ships as a `must_refuse` regression case in the podcast eval golden set.
+- **Hardened RAG system prompt.** The generator is now explicitly forbidden from inventing episode titles, numbers, guests, or dates absent from the retrieved context, and must copy every date tag verbatim from the context.
+- **RAG corpus migrated to `text-embedding-3-large` @ 3072 dims.** The rag_chunks corpus and both vector indexes were rebuilt at the code-default embedding (previously the corpus was 3-small@1536 while code defaults had moved, breaking every query after a redeploy). All 10 recent podcast episodes (61-70) re-ingested from local diarized transcripts and the full newsletter history ingested across all five communities (755 newsletter + 240 podcast chunks).
+
+### Fixed
+- **Startup fail-fast for embedding-dimension mismatch actually fails now.** The mismatch error is a dedicated `EmbeddingDimensionMismatchError` re-raised past the mongot-unavailability tolerance that previously downgraded it to a warning and let the app boot against an unqueryable index.
+- **Every podcast ingest scan duplicated the entire podcast corpus.** Podcast chunks store a uuid5-derived `source_id` while the scan passed the file path, so the idempotency check never matched; sources now expose `canonical_source_id()` and the pipeline dedups/refreshes on the stored id (regression-checked: a second scan skips 10/10).
+- **Podcast-only retrieval silently hid the whole corpus behind the 30-day soft window.** `rag_query` and REST chat scoped to podcasts now treat the default window as unbounded (matching `search_podcasts`), so a March episode stays reachable in July.
+- **Deployment defaults starved podcast retrieval.** The compose relevance-floor default dropped from 0.7 to 0.6 (strong question-to-passage matches on the current corpus measure 0.67-0.69 normalized; off-topic noise ~0.55).
+- **REST RAG chat returned HTTP 500 on every request** (`'AsyncClientSession' can't be used in 'await' expression`): pymongo 4.16 made `start_session()` synchronous; the transaction wrappers in the conversation repository (and the docstring example in `db.connection`) awaited it, while `start_transaction()` became a coroutine and was NOT awaited; both directions fixed.
+
 ## [1.22.0] - 2026-07-04
 
 ### Added
@@ -429,7 +451,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - Initial public release.
 
-[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.22.0...HEAD
+[Unreleased]: https://github.com/eladlaor/langrag/compare/v1.23.0...HEAD
+[1.23.0]: https://github.com/eladlaor/langrag/compare/v1.22.0...v1.23.0
 [1.22.0]: https://github.com/eladlaor/langrag/compare/v1.21.0...v1.22.0
 [1.20.1]: https://github.com/eladlaor/langrag/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/eladlaor/langrag/compare/v1.19.0...v1.20.0
