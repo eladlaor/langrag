@@ -55,16 +55,17 @@ interface StageData {
   color: string;
 }
 
-// 10 stages — no final Translate (it moves to bottom row as shared last step)
+// 9 stages — no final Translate (it moves to bottom row as shared last step).
+// Media content is parsed to text before Preprocess, so it participates in
+// ranking; the post-rank "Associate Images" join is therefore unnecessary.
 const PIPELINE_STAGES: StageData[] = [
   {label: 'Extract\nMessages', color: COLORS.TEAL},
-  {label: 'SLM\nFilter', color: COLORS.TEAL},
-  {label: 'Extract\nImages', color: COLORS.TEAL},
+  {label: 'SLM\nLabeling', color: COLORS.TEAL},
+  {label: 'Parse Media\nContent', color: COLORS.PURPLE},
   {label: 'Preprocess\nData', color: COLORS.TEAL},
   {label: 'Normalize\nto English', color: COLORS.PURPLE},
   {label: 'Separate\nDiscussions', color: COLORS.PURPLE},
   {label: 'Rank\nDiscussions', color: COLORS.PURPLE},
-  {label: 'Associate\nImages', color: COLORS.PURPLE},
   {label: 'Generate\nSummary', color: COLORS.PURPLE},
   {label: 'Link\nEnrichment', color: COLORS.PURPLE},
 ];
@@ -364,7 +365,7 @@ export default makeScene2D(function* (view) {
   }
 
   // Animate stages in groups with edges
-  // Group 1: Extract, SLM Filter, Extract Images
+  // Group 1: Extract Messages, SLM Labeling, Parse Media Content
   yield* all(
     ...stageRefs.slice(0, 3).map((ref) =>
       all(
@@ -380,9 +381,9 @@ export default makeScene2D(function* (view) {
   );
   yield* waitFor(0.3);
 
-  // Group 2: Preprocess → Associate Images
+  // Group 2: Preprocess → Rank Discussions
   yield* all(
-    ...stageRefs.slice(3, 8).map((ref, i) =>
+    ...stageRefs.slice(3, 7).map((ref, i) =>
       delay(
         i * 0.06,
         all(
@@ -393,14 +394,14 @@ export default makeScene2D(function* (view) {
     ),
   );
   yield* all(
-    ...stageEdgeRefs.slice(2, 7).map((ref, i) =>
+    ...stageEdgeRefs.slice(2, 6).map((ref, i) =>
       delay(i * 0.06, ref().end(1, 0.2, easeInOutCubic)),
     ),
   );
 
   // Group 3: Generate Summary, Link Enrichment
   yield* all(
-    ...stageRefs.slice(8, 10).map((ref, i) =>
+    ...stageRefs.slice(7, 9).map((ref, i) =>
       delay(
         i * 0.06,
         all(
@@ -411,14 +412,14 @@ export default makeScene2D(function* (view) {
     ),
   );
   yield* all(
-    ...stageEdgeRefs.slice(7, 9).map((ref, i) =>
+    ...stageEdgeRefs.slice(6, 8).map((ref, i) =>
       delay(i * 0.06, ref().end(1, 0.2, easeInOutCubic)),
     ),
   );
 
-  // ── Cyclic arrow on Link Enrichment (index 9) ──
+  // ── Cyclic arrow on Link Enrichment (last stage) ──
   const linkLoopRef = createRef<Line>();
-  const linkX = stageX(9);
+  const linkX = stageX(PIPELINE_STAGES.length - 1);
   const loopRadius = 36;
 
   view.add(

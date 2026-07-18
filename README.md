@@ -194,7 +194,7 @@ Then ask your agent things like *"What did the guests say about LangGraph state 
 The diagram below covers the **newsletter generation** flow only — message extraction through final, multi-channel delivery. The separate RAG query layer (REST API + MCP server over past newsletters and podcast transcripts) is described under [How](#how).
 
 <div align="center">
-  <img src="docs/figures/pipeline_overview/pipeline_overview.png" alt="LangRAG newsletter generation pipeline - full diagram" width="800">
+  <img src="docs/figures/pipeline_overview/pipeline_flow.png" alt="LangRAG newsletter generation pipeline - full diagram" width="800">
 </div>
 
 ---
