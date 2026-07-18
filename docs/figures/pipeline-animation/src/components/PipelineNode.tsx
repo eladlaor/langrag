@@ -14,4 +14,11 @@ export const COLORS = {
   GLOW_AMBER: '#f59e0b80',
   CONTAINER_BG: '#0f172a',
   CONTAINER_BORDER: '#1e293b',
+  // Two-color scheme, single axis: does a human touch this node?
+  // USER = the request in, the review step, the delivered newsletter out.
+  // INTERNAL = everything the system does on its own.
+  USER: '#f59e0b',
+  INTERNAL: '#8b5cf6',
+  GLOW_USER: '#f59e0b80',
+  GLOW_INTERNAL: '#8b5cf680',
 } as const;

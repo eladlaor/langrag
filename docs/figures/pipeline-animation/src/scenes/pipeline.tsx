@@ -59,15 +59,15 @@ interface StageData {
 // Media content is parsed to text before Preprocess, so it participates in
 // ranking; the post-rank "Associate Images" join is therefore unnecessary.
 const PIPELINE_STAGES: StageData[] = [
-  {label: 'Extract\nMessages', color: COLORS.TEAL},
-  {label: 'SLM\nLabeling', color: COLORS.TEAL},
-  {label: 'Parse Media\nContent', color: COLORS.PURPLE},
-  {label: 'Preprocess\nData', color: COLORS.TEAL},
-  {label: 'Normalize\nto English', color: COLORS.PURPLE},
-  {label: 'Separate\nDiscussions', color: COLORS.PURPLE},
-  {label: 'Rank\nDiscussions', color: COLORS.PURPLE},
-  {label: 'Generate\nSummary', color: COLORS.PURPLE},
-  {label: 'Link\nEnrichment', color: COLORS.PURPLE},
+  {label: 'Extract\nMessages', color: COLORS.INTERNAL},
+  {label: 'SLM\nLabeling', color: COLORS.INTERNAL},
+  {label: 'Parse Media\nContent', color: COLORS.INTERNAL},
+  {label: 'Preprocess\nData', color: COLORS.INTERNAL},
+  {label: 'Normalize\nto English', color: COLORS.INTERNAL},
+  {label: 'Separate\nDiscussions', color: COLORS.INTERNAL},
+  {label: 'Rank\nDiscussions', color: COLORS.INTERNAL},
+  {label: 'Generate\nSummary', color: COLORS.INTERNAL},
+  {label: 'Link\nEnrichment', color: COLORS.INTERNAL},
 ];
 
 interface BottomNode {
@@ -78,15 +78,15 @@ interface BottomNode {
 
 // Bottom row: 9 nodes — consolidation pipeline
 const BOTTOM_NODES: BottomNode[] = [
-  {label: 'Aggregate\nCross-Chat', color: COLORS.BLUE},
-  {label: 'Merge Similar\nDiscussions', color: COLORS.BLUE},
-  {label: 'ReRank', color: COLORS.BLUE},
-  {label: 'Apply\nMMR', color: COLORS.BLUE},
-  {label: 'Generate\nConsolidated', color: COLORS.BLUE},
-  {label: 'Human in\nthe Loop', color: COLORS.BLUE, isCircle: true},
-  {label: 'Translate', color: COLORS.PURPLE},
-  {label: 'Structure\nFormats', color: COLORS.PURPLE},
-  {label: 'Send to\nEmail / Hook', color: COLORS.AMBER},
+  {label: 'Aggregate\nCross-Chat', color: COLORS.INTERNAL},
+  {label: 'Merge Similar\nDiscussions', color: COLORS.INTERNAL},
+  {label: 'ReRank', color: COLORS.INTERNAL},
+  {label: 'Apply\nMMR', color: COLORS.INTERNAL},
+  {label: 'Generate\nConsolidated', color: COLORS.INTERNAL},
+  {label: 'Human in\nthe Loop', color: COLORS.USER, isCircle: true},
+  {label: 'Translate', color: COLORS.INTERNAL},
+  {label: 'Structure\nFormats', color: COLORS.INTERNAL},
+  {label: 'Send to\nEmail / Hook', color: COLORS.USER},
 ];
 
 // ──────────────────────────────────────────────────
@@ -156,12 +156,12 @@ export default makeScene2D(function* (view) {
         width={NODE_W}
         height={NODE_H}
         radius={8}
-        fill={COLORS.AMBER + '30'}
-        stroke={COLORS.AMBER}
+        fill={COLORS.USER + '30'}
+        stroke={COLORS.USER}
         lineWidth={1.5}
         opacity={0}
         scale={0.6}
-        shadowColor={glowOf(COLORS.AMBER)}
+        shadowColor={glowOf(COLORS.USER)}
         shadowBlur={12}
       >
         <Txt
@@ -182,12 +182,12 @@ export default makeScene2D(function* (view) {
         width={220}
         height={NODE_H}
         radius={8}
-        fill={COLORS.BLUE + '30'}
-        stroke={COLORS.BLUE}
+        fill={COLORS.INTERNAL + '30'}
+        stroke={COLORS.INTERNAL}
         lineWidth={1.5}
         opacity={0}
         scale={0.6}
-        shadowColor={glowOf(COLORS.BLUE)}
+        shadowColor={glowOf(COLORS.INTERNAL)}
         shadowBlur={12}
       >
         <Txt
@@ -252,7 +252,7 @@ export default makeScene2D(function* (view) {
           new Vector2(orchX + (fi - 1) * 30, midY),
           new Vector2(fanTargetX, targetY),
         ]}
-        stroke={COLORS.BLUE + '80'}
+        stroke={COLORS.EDGE + '80'}
         lineWidth={2.5}
         end={0}
         endArrow
@@ -431,7 +431,7 @@ export default makeScene2D(function* (view) {
         new Vector2(linkX - 28, CONTAINER_Y - STAGE_H / 2 - loopRadius),
         new Vector2(linkX - 28, CONTAINER_Y - STAGE_H / 2),
       ]}
-      stroke={COLORS.PURPLE + '90'}
+      stroke={COLORS.INTERNAL + '90'}
       lineWidth={2}
       end={0}
       endArrow
@@ -602,7 +602,7 @@ export default makeScene2D(function* (view) {
         new Vector2(hitlX - 24, ROW_BOT - CIRCLE_R - hitlLoopR),
         new Vector2(hitlX - 24, ROW_BOT - CIRCLE_R),
       ]}
-      stroke={COLORS.BLUE + '90'}
+      stroke={COLORS.USER + '90'}
       lineWidth={2}
       end={0}
       endArrow
@@ -624,7 +624,7 @@ export default makeScene2D(function* (view) {
         new Vector2(botX(0), ROW_BOT - 40),
         new Vector2(botX(0), ROW_BOT - BOT_NODE_H / 2),
       ]}
-      stroke={COLORS.BLUE + '60'}
+      stroke={COLORS.EDGE + '60'}
       lineWidth={1.5}
       end={0}
       endArrow

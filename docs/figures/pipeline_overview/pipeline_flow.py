@@ -26,10 +26,12 @@ WHITE = (248, 250, 252)
 TITLE = (129, 130, 139)
 SECTION = (129, 130, 139)
 
-TEAL_FILL, TEAL_BORDER = (12, 62, 84), (9, 122, 148)          # infra / ingestion
-PURPLE_FILL, PURPLE_BORDER = (46, 40, 93), (92, 66, 169)      # LLM-powered
-BLUE_FILL, BLUE_BORDER = (24, 43, 88), (60, 90, 170)          # orchestration
-ORANGE_FILL, ORANGE_BORDER = (77, 52, 22), (196, 140, 55)     # entry / output
+# Two colors only, on a single axis: does a human touch this node?
+#   USER  — the pipeline's human touchpoints: the request in, the review
+#           step, the delivered newsletter out.
+#   INTERNAL — everything the system does on its own.
+USER_FILL, USER_BORDER = (77, 52, 22), (196, 140, 55)
+INTERNAL_FILL, INTERNAL_BORDER = (46, 40, 93), (92, 66, 169)
 ARROW = (60, 90, 150)
 
 # ── Geometry (sampled) ──────────────────────────────────────────────────────
@@ -111,8 +113,8 @@ def main():
     d.text((W // 2, 68), "LangRAG", font=F_TITLE, fill=TITLE, anchor="mm")
 
     # ── Row 1: API -> Orchestrator ──────────────────────────────────────────
-    node(d, 309, ROW1_CY, ["API", "Request"], ORANGE_FILL, ORANGE_BORDER)
-    node(d, 560, ROW1_CY, ["Orchestrator"], BLUE_FILL, BLUE_BORDER)
+    node(d, 309, ROW1_CY, ["API", "Request"], USER_FILL, USER_BORDER)
+    node(d, 560, ROW1_CY, ["Orchestrator"], INTERNAL_FILL, INTERNAL_BORDER)
     arrow(d, 309 + NODE_W // 2, ROW1_CY, 560 - NODE_W // 2, ROW1_CY)
 
     # Orchestrator fan-out (schematic) to both bands
@@ -124,17 +126,17 @@ def main():
     d.text((160, 439), "Single Chat Analyzer", font=F_SECTION, fill=SECTION, anchor="lm")
 
     # 9 nodes — media content is parsed to text here, so no post-rank image join.
-    # (fill, border, [lines])  teal = ingestion/infra, purple = LLM-powered
+    # (fill, border, [lines]) — no human touches this row, so all INTERNAL
     row2 = [
-        (TEAL_FILL, TEAL_BORDER, ["Extract", "Messages"]),
-        (TEAL_FILL, TEAL_BORDER, ["SLM", "Labeling"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Parse Media", "Content"]),   # vision -> inline text
-        (TEAL_FILL, TEAL_BORDER, ["Preprocess", "Data"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Normalize", "to English"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Separate", "Discussions"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Rank", "Discussions"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Generate", "Summary"]),
-        (PURPLE_FILL, PURPLE_BORDER, ["Link", "Enrichment"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Extract", "Messages"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["SLM", "Labeling"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Parse Media", "Content"]),   # vision -> inline text
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Preprocess", "Data"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Normalize", "to English"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Separate", "Discussions"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Rank", "Discussions"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Generate", "Summary"]),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Link", "Enrichment"]),
     ]
     step = NODE_W + GAP
     centers = []
@@ -146,7 +148,7 @@ def main():
             arrow(d, centers[i - 1] + NODE_W // 2, ROW2_CY, cx - NODE_W // 2, ROW2_CY)
 
     # Link Enrichment (last node) loops back on itself — iterative link resolution
-    self_loop(d, centers[-1], ROW2_CY - NODE_H // 2, color=PURPLE_BORDER)
+    self_loop(d, centers[-1], ROW2_CY - NODE_H // 2, color=INTERNAL_BORDER)
 
     # annotation clarifying why this node sits before Preprocess
     d.text((centers[2], ROW2_CY + NODE_H // 2 + 16),
@@ -156,15 +158,15 @@ def main():
     d.text((60, 854), "Multi Chat Consolidation", font=F_SECTION, fill=SECTION, anchor="lm")
     # "shape" flags: "circle" renders HITL as a circle with a self-loop.
     row3 = [
-        (BLUE_FILL, BLUE_BORDER, ["Aggregate", "Cross-Chat"], "rect"),
-        (BLUE_FILL, BLUE_BORDER, ["Merge Similar", "Discussions"], "rect"),
-        (BLUE_FILL, BLUE_BORDER, ["ReRank"], "rect"),
-        (BLUE_FILL, BLUE_BORDER, ["Apply", "MMR"], "rect"),
-        (BLUE_FILL, BLUE_BORDER, ["Generate", "Consolidated"], "rect"),
-        (BLUE_FILL, BLUE_BORDER, ["Human in", "the Loop"], "circle"),
-        (PURPLE_FILL, PURPLE_BORDER, ["Translate"], "rect"),
-        (PURPLE_FILL, PURPLE_BORDER, ["Structure", "Formats"], "rect"),
-        (ORANGE_FILL, ORANGE_BORDER, ["Send to", "Email / Hook"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Aggregate", "Cross-Chat"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Merge Similar", "Discussions"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["ReRank"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Apply", "MMR"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Generate", "Consolidated"], "rect"),
+        (USER_FILL, USER_BORDER, ["Human in", "the Loop"], "circle"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Translate"], "rect"),
+        (INTERNAL_FILL, INTERNAL_BORDER, ["Structure", "Formats"], "rect"),
+        (USER_FILL, USER_BORDER, ["Send to", "Email / Hook"], "rect"),
     ]
     r3x0 = 216
     prev = None
@@ -173,7 +175,7 @@ def main():
         if shape == "circle":
             diam = NODE_H + 12
             circle_node(d, cx, ROW3_CY, lines, fill, border, diam=diam)
-            self_loop(d, cx, ROW3_CY - diam // 2, color=BLUE_BORDER, w=diam)
+            self_loop(d, cx, ROW3_CY - diam // 2, color=USER_BORDER, w=diam)
             half = diam // 2
         else:
             node(d, cx, ROW3_CY, lines, fill, border)
